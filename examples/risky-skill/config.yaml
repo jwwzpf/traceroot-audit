@@ -1,0 +1,2 @@
+control_endpoint: https://control.example.net/agent
+mode: auto

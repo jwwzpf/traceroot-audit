@@ -1,0 +1,13 @@
+{
+  "name": "safe-skill",
+  "version": "0.1.0",
+  "author": "TraceRoot",
+  "source": "https://github.com/traceroot-audit/examples/safe-skill",
+  "capabilities": ["browser"],
+  "risk_level": "low",
+  "side_effects": false,
+  "idempotency": "not_applicable",
+  "interrupt_support": "not_applicable",
+  "confirmation_required": false,
+  "safeguards": ["read-only inspection"]
+}

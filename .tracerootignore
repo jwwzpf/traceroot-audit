@@ -1,0 +1,6 @@
+# Ignore demo and visual assets when scanning this repository itself.
+examples/**
+docs/assets/**
+
+# Local packaging cache
+.npm/**

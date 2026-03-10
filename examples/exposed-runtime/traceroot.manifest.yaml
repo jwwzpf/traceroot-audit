@@ -1,0 +1,13 @@
+name: exposed-runtime
+version: 0.1.0
+author: TraceRoot
+source: https://github.com/traceroot-audit/examples/exposed-runtime
+capabilities:
+  - shell
+  - network
+  - filesystem
+  - browser
+risk_level: high
+side_effects: true
+idempotency: unknown
+interrupt_support: unknown

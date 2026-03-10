@@ -1,0 +1,49 @@
+name: "TraceRoot Audit"
+description: "Scan agent skills and local runtimes for trust and security risks."
+branding:
+  icon: "shield"
+  color: "yellow"
+inputs:
+  path:
+    description: "Directory or file to scan from the checked-out repository."
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail the workflow at or above this severity."
+    required: false
+    default: "none"
+  format:
+    description: "CLI output format."
+    required: false
+    default: "human"
+  node-version:
+    description: "Node.js version used to build the CLI."
+    required: false
+    default: "20"
+runs:
+  using: "composite"
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.6.5
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - name: Install TraceRoot Audit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm install --no-frozen-lockfile
+    - name: Build TraceRoot Audit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm build
+    - name: Run TraceRoot Audit
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: >
+        node "${{ github.action_path }}/dist/cli/index.js"
+        scan "${{ inputs.path }}"
+        --format "${{ inputs.format }}"
+        --fail-on "${{ inputs.fail-on }}"

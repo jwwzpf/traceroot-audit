@@ -1,0 +1,69 @@
+{
+  "name": "traceroot-audit",
+  "version": "0.1.0",
+  "description": "Open-source trust and security scanner for agent skills and local agent runtimes.",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "traceroot-audit": "dist/cli/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwwzpf/traceroot-audit.git"
+  },
+  "homepage": "https://github.com/jwwzpf/traceroot-audit#readme",
+  "bugs": {
+    "url": "https://github.com/jwwzpf/traceroot-audit/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.6.5",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "node --loader tsx src/cli/index.ts",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "prepack": "npm run build",
+    "package:check": "npm pack --dry-run --cache .npm"
+  },
+  "keywords": [
+    "cli",
+    "security",
+    "agents",
+    "audit",
+    "runtime",
+    "skills",
+    "openclaw",
+    "supply-chain",
+    "agent-security"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^14.0.1",
+    "fast-glob": "^3.3.3",
+    "picocolors": "^1.1.1",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.38.0",
+    "@types/node": "^24.6.0",
+    "eslint": "^9.38.0",
+    "prettier": "^3.6.2",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript-eslint": "^8.46.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

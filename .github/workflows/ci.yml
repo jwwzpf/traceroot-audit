@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  dogfood-action:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan safe example
+        uses: ./
+        with:
+          path: ./examples/safe-skill
+          fail-on: high
+
+  pr-comment-summary:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Generate markdown report
+        run: node dist/cli/index.js scan . --format markdown --compact > traceroot-pr-summary.md
+
+      - name: Append workflow summary
+        run: cat traceroot-pr-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Note fork PR comment limitation
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> PR comment upsert skipped for forked pull requests because GitHub provides a read-only token on \`pull_request\` events." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert PR comment
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- traceroot-audit-comment -->';
+            const report = fs.readFileSync('traceroot-pr-summary.md', 'utf8');
+            const body = `${marker}\n## TraceRoot Audit PR Summary\n\n${report}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+            const existing = comments.find((comment) =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }

