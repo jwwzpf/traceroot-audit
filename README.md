@@ -1,20 +1,80 @@
 # TraceRoot Audit
 
-TraceRoot Audit is an open-source trust and security scanner for agent skills and local agent runtimes.
+[简体中文](./README.zh-CN.md)
 
-It helps developers detect risky agent skills, unsafe execution patterns, overbroad permissions, missing trust metadata, and weak provenance in OpenClaw-like agent ecosystems.
+**Open-source trust and security scanner for agent skills and local agent runtimes.**
 
-## Goals
+TraceRoot Audit helps developers quickly detect risky agent skills, unsafe execution patterns, overbroad permissions, missing trust metadata, and insecure runtime exposure in OpenClaw-like agent ecosystems.
 
-- Detect suspicious or dangerous skill behavior
-- Flag unsafe runtime and deployment configurations
-- Surface missing trust metadata and provenance signals
-- Make agent ecosystems easier to inspect, trust, and secure
+## Why it matters
 
-## Initial scope
+Agent skills can now trigger real actions like:
 
-- Scan skill packages and local agent projects
-- Detect dangerous shell/network execution patterns
-- Flag missing metadata and trust declarations
-- Report overbroad permissions and risky defaults
-- Produce human-readable and machine-readable audit reports
+- shell execution
+- file access
+- network calls
+- email changes
+- purchases or other side effects
+
+TraceRoot Audit helps surface obvious trust and security risks before they cause damage.
+
+## Install
+
+```bash
+npm install -g traceroot-audit
+```
+
+## Quick start
+
+Scan the current project:
+
+```bash
+traceroot-audit scan .
+```
+
+Scan a skill package:
+
+```bash
+traceroot-audit scan ./skills/my-skill
+```
+
+Output JSON for CI:
+
+```bash
+traceroot-audit scan . --format json
+```
+
+Fail CI on high-risk findings:
+
+```bash
+traceroot-audit scan . --fail-on high
+```
+
+## What it checks
+
+Initial checks include:
+
+- publicly exposed local runtimes
+- remote fetch-and-execute patterns
+- unsafe shell/network/filesystem combinations
+- missing trust metadata
+- overbroad permissions
+- weak provenance signals
+- risky defaults in local agent projects
+
+## Status
+
+Early-stage open-source project.  
+The first release focuses on detection and risk surfacing.
+
+## Roadmap
+
+- CLI scanner
+- rule engine
+- JSON output
+- CI integration
+- trust metadata suggestions
+
+## License
+
+Apache-2.0
