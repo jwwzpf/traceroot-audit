@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -73,8 +74,18 @@ export async function runCli(argv = process.argv, io: CliIO = defaultIo): Promis
   }
 }
 
-const currentFilePath = fileURLToPath(import.meta.url);
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+function resolveExecutablePath(filePath: string): string {
+  const absolutePath = path.resolve(filePath);
+
+  try {
+    return realpathSync(absolutePath);
+  } catch {
+    return absolutePath;
+  }
+}
+
+const currentFilePath = resolveExecutablePath(fileURLToPath(import.meta.url));
+const invokedPath = process.argv[1] ? resolveExecutablePath(process.argv[1]) : null;
 
 if (invokedPath === currentFilePath) {
   void runCli().then((exitCode) => {
