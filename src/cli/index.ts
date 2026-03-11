@@ -27,11 +27,15 @@ const defaultIo: CliIO = {
 
 export function createProgram(runtime: CliRuntime): Command {
   const program = new Command();
+  program.configureOutput({
+    writeOut: (text) => runtime.io.stdout(text),
+    writeErr: (text) => runtime.io.stderr(text)
+  });
 
   program
     .name("traceroot-audit")
     .description("Trust and security scanner for agent skills and local runtimes.")
-    .version("0.1.0")
+    .version("0.1.1")
     .showHelpAfterError();
 
   registerScanCommand(program, runtime);
@@ -57,11 +61,16 @@ export async function runCli(argv = process.argv, io: CliIO = defaultIo): Promis
     return runtime.exitCode;
   } catch (error) {
     if (error instanceof CommanderError) {
-      if (error.code !== "commander.helpDisplayed") {
+      if (
+        error.code !== "commander.helpDisplayed" &&
+        error.code !== "commander.version"
+      ) {
         io.stderr(`${error.message}\n`);
       }
 
-      return error.exitCode || runtime.exitCode || 1;
+      return typeof error.exitCode === "number"
+        ? error.exitCode
+        : runtime.exitCode || 1;
     }
 
     if (error instanceof Error) {

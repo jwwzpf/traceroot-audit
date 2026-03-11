@@ -31,6 +31,13 @@ pnpm install
 pnpm build
 ```
 
+If you do not use `pnpm`, local development works with npm too:
+
+```bash
+npm install
+npm run build
+```
+
 ## Fastest local usage
 
 Run without global install:

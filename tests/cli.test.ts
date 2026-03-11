@@ -243,4 +243,20 @@ describe("CLI", () => {
     expect(exitCode).toBe(0);
     expect(capture.read().stdout).toContain("Remote Fetch and Execute");
   });
+
+  it("returns zero for --help", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(["node", "traceroot-audit", "--help"], capture.io);
+
+    expect(exitCode).toBe(0);
+    expect(capture.read().stdout).toContain("Usage: traceroot-audit");
+  });
+
+  it("returns zero for --version", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(["node", "traceroot-audit", "--version"], capture.io);
+
+    expect(exitCode).toBe(0);
+    expect(capture.read().stdout.trim()).toBe("0.1.1");
+  });
 });

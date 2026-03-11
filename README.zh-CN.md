@@ -31,6 +31,13 @@ pnpm install
 pnpm build
 ```
 
+如果你本地不用 `pnpm`，也可以直接用 npm 做本地开发：
+
+```bash
+npm install
+npm run build
+```
+
 ## 最快的本地用法
 
 无需全局安装，直接运行：
