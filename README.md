@@ -47,6 +47,7 @@ npx traceroot-audit discover .
 npx traceroot-audit discover --host
 npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
+npx traceroot-audit guard --host --interval 60
 npx traceroot-audit harden --host
 ```
 
@@ -84,6 +85,12 @@ Start the interactive hardening wizard:
 
 ```bash
 node dist/cli/index.js harden --host
+```
+
+Keep watching a machine or project for new agent surfaces and risk changes:
+
+```bash
+node dist/cli/index.js guard --host --interval 60
 ```
 
 Record current findings as a baseline:
@@ -263,6 +270,11 @@ and suggest the most useful paths to scan next.
 By default it excludes the current working directory subtree, so host discovery behaves like a machine-level search instead of simply rediscovering the repo you launched it from. If you want both behaviors, add `--include-cwd`.
 
 It does **not** do a blind full-disk crawl. The goal is to help non-expert users find likely agent action surfaces without first understanding where OpenClaw or skill packages are installed.
+
+Host discovery now also recommends the next best action for each candidate:
+
+- `scan` when TraceRoot should quantify current blast radius first
+- `harden` when the surface already looks like a reusable skill/tool/MCP surface that should be tightened before trust
 
 ## Ignore generated or irrelevant paths
 

@@ -1,7 +1,6 @@
 import pc from "picocolors";
 
 import type { DiscoveryResult, HostDiscoveryResult } from "./discovery";
-import { hostScanCommandPath } from "./discovery";
 import type { HardeningPlan } from "../hardening/analysis";
 import {
   createFindingFingerprint,
@@ -474,7 +473,9 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
       `   📍 Path: ${candidate.displayPath}`,
       `   📦 Scannable files: ${candidate.filesDiscovered}`,
       `   🧠 Why: ${candidate.surface.reasons[0] ?? "best-effort host discovery guess"}`,
-      `   ✨ Why it matters: ${candidate.attention}`
+      `   ✨ Why it matters: ${candidate.attention}`,
+      `   ➡️ Recommended next step: ${candidate.recommendedActionLabel}`,
+      `   🛠 Command: ${candidate.recommendedCommand}`
     );
 
     if (candidate.strongSignals.length > 0) {
@@ -495,7 +496,8 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
       lines.push(
         `${index + 1}. ${candidate.categoryLabel} (${candidate.surface.confidence} confidence)`,
         `   📍 Path: ${candidate.displayPath}`,
-        `   ✨ Why it matters: ${candidate.attention}`
+        `   ✨ Why it matters: ${candidate.attention}`,
+        `   ➡️ Recommended next step: ${candidate.recommendedActionLabel}`
       );
 
       if (candidate.strongSignals.length > 0) {
@@ -509,7 +511,7 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
   lines.push("🚀 Try next:");
 
   for (const candidate of primaryList.slice(0, 3)) {
-    lines.push(`- ${hostScanCommandPath(candidate.absolutePath)}`);
+    lines.push(`- ${candidate.recommendedCommand}`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -538,7 +540,10 @@ export function renderHostDiscoveryJsonOutput(result: HostDiscoveryResult): stri
         score: candidate.score,
         tier: candidate.tier,
         categoryLabel: candidate.categoryLabel,
-        attention: candidate.attention
+        attention: candidate.attention,
+        recommendedAction: candidate.recommendedAction,
+        recommendedActionLabel: candidate.recommendedActionLabel,
+        recommendedCommand: candidate.recommendedCommand
       }))
     },
     null,

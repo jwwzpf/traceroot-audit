@@ -245,6 +245,8 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("OpenClaw runtime");
       expect(capture.read().stdout).toContain("~/.openclaw");
       expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
+      expect(capture.read().stdout).toContain("Recommended next step");
+      expect(capture.read().stdout).toContain("traceroot-audit harden");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {
@@ -284,6 +286,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("Current directory included");
       expect(capture.read().stdout).toContain("~/scratch/openclaw-runtime");
       expect(capture.read().stdout).toContain("Possible surfaces");
+      expect(capture.read().stdout).toContain("Recommended next step");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {
@@ -462,6 +465,81 @@ describe("CLI", () => {
       expect(report).toContain("TraceRoot Audit Hardening Plan");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs guard for a single target cycle", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(
+      [
+        "node",
+        "traceroot-audit",
+        "guard",
+        "./examples/safe-skill",
+        "--cycles",
+        "1",
+        "--interval",
+        "1"
+      ],
+      capture.io
+    );
+
+    const output = capture.read().stdout;
+
+    expect(exitCode).toBe(0);
+    expect(output).toContain("TraceRoot Audit Guard");
+    expect(output).toContain("Initial risk score");
+    expect(output).toContain("No risk changes detected");
+  });
+
+  it("runs host guard for a single cycle and suggests immediate actions", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-guard-"));
+    const tempCwd = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-guard-cwd-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+
+    try {
+      await mkdir(path.join(tempHome, ".openclaw"), { recursive: true });
+      await writeFile(
+        path.join(tempHome, ".openclaw", "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      process.chdir(tempCwd);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "guard",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot Audit Guard");
+      expect(output).toContain("What you can do right now");
+      expect(output).toContain("traceroot-audit harden");
+      expect(output).toContain("No machine-level agent surface changes detected");
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempCwd, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
     }
   });
 

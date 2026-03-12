@@ -56,6 +56,9 @@ export interface HostDiscoveryCandidate {
   tier: "best-first" | "possible";
   categoryLabel: string;
   attention: string;
+  recommendedAction: "scan" | "harden";
+  recommendedActionLabel: string;
+  recommendedCommand: string;
 }
 
 export interface HostDiscoveryResult {
@@ -199,6 +202,10 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function hostHardenCommandPath(absolutePath: string): string {
+  return `traceroot-audit harden ${shellQuote(absolutePath)}`;
+}
+
 function candidateStrength(relativePath: string): number {
   const baseName = path.basename(relativePath);
 
@@ -264,7 +271,16 @@ function summarizeStrongSignals(discovery: DiscoveryResult): string[] {
 function candidateMetadata(
   discovery: DiscoveryResult,
   candidatePath: string
-): Pick<HostDiscoveryCandidate, "score" | "tier" | "categoryLabel" | "attention"> {
+): Pick<
+  HostDiscoveryCandidate,
+  | "score"
+  | "tier"
+  | "categoryLabel"
+  | "attention"
+  | "recommendedAction"
+  | "recommendedActionLabel"
+  | "recommendedCommand"
+> {
   const normalizedCandidatePath = candidatePath.replace(/\\/g, "/");
   const normalizedSignals = [
     ...discovery.manifestFiles,
@@ -339,19 +355,34 @@ function candidateMetadata(
 
   let categoryLabel = "possible agent-capable project";
   let attention = "worth checking if this project actually drives AI actions on your machine";
+  let recommendedAction: HostDiscoveryCandidate["recommendedAction"] = "scan";
+  let recommendedActionLabel = "scan this surface first";
+  let recommendedCommand = hostScanCommandPath(candidatePath);
 
   if (hasOpenClawMarker && hasDockerCompose) {
     categoryLabel = "OpenClaw runtime";
     attention = "worth checking first: runtime wiring and exposure signals were found";
+    recommendedAction = "harden";
+    recommendedActionLabel = "run the hardening wizard to shrink the runtime first";
+    recommendedCommand = hostHardenCommandPath(candidatePath);
   } else if (hasManifest || hasSkillMarker) {
     categoryLabel = "skill / tool package";
     attention = "worth checking first: explicit reusable agent actions were detected";
+    recommendedAction = "harden";
+    recommendedActionLabel = "harden this action surface before you trust it";
+    recommendedCommand = hostHardenCommandPath(candidatePath);
   } else if (hasMcpMarker) {
     categoryLabel = "MCP / tool server";
     attention = "worth checking first: MCP or tool-server wiring was detected";
+    recommendedAction = "harden";
+    recommendedActionLabel = "harden this MCP/tool surface before wiring it into an agent";
+    recommendedCommand = hostHardenCommandPath(candidatePath);
   } else if (hasDockerCompose || hasEnv) {
     categoryLabel = "runtime config";
     attention = "worth checking if this runtime is broader or more exposed than you intended";
+    recommendedAction = "scan";
+    recommendedActionLabel = "scan it first to quantify current blast radius";
+    recommendedCommand = hostScanCommandPath(candidatePath);
   }
 
   const tier = score >= 24 ? "best-first" : "possible";
@@ -360,7 +391,10 @@ function candidateMetadata(
     score,
     tier,
     categoryLabel,
-    attention
+    attention,
+    recommendedAction,
+    recommendedActionLabel,
+    recommendedCommand
   };
 }
 
@@ -515,7 +549,10 @@ export async function discoverHost(
         score: metadata.score,
         tier: metadata.tier,
         categoryLabel: metadata.categoryLabel,
-        attention: metadata.attention
+        attention: metadata.attention,
+        recommendedAction: metadata.recommendedAction,
+        recommendedActionLabel: metadata.recommendedActionLabel,
+        recommendedCommand: metadata.recommendedCommand
       });
     } catch {
       continue;

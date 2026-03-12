@@ -8,6 +8,7 @@ import { Command, CommanderError } from "commander";
 import { registerBaselineCommand } from "./commands/baseline";
 import { registerDiscoverCommand } from "./commands/discover";
 import { registerExplainCommand } from "./commands/explain";
+import { registerGuardCommand } from "./commands/guard";
 import { registerHardenCommand } from "./commands/harden";
 import { registerInitCommand } from "./commands/init";
 import { registerRulesCommand } from "./commands/rules";
@@ -153,6 +154,7 @@ export function createProgram(runtime: CliRuntime): Command {
 
   registerScanCommand(program, runtime);
   registerDiscoverCommand(program, runtime);
+  registerGuardCommand(program, runtime);
   registerHardenCommand(program, runtime);
   registerBaselineCommand(program, runtime);
   registerInitCommand(program, runtime);

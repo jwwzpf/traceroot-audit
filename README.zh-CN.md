@@ -47,6 +47,7 @@ npx traceroot-audit discover .
 npx traceroot-audit discover --host
 npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
+npx traceroot-audit guard --host --interval 60
 npx traceroot-audit harden --host
 ```
 
@@ -84,6 +85,12 @@ node dist/cli/index.js init
 
 ```bash
 node dist/cli/index.js harden --host
+```
+
+持续守望整台机器或某个项目的风险变化：
+
+```bash
+node dist/cli/index.js guard --host --interval 60
 ```
 
 把当前问题记录成 baseline：
@@ -263,6 +270,11 @@ node dist/cli/index.js discover --host
 默认情况下，它会排除你当前所在的工作目录子树，避免“主机级发现”又把你刚刚打开的仓库重新识别一遍。如果你想同时包含当前工作区，可以加上 `--include-cwd`。
 
 目标是让不熟悉命令行和目录结构的用户，也能先找到值得扫描的本地 agent action surface。
+
+现在 host discovery 还会直接给每个候选面推荐下一步动作：
+
+- `scan`：先量化当前 blast radius
+- `harden`：这个 surface 已经很像 skill/tool/MCP，应该先收缩权限面再信任它
 
 ## 忽略生成目录或无关路径
 
