@@ -38,6 +38,20 @@ This means the product has two layers:
 
 Static scan stays important, but runtime audit becomes the more emotionally valuable part.
 
+## First shipped slice
+
+The first local runtime-audit loop should stay deliberately small:
+
+- `traceroot-audit doctor /path/to/runtime --watch`
+- local JSONL event storage in `~/.traceroot/audit/events.jsonl`
+- `traceroot-audit logs` for recent timeline review
+
+This first slice is valuable even before action-level adapters exist, because it already gives users:
+
+- a persistent local audit trail
+- visible drift alerts while the runtime is live
+- a way to review what changed later from the terminal
+
 ## Core user story
 
 The most important target user is:

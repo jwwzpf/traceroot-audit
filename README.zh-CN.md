@@ -52,6 +52,13 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 
 我们也已经把下一步产品主线收敛出来了：除了静态扫描之外，TraceRoot 还要走向本地运行时审计，持续观察 live agent 行为、写入本地审计日志，并在高风险动作开始时及时提醒。当前 v1 规格在 [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md)。
 
+第一条本地运行时审计链路现在已经能跑起来了：
+
+```bash
+npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
+npx traceroot-audit logs
+```
+
 如果你想使用更底层的命令，它们仍然都在：
 
 先判断当前目录更像哪种扫描对象：
@@ -96,6 +103,14 @@ node dist/cli/index.js harden --host
 node dist/cli/index.js guard --host --interval 60
 ```
 
+查看本地运行时审计时间线：
+
+```bash
+node dist/cli/index.js logs
+node dist/cli/index.js logs --today
+node dist/cli/index.js logs --tail
+```
+
 把当前问题记录成 baseline：
 
 ```bash
@@ -120,6 +135,13 @@ node dist/cli/index.js doctor /path/to/openclaw
 
 ```bash
 node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
+```
+
+之后可以直接回看本地审计记录：
+
+```bash
+node dist/cli/index.js logs
+node dist/cli/index.js logs --target /path/to/openclaw --today
 ```
 
 进阶工作流：

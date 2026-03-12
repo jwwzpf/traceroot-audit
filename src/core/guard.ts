@@ -19,6 +19,8 @@ export interface GuardHostCandidateSnapshot {
   tier: "best-first" | "possible";
   categoryLabel: string;
   recommendedAction: "scan" | "harden";
+  recommendedActionLabel: string;
+  recommendedCommand: string;
 }
 
 export interface GuardHostSnapshot {
@@ -60,7 +62,9 @@ export function createHostSnapshot(result: HostDiscoveryResult): GuardHostSnapsh
       displayPath: candidate.displayPath,
       tier: candidate.tier,
       categoryLabel: candidate.categoryLabel,
-      recommendedAction: candidate.recommendedAction
+      recommendedAction: candidate.recommendedAction,
+      recommendedActionLabel: candidate.recommendedActionLabel,
+      recommendedCommand: candidate.recommendedCommand
     }))
   };
 }

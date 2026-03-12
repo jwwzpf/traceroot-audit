@@ -13,6 +13,7 @@ import { registerExplainCommand } from "./commands/explain";
 import { registerGuardCommand } from "./commands/guard";
 import { registerHardenCommand } from "./commands/harden";
 import { registerInitCommand } from "./commands/init";
+import { registerLogsCommand } from "./commands/logs";
 import { registerRulesCommand } from "./commands/rules";
 import { registerScanCommand } from "./commands/scan";
 
@@ -162,6 +163,7 @@ export function createProgram(runtime: CliRuntime): Command {
   registerHardenCommand(program, runtime);
   registerBaselineCommand(program, runtime);
   registerInitCommand(program, runtime);
+  registerLogsCommand(program, runtime);
   registerRulesCommand(program, runtime);
   registerExplainCommand(program, runtime);
 

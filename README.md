@@ -52,6 +52,13 @@ For most users, `doctor` is now the main entry point. It finds a likely surface,
 
 We are also defining the next product step beyond static scanning: a local runtime audit layer that watches live agent behavior, writes local audit logs, and raises attention when high-risk actions begin. The current v1 spec lives in [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md).
 
+The first local audit slice is now live:
+
+```bash
+npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
+npx traceroot-audit logs
+```
+
 If you want the lower-level commands, they still exist:
 
 Inspect what this directory looks like before you scan it:
@@ -94,6 +101,14 @@ Keep watching a machine or project for new agent surfaces and risk changes:
 
 ```bash
 node dist/cli/index.js guard --host --interval 60
+```
+
+Review the local runtime audit timeline:
+
+```bash
+node dist/cli/index.js logs
+node dist/cli/index.js logs --today
+node dist/cli/index.js logs --tail
 ```
 
 Record current findings as a baseline:
@@ -232,6 +247,13 @@ If you want TraceRoot to stay with you and keep watching the boundary afterwards
 
 ```bash
 node dist/cli/index.js doctor --watch --interval 60
+```
+
+Review what happened afterwards:
+
+```bash
+node dist/cli/index.js logs
+node dist/cli/index.js logs --target /path/to/openclaw --today
 ```
 
 `doctor` will:

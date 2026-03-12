@@ -137,6 +137,8 @@ describe("CLI", () => {
 
   it("can keep watching from doctor without switching to another command", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-home-"));
+    const previousHome = process.env.HOME;
 
     try {
       await writeFile(
@@ -154,6 +156,7 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
+      process.env.HOME = tempHome;
 
       const capture = createCapture();
       const exitCode = await runCli(
@@ -172,8 +175,91 @@ describe("CLI", () => {
       expect(output).toContain("Doctor is staying with you and will keep watching this boundary now");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
       expect(output).toContain("Doctor Watch is now keeping an eye on");
+      expect(output).toContain("Audit log:");
       expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes local runtime audit events and lets users review them with logs", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\nSTRIPE_SECRET_KEY=sk_test_123\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const eventsPath = path.join(tempHome, ".traceroot", "audit", "events.jsonl");
+      const eventsContent = await readFile(eventsPath, "utf8");
+
+      expect(watchExitCode).toBe(0);
+      expect(eventsContent).toContain('"category":"watch-started"');
+      expect(eventsContent).toContain('"category":"finding-change"');
+      expect(eventsContent).toContain('"category":"boundary-drift"');
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("TraceRoot Audit Logs");
+      expect(logsOutput).toContain("Target filter");
+      expect(logsOutput).toContain("Boundary drift");
+      expect(logsOutput).toContain("Watch started");
+      expect(logsOutput).toContain("Current setup is still broader than the approved boundary");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
   });
