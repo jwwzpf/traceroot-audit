@@ -229,6 +229,23 @@ After the wizard runs, TraceRoot can generate:
 - `traceroot.hardened.profile.json`
 - `traceroot.manifest.hardened.json` or `.yaml`
 
+## Boundary guard
+
+Once you have approved a safer profile, `guard` can keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later.
+
+Example:
+
+```bash
+node dist/cli/index.js guard /path/to/openclaw --interval 60
+```
+
+With a saved `traceroot.hardened.profile.json`, guard now highlights:
+
+- capabilities that are still broader than the approved workflow mix
+- public exposure that came back even though you chose localhost-only
+- missing approval gates for side-effecting actions
+- unrelated secrets still visible to the runtime
+
 ## What to scan
 
 TraceRoot Audit works best when you point it at the local files that define what an agent can really do:

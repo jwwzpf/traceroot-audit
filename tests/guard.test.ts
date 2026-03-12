@@ -6,6 +6,10 @@ import {
   diffHostSnapshots,
   diffScanSnapshots
 } from "../src/core/guard";
+import {
+  diffBoundaryStatus,
+  evaluateBoundaryStatus
+} from "../src/hardening/boundary";
 
 describe("guard snapshot diffs", () => {
   it("detects new and resolved findings in scan snapshots", () => {
@@ -165,5 +169,151 @@ describe("guard snapshot diffs", () => {
     expect(diff.promotedToBestFirst[0]?.displayPath).toBe("~/tools/gmail");
     expect(diff.newBestFirst).toHaveLength(1);
     expect(diff.newBestFirst[0]?.displayPath).toBe("~/.openclaw");
+  });
+
+  it("detects violations against an approved hardening boundary", () => {
+    const status = evaluateBoundaryStatus(
+      {
+        target: ".",
+        targetPath: "/tmp/example",
+        surface: "runtime config",
+        selectedIntents: [
+          {
+            id: "email-reply",
+            title: "邮件整理与回复"
+          }
+        ],
+        selectedPolicies: {
+          outboundApproval: "always-confirm",
+          filesystemScope: "workspace-only",
+          exposureMode: "localhost-only"
+        },
+        currentCapabilities: ["email", "filesystem", "network", "shell"],
+        recommendedCapabilities: ["email", "network"],
+        extraCapabilities: ["filesystem", "shell"],
+        missingCapabilities: [],
+        approvalPolicy: "always confirm before sending or posting",
+        fileWritePolicy: "workspace-only file writes",
+        exposurePolicy: "localhost only; no network exposure",
+        immediateActions: [],
+        secretExposure: [],
+        findingsSummary: {
+          critical: 1,
+          high: 0,
+          medium: 0,
+          total: 1
+        },
+        topFindings: [],
+        recommendedManifest: {
+          name: "example",
+          version: "0.1.0",
+          author: "tester",
+          source: "https://example.com/runtime",
+          capabilities: ["email", "network"],
+          risk_level: "high",
+          side_effects: true,
+          confirmation_required: true,
+          interrupt_support: "supported",
+          idempotency: "unknown",
+          safeguards: ["localhost_only_runtime"]
+        }
+      },
+      {
+        target: ".",
+        targetPath: "/tmp/example",
+        rootDir: "/tmp/example",
+        manifest: {
+          name: "example",
+          version: "0.1.0",
+          author: "tester",
+          source: "https://example.com/runtime",
+          capabilities: ["email", "network", "shell", "filesystem"],
+          risk_level: "critical",
+          side_effects: true,
+          confirmation_required: false,
+          interrupt_support: "supported",
+          idempotency: "unknown"
+        },
+        manifestPath: "traceroot.manifest.json",
+        currentCapabilities: ["email", "filesystem", "network", "shell"],
+        secretExposure: [
+          {
+            variable: "AWS_SECRET_ACCESS_KEY",
+            group: "cloud",
+            action: "review"
+          }
+        ],
+        findingsSummary: {
+          critical: 1,
+          high: 1,
+          medium: 0,
+          total: 2
+        },
+        topFindings: [],
+        publicExposureDetected: true
+      }
+    );
+
+    expect(status.aligned).toBe(false);
+    expect(status.violations.map((violation) => violation.code)).toEqual([
+      "unexpected-capabilities",
+      "public-exposure",
+      "missing-confirmation",
+      "secret-exposure"
+    ]);
+  });
+
+  it("detects new and resolved boundary violations", () => {
+    const previous = {
+      aligned: false,
+      violations: [
+        {
+          code: "unexpected-capabilities",
+          severity: "critical" as const,
+          title: "More power than approved",
+          message: "shell still enabled",
+          recommendation: "disable shell",
+          fingerprint: "unexpected-capabilities:shell"
+        },
+        {
+          code: "secret-exposure",
+          severity: "high" as const,
+          title: "Unrelated secrets are still visible",
+          message: "AWS secret visible",
+          recommendation: "move secret out",
+          fingerprint: "secret-exposure:AWS_SECRET_ACCESS_KEY"
+        }
+      ]
+    };
+
+    const current = {
+      aligned: false,
+      violations: [
+        {
+          code: "unexpected-capabilities",
+          severity: "critical" as const,
+          title: "More power than approved",
+          message: "shell still enabled",
+          recommendation: "disable shell",
+          fingerprint: "unexpected-capabilities:shell"
+        },
+        {
+          code: "public-exposure",
+          severity: "critical" as const,
+          title: "Public or network exposure is still possible",
+          message: "runtime reachable",
+          recommendation: "bind localhost",
+          fingerprint: "public-exposure"
+        }
+      ]
+    };
+
+    const diff = diffBoundaryStatus(previous, current);
+
+    expect(diff.changed).toBe(true);
+    expect(diff.newViolations).toHaveLength(1);
+    expect(diff.newViolations[0]?.code).toBe("public-exposure");
+    expect(diff.resolvedViolations).toHaveLength(1);
+    expect(diff.resolvedViolations[0]?.code).toBe("secret-exposure");
   });
 });

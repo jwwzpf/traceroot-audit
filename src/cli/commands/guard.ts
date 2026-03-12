@@ -8,6 +8,19 @@ import {
   diffScanSnapshots
 } from "../../core/guard";
 import { scanTarget } from "../../core/scanner";
+import { buildCurrentHardeningState } from "../../hardening/analysis";
+import {
+  diffBoundaryStatus,
+  evaluateBoundaryStatus,
+  type BoundaryStatus,
+  type BoundaryViolation
+} from "../../hardening/boundary";
+import { loadHardeningProfile } from "../../hardening/profile";
+import {
+  getHardeningProfileById,
+  type HardeningIntentId
+} from "../../hardening/profiles";
+import { resolveTarget } from "../../utils/files";
 
 import type { CliRuntime } from "../index";
 
@@ -26,6 +39,67 @@ function sleep(ms: number): Promise<void> {
 
 function timestamp(): string {
   return new Date().toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
+}
+
+function renderWorkflowSummary(profilePath: string, selectedIntentIds: string[]): string[] {
+  const workflows = selectedIntentIds
+    .map((intentId) => {
+      try {
+        const profile = getHardeningProfileById(intentId as HardeningIntentId);
+        return `${profile.icon} ${profile.title}`;
+      } catch {
+        return intentId;
+      }
+    })
+    .join(", ");
+
+  return [
+    `🛡️ Approved boundary: ${profilePath}`,
+    `🧩 Approved workflows: ${workflows || "none recorded"}`
+  ];
+}
+
+function renderBoundaryStatus(status: BoundaryStatus): string[] {
+  if (status.aligned) {
+    return [
+      "✅ Current setup matches the approved boundary.",
+      "💓 Guard will watch for any future drift beyond it."
+    ];
+  }
+
+  const lines = ["🚧 Current setup is still broader than the approved boundary."];
+
+  for (const violation of status.violations.slice(0, 4)) {
+    const icon =
+      violation.severity === "critical"
+        ? "🛑"
+        : violation.severity === "high"
+          ? "⚠️"
+          : "ℹ️";
+    lines.push(`- ${icon} ${violation.title}: ${violation.message}`);
+  }
+
+  const recommendations = [...new Set(status.violations.map((violation) => violation.recommendation))];
+  if (recommendations.length > 0) {
+    lines.push("", "🔧 Best next fixes:");
+
+    for (const recommendation of recommendations.slice(0, 3)) {
+      lines.push(`- ${recommendation}`);
+    }
+  }
+
+  return lines;
+}
+
+function renderViolationLine(violation: BoundaryViolation): string {
+  const icon =
+    violation.severity === "critical"
+      ? "🛑"
+      : violation.severity === "high"
+        ? "⚠️"
+        : "ℹ️";
+
+  return `- ${icon} ${violation.title}: ${violation.message}`;
 }
 
 export function registerGuardCommand(program: Command, runtime: CliRuntime): void {
@@ -174,26 +248,69 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
         return;
       }
 
+      const resolvedTarget = await resolveTarget(target);
       const initialScan = await scanTarget(target);
       let previousSnapshot = createScanSnapshot(initialScan);
+      const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
+      let previousBoundaryStatus: BoundaryStatus | null = null;
 
-      runtime.io.stdout(
-        [
-          "TraceRoot Audit Guard",
-          "=====================",
+      if (hardeningProfileResult.profile) {
+        const initialBoundaryState = await buildCurrentHardeningState(
+          target,
+          hardeningProfileResult.profile.selectedIntents.map(
+            (intent) => intent.id as HardeningIntentId
+          )
+        );
+        previousBoundaryStatus = evaluateBoundaryStatus(
+          hardeningProfileResult.profile,
+          initialBoundaryState
+        );
+      }
+
+      const initialLines = [
+        "TraceRoot Audit Guard",
+        "=====================",
+        "",
+        `🎯 Target: ${target}`,
+        `⏱️ Interval: every ${intervalSeconds}s`,
+        `📊 Initial risk score: ${initialScan.riskScore.toFixed(1)}/10`,
+        `📈 Initial findings: ${initialScan.summary.total} (${initialScan.summary.critical} critical, ${initialScan.summary.high} high, ${initialScan.summary.medium} medium)`
+      ];
+
+      if (hardeningProfileResult.profilePath) {
+        initialLines.push(
           "",
-          `🎯 Target: ${target}`,
-          `⏱️ Interval: every ${intervalSeconds}s`,
-          `📊 Initial risk score: ${initialScan.riskScore.toFixed(1)}/10`,
-          `📈 Initial findings: ${initialScan.summary.total} (${initialScan.summary.critical} critical, ${initialScan.summary.high} high, ${initialScan.summary.medium} medium)`,
-          "",
-          "💓 Guard is watching for:",
-          "- risk score increases",
-          "- new findings appearing",
-          "- findings disappearing after fixes",
-          ""
-        ].join("\n") + "\n"
+          ...(hardeningProfileResult.profile
+            ? renderWorkflowSummary(
+                hardeningProfileResult.profilePath,
+                hardeningProfileResult.profile.selectedIntents.map((intent) => intent.id)
+              )
+            : [
+                `🛡️ Approved boundary: ${hardeningProfileResult.profilePath}`,
+                `⚠️ Saved boundary could not be loaded cleanly: ${hardeningProfileResult.error ?? "unknown error"}`
+              ])
+        );
+
+        if (hardeningProfileResult.profile && previousBoundaryStatus) {
+          initialLines.push("", ...renderBoundaryStatus(previousBoundaryStatus));
+        }
+      }
+
+      initialLines.push(
+        "",
+        "💓 Guard is watching for:",
+        "- risk score increases",
+        "- new findings appearing",
+        "- findings disappearing after fixes"
       );
+
+      if (hardeningProfileResult.profile) {
+        initialLines.push("- power drifting beyond your approved boundary");
+      }
+
+      initialLines.push("");
+
+      runtime.io.stdout(`${initialLines.join("\n")}\n`);
 
       const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
 
@@ -205,12 +322,33 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
         const latestScan = await scanTarget(target);
         const currentSnapshot = createScanSnapshot(latestScan);
         const diff = diffScanSnapshots(previousSnapshot, currentSnapshot);
+        let boundaryDiff = null;
+        let currentBoundaryStatus: BoundaryStatus | null = null;
 
-        if (!diff.changed) {
-          runtime.io.stdout(
-            `💓 ${timestamp()} No risk changes detected. Score still ${latestScan.riskScore.toFixed(1)}/10.\n`
+        if (hardeningProfileResult.profile && previousBoundaryStatus) {
+          const latestBoundaryState = await buildCurrentHardeningState(
+            target,
+            hardeningProfileResult.profile.selectedIntents.map(
+              (intent) => intent.id as HardeningIntentId
+            )
           );
+          currentBoundaryStatus = evaluateBoundaryStatus(
+            hardeningProfileResult.profile,
+            latestBoundaryState
+          );
+          boundaryDiff = diffBoundaryStatus(previousBoundaryStatus, currentBoundaryStatus);
+        }
+
+        if (!diff.changed && !boundaryDiff?.changed) {
+          const heartbeat = currentBoundaryStatus?.aligned === false
+            ? `💓 ${timestamp()} No new risk or boundary changes. Current setup is still broader than the approved boundary (${currentBoundaryStatus.violations.length} issues). Score still ${latestScan.riskScore.toFixed(1)}/10.\n`
+            : `💓 ${timestamp()} No risk or boundary changes detected. Score still ${latestScan.riskScore.toFixed(1)}/10.\n`;
+
+          runtime.io.stdout(heartbeat);
           previousSnapshot = currentSnapshot;
+          if (currentBoundaryStatus) {
+            previousBoundaryStatus = currentBoundaryStatus;
+          }
           continue;
         }
 
@@ -232,8 +370,21 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
           lines.push(`- ✅ Findings resolved: ${diff.resolvedFindingCount}`);
         }
 
+        if (boundaryDiff) {
+          for (const violation of boundaryDiff.newViolations) {
+            lines.push(renderViolationLine(violation));
+          }
+
+          for (const violation of boundaryDiff.resolvedViolations) {
+            lines.push(`- ✅ Boundary restored: ${violation.title}`);
+          }
+        }
+
         runtime.io.stdout(`${lines.join("\n")}\n`);
         previousSnapshot = currentSnapshot;
+        if (currentBoundaryStatus) {
+          previousBoundaryStatus = currentBoundaryStatus;
+        }
       }
     });
 }

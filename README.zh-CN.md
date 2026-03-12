@@ -229,6 +229,23 @@ node dist/cli/index.js harden --host
 - `traceroot.hardened.profile.json`
 - `traceroot.manifest.hardened.json` 或 `.yaml`
 
+## 边界守护
+
+当你已经通过 `harden` 批准了一套更安全的配置后，`guard` 可以继续盯着这个目标，告诉你当前配置是不是仍然比批准过的边界更宽，或者后续有没有重新漂移出去。
+
+示例：
+
+```bash
+node dist/cli/index.js guard /path/to/openclaw --interval 60
+```
+
+如果目录里有保存下来的 `traceroot.hardened.profile.json`，`guard` 现在会重点提醒：
+
+- 当前能力是否仍然比批准的工作流更宽
+- 你明明要求 localhost only，但 runtime 是否又重新暴露了
+- 外发型副作用动作是否缺少确认门
+- 与当前任务无关的 secrets 是否仍然暴露给 runtime
+
 ## 应该扫描什么
 
 TraceRoot Audit 最适合扫描那些真正决定 agent 能做什么的本地文件：

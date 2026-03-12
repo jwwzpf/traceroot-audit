@@ -41,6 +41,7 @@ export interface HardeningPlan {
   rootDir: string;
   surfaceLabel: string;
   manifestPath: string | null;
+  selections: HardeningSelections;
   selectedProfiles: HardeningIntentProfile[];
   currentCapabilities: SupportedCapability[];
   recommendedCapabilities: SupportedCapability[];
@@ -64,6 +65,29 @@ export interface HardeningPlan {
   fileWritePolicy: string;
   exposurePolicy: string;
   approvalPolicy: string;
+}
+
+export interface HardeningCurrentState {
+  target: string;
+  targetPath: string;
+  rootDir: string;
+  manifest: TraceRootManifest | null;
+  manifestPath: string | null;
+  currentCapabilities: SupportedCapability[];
+  secretExposure: SecretExposure[];
+  findingsSummary: {
+    critical: number;
+    high: number;
+    medium: number;
+    total: number;
+  };
+  topFindings: {
+    ruleId: string;
+    severity: "critical" | "high" | "medium";
+    title: string;
+    message: string;
+  }[];
+  publicExposureDetected: boolean;
 }
 
 const capabilityDetectors: Record<SupportedCapability, RegExp[]> = {
@@ -197,36 +221,19 @@ function detectSecretExposures(
   return [...exposures.values()].sort((left, right) => left.variable.localeCompare(right.variable));
 }
 
+function allowedSecretGroupsForIntentIds(intentIds: HardeningIntentId[]): Set<SecretGroup> {
+  return new Set<SecretGroup>(
+    intentIds.flatMap((intentId) => getHardeningProfileById(intentId).allowedSecretGroups)
+  );
+}
+
 function uniqueCapabilities(
-  profiles: HardeningIntentProfile[],
-  selections: HardeningSelections
+  profiles: HardeningIntentProfile[]
 ): SupportedCapability[] {
   const capabilities = new Set<SupportedCapability>();
 
   for (const profile of profiles) {
     profile.requiredCapabilities.forEach((capability) => capabilities.add(capability));
-  }
-
-  if (selections.filesystemScope !== "no-write") {
-    for (const profile of profiles) {
-      profile.optionalCapabilities
-        .filter((capability) => capability === "filesystem")
-        .forEach((capability) => capabilities.add(capability));
-    }
-  }
-
-  if (selections.outboundApproval !== "allow-autonomous") {
-    for (const profile of profiles) {
-      profile.optionalCapabilities
-        .filter((capability) => capability === "email")
-        .forEach((capability) => capabilities.add(capability));
-    }
-  }
-
-  for (const profile of profiles) {
-    profile.optionalCapabilities
-      .filter((capability) => capability !== "filesystem" && capability !== "email")
-      .forEach((capability) => capabilities.add(capability));
   }
 
   return [...capabilities].sort();
@@ -355,26 +362,20 @@ export async function buildHardeningPlan(
   targetInput: string,
   selections: HardeningSelections
 ): Promise<HardeningPlan> {
-  const resolvedTarget = await resolveTarget(targetInput);
-  const files = await discoverFiles(resolvedTarget);
-  const manifestLoadResult = await loadManifest(resolvedTarget.rootDir);
-  const discovery = await discoverTarget(targetInput);
-  const scanResult = await scanTarget(targetInput, { useBaseline: false });
   const selectedProfiles = selections.intentIds.map((intentId) => getHardeningProfileById(intentId));
-  const currentCapabilities = inferCapabilities(files, manifestLoadResult.manifest);
-  const recommendedCapabilities = uniqueCapabilities(selectedProfiles, selections);
+  const currentState = await buildCurrentHardeningState(targetInput, selections.intentIds);
+  const discovery = await discoverTarget(targetInput);
+  const currentCapabilities = currentState.currentCapabilities;
+  const recommendedCapabilities = uniqueCapabilities(selectedProfiles);
   const extraCapabilities = currentCapabilities.filter(
     (capability) => !recommendedCapabilities.includes(capability)
   );
   const missingCapabilities = recommendedCapabilities.filter(
     (capability) => !currentCapabilities.includes(capability)
   );
-  const allowedSecretGroups = new Set<SecretGroup>(
-    selectedProfiles.flatMap((profile) => profile.allowedSecretGroups)
-  );
-  const secretExposure = detectSecretExposures(files, allowedSecretGroups);
+  const secretExposure = currentState.secretExposure;
   const baseManifest =
-    manifestLoadResult.manifest ?? (await buildManifestTemplate(resolvedTarget.rootDir));
+    currentState.manifest ?? (await buildManifestTemplate(currentState.rootDir));
   const recommendedManifest = buildRecommendedManifest(
     baseManifest,
     selections,
@@ -384,10 +385,11 @@ export async function buildHardeningPlan(
 
   return {
     target: targetInput,
-    targetPath: resolvedTarget.absolutePath,
-    rootDir: resolvedTarget.rootDir,
+    targetPath: currentState.targetPath,
+    rootDir: currentState.rootDir,
     surfaceLabel: surfaceLabelForHumans(discovery.surface.kind),
-    manifestPath: manifestLoadResult.manifestPath,
+    manifestPath: currentState.manifestPath,
+    selections,
     selectedProfiles,
     currentCapabilities,
     recommendedCapabilities,
@@ -396,6 +398,33 @@ export async function buildHardeningPlan(
     recommendedManifest,
     immediateActions: recommendationActions(extraCapabilities, selections, secretExposure),
     secretExposure,
+    findingsSummary: currentState.findingsSummary,
+    topFindings: currentState.topFindings,
+    fileWritePolicy: fileScopeLabel(selections.filesystemScope),
+    exposurePolicy: exposureLabel(selections.exposureMode),
+    approvalPolicy: approvalPolicyLabel(selections.outboundApproval)
+  };
+}
+
+export async function buildCurrentHardeningState(
+  targetInput: string,
+  intentIds: HardeningIntentId[]
+): Promise<HardeningCurrentState> {
+  const resolvedTarget = await resolveTarget(targetInput);
+  const files = await discoverFiles(resolvedTarget);
+  const manifestLoadResult = await loadManifest(resolvedTarget.rootDir);
+  const scanResult = await scanTarget(targetInput, { useBaseline: false });
+  const currentCapabilities = inferCapabilities(files, manifestLoadResult.manifest);
+  const allowedSecretGroups = allowedSecretGroupsForIntentIds(intentIds);
+
+  return {
+    target: targetInput,
+    targetPath: resolvedTarget.absolutePath,
+    rootDir: resolvedTarget.rootDir,
+    manifest: manifestLoadResult.manifest,
+    manifestPath: manifestLoadResult.manifestPath,
+    currentCapabilities,
+    secretExposure: detectSecretExposures(files, allowedSecretGroups),
     findingsSummary: scanResult.summary,
     topFindings: scanResult.findings.slice(0, 3).map((finding) => ({
       ruleId: finding.ruleId,
@@ -403,9 +432,7 @@ export async function buildHardeningPlan(
       title: finding.title,
       message: finding.message
     })),
-    fileWritePolicy: fileScopeLabel(selections.filesystemScope),
-    exposurePolicy: exposureLabel(selections.exposureMode),
-    approvalPolicy: approvalPolicyLabel(selections.outboundApproval)
+    publicExposureDetected: scanResult.findings.some((finding) => finding.ruleId === "C001")
   };
 }
 

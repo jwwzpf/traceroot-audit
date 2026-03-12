@@ -46,6 +46,8 @@ export async function writeHardeningFiles(
 
 function renderProfileJson(plan: HardeningPlan) {
   return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
     target: plan.target,
     targetPath: plan.targetPath,
     surface: plan.surfaceLabel,
@@ -53,6 +55,11 @@ function renderProfileJson(plan: HardeningPlan) {
       id: profile.id,
       title: profile.title
     })),
+    selectedPolicies: {
+      outboundApproval: plan.selections.outboundApproval,
+      filesystemScope: plan.selections.filesystemScope,
+      exposureMode: plan.selections.exposureMode
+    },
     currentCapabilities: plan.currentCapabilities,
     recommendedCapabilities: plan.recommendedCapabilities,
     extraCapabilities: plan.extraCapabilities,

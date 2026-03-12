@@ -460,7 +460,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("TraceRoot Audit Hardening");
       expect(capture.read().stdout).toContain("🧩 Selected workflows: 📧 邮件整理与回复, 💬 客服 / 聊天支持 / 消息代发");
       expect(capture.read().stdout).toContain("🔐 Secret review:");
-      expect(manifestSuggestion.capabilities).toEqual(["browser", "email", "network"]);
+      expect(manifestSuggestion.capabilities).toEqual(["email", "network"]);
       expect(profile.extraCapabilities).toContain("filesystem");
       expect(report).toContain("TraceRoot Audit Hardening Plan");
     } finally {
@@ -489,7 +489,66 @@ describe("CLI", () => {
     expect(exitCode).toBe(0);
     expect(output).toContain("TraceRoot Audit Guard");
     expect(output).toContain("Initial risk score");
-    expect(output).toContain("No risk changes detected");
+    expect(output).toContain("No risk or boundary changes detected");
+  });
+
+  it("loads an approved boundary during guard and shows when the setup is still broader", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-guard-boundary-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
+        "utf8"
+      );
+
+      await runCli(
+        ["node", "traceroot-audit", "harden", tempDir],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "guard",
+          tempDir,
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Approved boundary");
+      expect(output).toContain("Initial findings: 3");
+      expect(output).toContain("Current setup is still broader than the approved boundary");
+      expect(output).toContain("Best next fixes");
+      expect(output).toContain("More power than approved");
+      expect(output).toContain("Public or network exposure is still possible");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("runs host guard for a single cycle and suggests immediate actions", async () => {

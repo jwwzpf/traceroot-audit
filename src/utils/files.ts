@@ -22,7 +22,12 @@ const ignorePatterns = [
   "**/.turbo/**",
   "**/.next/**",
   "**/.output/**",
-  "**/traceroot.baseline.json"
+  "**/traceroot.baseline.json",
+  "**/traceroot.hardened.profile.json",
+  "**/traceroot.hardened.report.md",
+  "**/traceroot.manifest.hardened.json",
+  "**/traceroot.manifest.hardened.yaml",
+  "**/traceroot.manifest.hardened.yml"
 ];
 
 const traceRootIgnoreFile = ".tracerootignore";
