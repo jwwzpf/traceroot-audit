@@ -460,6 +460,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("TraceRoot Audit Hardening");
       expect(capture.read().stdout).toContain("🧩 Selected workflows: 📧 邮件整理与回复, 💬 客服 / 聊天支持 / 消息代发");
       expect(capture.read().stdout).toContain("🔐 Secret review:");
+      expect(capture.read().stdout).toContain("traceroot-audit apply");
       expect(manifestSuggestion.capabilities).toEqual(["email", "network"]);
       expect(profile.extraCapabilities).toContain("filesystem");
       expect(report).toContain("TraceRoot Audit Hardening Plan");
@@ -546,6 +547,68 @@ describe("CLI", () => {
       expect(output).toContain("Best next fixes");
       expect(output).toContain("More power than approved");
       expect(output).toContain("Public or network exposure is still possible");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("generates safer patch bundle files from an approved profile", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-apply-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\nSTRIPE_SECRET_KEY=sk_test_123\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
+        "utf8"
+      );
+
+      await runCli(
+        ["node", "traceroot-audit", "harden", tempDir],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "apply", tempDir],
+        capture.io
+      );
+
+      const applyPlan = await readFile(
+        path.join(tempDir, "traceroot.apply.plan.md"),
+        "utf8"
+      );
+      const envTemplate = await readFile(
+        path.join(tempDir, "traceroot.env.agent.example"),
+        "utf8"
+      );
+      const composeOverride = await readFile(
+        path.join(tempDir, "docker-compose.traceroot.override.yml"),
+        "utf8"
+      );
+
+      expect(exitCode).toBe(0);
+      expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
+      expect(capture.read().stdout).toContain("Compose override");
+      expect(envTemplate).toContain("SMTP_API_KEY=");
+      expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
+      expect(composeOverride).toContain("127.0.0.1:11434:11434");
+      expect(applyPlan).toContain("TraceRoot Audit Apply Plan");
+      expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

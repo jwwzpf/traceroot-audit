@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError } from "commander";
 
+import { registerApplyCommand } from "./commands/apply";
 import { registerBaselineCommand } from "./commands/baseline";
 import { registerDiscoverCommand } from "./commands/discover";
 import { registerExplainCommand } from "./commands/explain";
@@ -153,6 +154,7 @@ export function createProgram(runtime: CliRuntime): Command {
     .showHelpAfterError();
 
   registerScanCommand(program, runtime);
+  registerApplyCommand(program, runtime);
   registerDiscoverCommand(program, runtime);
   registerGuardCommand(program, runtime);
   registerHardenCommand(program, runtime);

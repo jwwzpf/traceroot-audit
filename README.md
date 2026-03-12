@@ -49,6 +49,7 @@ npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
 npx traceroot-audit guard --host --interval 60
 npx traceroot-audit harden --host
+npx traceroot-audit apply /path/to/openclaw
 ```
 
 Inspect what this directory looks like before you scan it:
@@ -228,6 +229,21 @@ After the wizard runs, TraceRoot can generate:
 - `traceroot.hardened.report.md`
 - `traceroot.hardened.profile.json`
 - `traceroot.manifest.hardened.json` or `.yaml`
+
+## Apply the safer bundle
+
+Once you have approved a smaller boundary with `harden`, run `apply` to generate files you can actually use:
+
+```bash
+node dist/cli/index.js apply /path/to/openclaw
+```
+
+`apply` currently generates:
+
+- `traceroot.manifest.hardened.json` or `.yaml`
+- `traceroot.env.agent.example`
+- `docker-compose.traceroot.override.yml` when TraceRoot can safely localize published ports
+- `traceroot.apply.plan.md`
 
 ## Boundary guard
 

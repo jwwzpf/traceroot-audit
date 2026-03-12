@@ -49,6 +49,7 @@ npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
 npx traceroot-audit guard --host --interval 60
 npx traceroot-audit harden --host
+npx traceroot-audit apply /path/to/openclaw
 ```
 
 先判断当前目录更像哪种扫描对象：
@@ -228,6 +229,21 @@ node dist/cli/index.js harden --host
 - `traceroot.hardened.report.md`
 - `traceroot.hardened.profile.json`
 - `traceroot.manifest.hardened.json` 或 `.yaml`
+
+## 应用更安全的补丁包
+
+当你已经用 `harden` 批准了一套更小的边界后，可以继续运行 `apply`，让 TraceRoot 直接生成你能拿去用的补丁文件：
+
+```bash
+node dist/cli/index.js apply /path/to/openclaw
+```
+
+`apply` 当前会生成：
+
+- `traceroot.manifest.hardened.json` 或 `.yaml`
+- `traceroot.env.agent.example`
+- `docker-compose.traceroot.override.yml`（当 TraceRoot 能安全地把端口收回到 localhost 时）
+- `traceroot.apply.plan.md`
 
 ## 边界守护
 

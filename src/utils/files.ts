@@ -25,9 +25,12 @@ const ignorePatterns = [
   "**/traceroot.baseline.json",
   "**/traceroot.hardened.profile.json",
   "**/traceroot.hardened.report.md",
+  "**/traceroot.apply.plan.md",
+  "**/traceroot.env.agent.example",
   "**/traceroot.manifest.hardened.json",
   "**/traceroot.manifest.hardened.yaml",
-  "**/traceroot.manifest.hardened.yml"
+  "**/traceroot.manifest.hardened.yml",
+  "**/docker-compose.traceroot.override.yml"
 ];
 
 const traceRootIgnoreFile = ".tracerootignore";

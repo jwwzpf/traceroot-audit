@@ -186,9 +186,9 @@ export function registerHardenCommand(program: Command, runtime: CliRuntime): vo
             `📜 Manifest suggestion: ${writeResult.manifestPath}`,
             "",
             "Next steps:",
+            `- Run \`traceroot-audit apply "${effectiveTarget}"\` to generate a safer patch bundle.`,
             "- Review the generated manifest suggestion and compare it with your current setup.",
-            "- Move unrelated secrets out of the agent runtime env.",
-            "- Re-run `traceroot-audit scan` after you apply the changes."
+            "- Re-run `traceroot-audit guard` after you apply the changes."
           ].join("\n") + "\n"
         );
       }
