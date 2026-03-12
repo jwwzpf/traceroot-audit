@@ -43,14 +43,14 @@ npm run build
 Run without global install:
 
 ```bash
-npx traceroot-audit discover .
-npx traceroot-audit discover --host
-npx traceroot-audit discover --host --include-cwd
-npx traceroot-audit scan .
-npx traceroot-audit guard --host --interval 60
-npx traceroot-audit harden --host
-npx traceroot-audit apply /path/to/openclaw
+npx traceroot-audit doctor
+npx traceroot-audit doctor /path/to/openclaw
+npx traceroot-audit guard /path/to/openclaw --interval 60
 ```
+
+For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, and prepares a safer patch bundle.
+
+If you want the lower-level commands, they still exist:
 
 Inspect what this directory looks like before you scan it:
 
@@ -101,6 +101,20 @@ node dist/cli/index.js baseline
 ```
 
 ## Quick start
+
+Most users should start here:
+
+```bash
+node dist/cli/index.js doctor
+```
+
+If you already know the target directory:
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw
+```
+
+Advanced workflow:
 
 Discover what TraceRoot can scan in the current project:
 
@@ -198,9 +212,33 @@ Explain a rule:
 node dist/cli/index.js explain C002
 ```
 
+## The simplest path: doctor
+
+For most users, the main command is now `doctor`.
+
+```bash
+node dist/cli/index.js doctor
+```
+
+`doctor` will:
+
+1. find a likely OpenClaw / runtime / skill surface
+2. ask what you actually want the AI to do
+3. generate a smaller approved boundary
+4. generate a safer patch bundle you can actually use
+5. tell you what still needs to change in the live setup
+
+If you already know the directory:
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw
+```
+
 ## Interactive hardening wizard
 
 TraceRoot Audit now includes a guided `harden` flow for users who do not want to reason through capabilities manually.
+
+`harden` is the advanced form of the same workflow. Most users should start with `doctor`.
 
 It walks through:
 

@@ -43,14 +43,14 @@ npm run build
 无需全局安装，直接运行：
 
 ```bash
-npx traceroot-audit discover .
-npx traceroot-audit discover --host
-npx traceroot-audit discover --host --include-cwd
-npx traceroot-audit scan .
-npx traceroot-audit guard --host --interval 60
-npx traceroot-audit harden --host
-npx traceroot-audit apply /path/to/openclaw
+npx traceroot-audit doctor
+npx traceroot-audit doctor /path/to/openclaw
+npx traceroot-audit guard /path/to/openclaw --interval 60
 ```
+
+对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包。
+
+如果你想使用更底层的命令，它们仍然都在：
 
 先判断当前目录更像哪种扫描对象：
 
@@ -101,6 +101,20 @@ node dist/cli/index.js baseline
 ```
 
 ## 快速开始
+
+大多数用户建议直接从这里开始：
+
+```bash
+node dist/cli/index.js doctor
+```
+
+如果你已经知道目标目录：
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw
+```
+
+进阶工作流：
 
 先识别当前项目更适合怎么扫：
 
@@ -198,9 +212,33 @@ node dist/cli/index.js rules
 node dist/cli/index.js explain C002
 ```
 
+## 最简单的路径：doctor
+
+对大多数用户来说，主命令现在是 `doctor`。
+
+```bash
+node dist/cli/index.js doctor
+```
+
+`doctor` 会：
+
+1. 找到可能的 OpenClaw / runtime / skill surface
+2. 问你真正想让 AI 做什么
+3. 生成更小的批准边界
+4. 生成你可以直接使用的更安全补丁包
+5. 告诉你当前 live setup 还差哪些地方没收回来
+
+如果你已经知道目录：
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw
+```
+
 ## 交互式硬化向导
 
 TraceRoot Audit 现在提供了一个真正面向普通用户的 `harden` 向导，不要求用户自己去想权限应该怎么收。
+
+`harden` 是同一条工作流的高级形式。大多数用户更适合直接用 `doctor`。
 
 它会一步步带着用户做：
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError } from "commander";
 
+import { registerDoctorCommand } from "./commands/doctor";
 import { registerApplyCommand } from "./commands/apply";
 import { registerBaselineCommand } from "./commands/baseline";
 import { registerDiscoverCommand } from "./commands/discover";
@@ -149,12 +150,13 @@ export function createProgram(runtime: CliRuntime): Command {
 
   program
     .name("traceroot-audit")
-    .description("Trust and security scanner for agent skills and local runtimes.")
+    .description("Shrink the blast radius of local AI runtimes and skills.")
     .version("0.2.0")
     .showHelpAfterError();
 
-  registerScanCommand(program, runtime);
+  registerDoctorCommand(program, runtime);
   registerApplyCommand(program, runtime);
+  registerScanCommand(program, runtime);
   registerDiscoverCommand(program, runtime);
   registerGuardCommand(program, runtime);
   registerHardenCommand(program, runtime);
