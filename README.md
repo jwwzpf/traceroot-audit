@@ -50,6 +50,8 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 
 For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
 
+We are also defining the next product step beyond static scanning: a local runtime audit layer that watches live agent behavior, writes local audit logs, and raises attention when high-risk actions begin. The current v1 spec lives in [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md).
+
 If you want the lower-level commands, they still exist:
 
 Inspect what this directory looks like before you scan it:
