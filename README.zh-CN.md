@@ -45,6 +45,7 @@ npm run build
 ```bash
 npx traceroot-audit discover .
 npx traceroot-audit discover --host
+npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
 npx traceroot-audit harden --host
 ```
@@ -59,6 +60,12 @@ node dist/cli/index.js discover
 
 ```bash
 node dist/cli/index.js discover --host
+```
+
+如果你希望主机级发现也把当前工作目录一起算进去：
+
+```bash
+node dist/cli/index.js discover --host --include-cwd
 ```
 
 直接扫描当前目录：
@@ -252,6 +259,8 @@ node dist/cli/index.js discover --host
 - `~/Projects`
 - `~/workspace`
 - macOS 下的 `~/Library/Application Support`
+
+默认情况下，它会排除你当前所在的工作目录子树，避免“主机级发现”又把你刚刚打开的仓库重新识别一遍。如果你想同时包含当前工作区，可以加上 `--include-cwd`。
 
 目标是让不熟悉命令行和目录结构的用户，也能先找到值得扫描的本地 agent action surface。
 

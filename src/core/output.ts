@@ -421,6 +421,9 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
     "",
     "🖥️ Scope: common agent/runtime locations on this machine",
     `🏠 Home: ${result.homeDir}`,
+    result.includeCwd
+      ? `📂 Current directory included: ${result.cwd}`
+      : `🚫 Current directory excluded: ${result.cwd}`,
     `🔎 Roots searched: ${result.searchedRoots.length}`,
     `📌 Likely agent action surfaces found: ${result.candidates.length}`
   ];
@@ -431,6 +434,7 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
       "No obvious local agent surfaces were found in the common locations we checked.",
       "",
       "Try next:",
+      "- traceroot-audit discover --host --include-cwd",
       "- traceroot-audit discover .",
       "- traceroot-audit discover /path/to/openclaw",
       "- traceroot-audit scan /path/to/skills"
@@ -470,6 +474,8 @@ export function renderHostDiscoveryJsonOutput(result: HostDiscoveryResult): stri
     {
       target: result.target,
       homeDir: result.homeDir,
+      cwd: result.cwd,
+      includeCwd: result.includeCwd,
       searchedRoots: result.searchedRoots,
       candidates: result.candidates.map((candidate) => ({
         absolutePath: candidate.absolutePath,

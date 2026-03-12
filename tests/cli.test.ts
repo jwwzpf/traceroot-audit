@@ -189,6 +189,7 @@ describe("CLI", () => {
 
   it("discovers likely surfaces across the host in human output", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-"));
+    const tempCwd = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-cwd-"));
     const previousCwd = process.cwd();
     const previousHome = process.env.HOME;
 
@@ -231,7 +232,7 @@ describe("CLI", () => {
       );
 
       process.env.HOME = tempHome;
-      process.chdir(tempHome);
+      process.chdir(tempCwd);
 
       const capture = createCapture();
       const exitCode = await runCli(["node", "traceroot-audit", "discover", "--host"], capture.io);
@@ -239,8 +240,47 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Host Discovery");
       expect(capture.read().stdout).toContain("Likely agent action surfaces found: 2");
+      expect(capture.read().stdout).toContain("Current directory excluded");
       expect(capture.read().stdout).toContain("~/.openclaw");
       expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempCwd, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can include the current working directory in host discovery when requested", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-include-cwd-home-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+
+    try {
+      const localRuntimeDir = path.join(tempHome, "scratch", "openclaw-runtime");
+      await mkdir(localRuntimeDir, { recursive: true });
+      await writeFile(
+        path.join(localRuntimeDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      process.chdir(localRuntimeDir);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "discover", "--host", "--include-cwd"],
+        capture.io
+      );
+
+      expect(exitCode).toBe(0);
+      expect(capture.read().stdout).toContain("Current directory included");
+      expect(capture.read().stdout).toContain("~/scratch/openclaw-runtime");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {

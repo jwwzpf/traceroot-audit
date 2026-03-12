@@ -26,17 +26,24 @@ export function registerDiscoverCommand(program: Command, runtime: CliRuntime): 
       "--host",
       "search common agent/runtime locations on this machine instead of only the current path"
     )
+    .option(
+      "--include-cwd",
+      "when used with --host, also include the current working directory subtree in host discovery"
+    )
     .action(
       async (
         target: string,
         options: {
           format: "human" | "json";
           host?: boolean;
+          includeCwd?: boolean;
         }
       ) => {
         const output = options.host
           ? (() => {
-              const resultPromise = discoverHost();
+              const resultPromise = discoverHost({
+                includeCwd: options.includeCwd ?? false
+              });
               return resultPromise.then((result) =>
                 options.format === "json"
                   ? renderHostDiscoveryJsonOutput(result)

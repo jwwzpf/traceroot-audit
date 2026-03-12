@@ -42,7 +42,9 @@ const runtimePathPattern =
   /(^|\/)(runtime|config|configs|compose|docker|deploy|infra)(\/|$)/i;
 const dockerComposePattern = /(^|\/)docker-compose[^/]*\.ya?ml$/i;
 const configLikePattern =
-  /(^|\/)(?:[^/]*?(?:config|runtime|compose|docker)[^/]*)\.(json|ya?ml)$/i;
+  /(^|\/)(?:[^/]*?(?:runtime|compose|docker|openclaw|claw|agent|mcp)[^/]*)\.(json|ya?ml)$/i;
+const ignoredRuntimeConfigPattern =
+  /(^|\/)(?:tsconfig(?:\.[^/]+)?|jsconfig|eslint\.config|prettier\.config|vitest\.config|vite\.config|jest\.config|babel\.config|webpack\.config|tailwind\.config|postcss\.config|metro\.config|next\.config|nuxt\.config|astro\.config|svelte\.config)\.[^/]+$/i;
 
 function normalizeSuggestionPath(relativePath: string): string {
   if (relativePath === "." || relativePath.length === 0) {
@@ -83,7 +85,11 @@ function collectEnvFiles(files: ScannableFile[]): string[] {
 
 function collectRuntimeConfigFiles(files: ScannableFile[]): string[] {
   return files
-    .filter((file) => dockerComposePattern.test(file.relativePath) || configLikePattern.test(file.relativePath))
+    .filter(
+      (file) =>
+        !ignoredRuntimeConfigPattern.test(file.relativePath) &&
+        (dockerComposePattern.test(file.relativePath) || configLikePattern.test(file.relativePath))
+    )
     .map((file) => file.relativePath)
     .sort((left, right) => left.localeCompare(right));
 }

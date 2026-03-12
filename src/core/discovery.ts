@@ -57,6 +57,8 @@ export interface HostDiscoveryCandidate {
 export interface HostDiscoveryResult {
   target: "host";
   homeDir: string;
+  cwd: string;
+  includeCwd: boolean;
   searchedRoots: string[];
   candidates: HostDiscoveryCandidate[];
 }
@@ -69,6 +71,7 @@ interface HostSearchRootSpec {
 interface DiscoverHostOptions {
   homeDir?: string;
   cwd?: string;
+  includeCwd?: boolean;
 }
 
 const hostDiscoveryIgnorePatterns = [
@@ -79,7 +82,18 @@ const hostDiscoveryIgnorePatterns = [
   "**/.next/**",
   "**/.turbo/**",
   "**/.output/**",
+  "**/.cache/**",
+  "**/.npm/**",
+  "**/.pnpm-store/**",
+  "**/.yarn/**",
+  "**/Applications/**",
+  "**/Library/**",
+  "**/Movies/**",
+  "**/Music/**",
+  "**/Pictures/**",
+  "**/Public/**",
   "**/Library/Caches/**",
+  "**/Library/CloudStorage/**",
   "**/.Trash/**"
 ];
 
@@ -108,9 +122,13 @@ const manifestFilePattern = /^traceroot\.manifest\.(json|ya?ml)$/i;
 const dockerComposeFilePattern = /^docker-compose[^/]*\.ya?ml$/i;
 const envFilePattern = /^\.env(?:\..+)?$/i;
 
-function hostSearchRoots(homeDir: string, cwd: string): HostSearchRootSpec[] {
+function hostSearchRoots(
+  homeDir: string,
+  cwd: string,
+  includeCwd: boolean
+): HostSearchRootSpec[] {
   const roots = [
-    { absolutePath: cwd, deep: 3 },
+    { absolutePath: homeDir, deep: 4 },
     { absolutePath: path.join(homeDir, ".openclaw"), deep: 4 },
     { absolutePath: path.join(homeDir, ".mcp"), deep: 4 },
     { absolutePath: path.join(homeDir, ".config"), deep: 4 },
@@ -128,6 +146,10 @@ function hostSearchRoots(homeDir: string, cwd: string): HostSearchRootSpec[] {
       absolutePath: path.join(homeDir, "Library", "Application Support"),
       deep: 4
     });
+  }
+
+  if (includeCwd) {
+    roots.unshift({ absolutePath: cwd, deep: 3 });
   }
 
   return roots;
@@ -242,6 +264,16 @@ function pathHasActionSegment(absolutePath: string): boolean {
     );
 }
 
+function isSameOrDescendant(targetPath: string, parentPath: string): boolean {
+  const normalizedTarget = path.resolve(targetPath);
+  const normalizedParent = path.resolve(parentPath);
+
+  return (
+    normalizedTarget === normalizedParent ||
+    normalizedTarget.startsWith(`${normalizedParent}${path.sep}`)
+  );
+}
+
 export async function discoverTarget(targetInput: string): Promise<DiscoveryResult> {
   const resolvedTarget = await resolveTarget(targetInput);
   const files = await discoverFiles(resolvedTarget);
@@ -276,7 +308,8 @@ export async function discoverHost(
 ): Promise<HostDiscoveryResult> {
   const homeDir = await canonicalPath(options.homeDir ?? os.homedir());
   const cwd = await canonicalPath(options.cwd ?? process.cwd());
-  const rootSpecs = hostSearchRoots(homeDir, cwd);
+  const includeCwd = options.includeCwd ?? false;
+  const rootSpecs = hostSearchRoots(homeDir, cwd, includeCwd);
   const searchableRoots = [];
 
   for (const rootSpec of rootSpecs) {
@@ -308,6 +341,10 @@ export async function discoverHost(
       const candidatePath = await canonicalPath(
         deriveCandidatePath(rootSpec.absolutePath, relativeMatch)
       );
+
+      if (!includeCwd && isSameOrDescendant(candidatePath, cwd)) {
+        continue;
+      }
 
       const nextScore = candidateStrength(relativeMatch);
       const existing = candidateMap.get(candidatePath);
@@ -371,6 +408,8 @@ export async function discoverHost(
   return {
     target: "host",
     homeDir,
+    cwd,
+    includeCwd,
     searchedRoots: searchableRoots.map((rootSpec) => displayPathForHuman(rootSpec.absolutePath, homeDir)),
     candidates: discoveredCandidates
   };

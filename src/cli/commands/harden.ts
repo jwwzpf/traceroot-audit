@@ -90,17 +90,24 @@ export function registerHardenCommand(program: Command, runtime: CliRuntime): vo
       "--host",
       "discover likely OpenClaw/runtime surfaces on this machine, then let you choose one"
     )
+    .option(
+      "--include-cwd",
+      "when used with --host, also include the current working directory subtree in host discovery"
+    )
     .action(
       async (
         target: string,
         options: {
           host?: boolean;
+          includeCwd?: boolean;
         }
       ) => {
         let effectiveTarget = target;
 
         if (options.host) {
-          const hostDiscovery = await discoverHost();
+          const hostDiscovery = await discoverHost({
+            includeCwd: options.includeCwd ?? false
+          });
 
           if (hostDiscovery.candidates.length === 0) {
             runtime.io.stdout(

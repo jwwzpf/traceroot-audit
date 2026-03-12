@@ -45,6 +45,7 @@ Run without global install:
 ```bash
 npx traceroot-audit discover .
 npx traceroot-audit discover --host
+npx traceroot-audit discover --host --include-cwd
 npx traceroot-audit scan .
 npx traceroot-audit harden --host
 ```
@@ -59,6 +60,12 @@ Let TraceRoot look for common agent/runtime locations on this machine:
 
 ```bash
 node dist/cli/index.js discover --host
+```
+
+If you also want host discovery to include the current workspace you launched from:
+
+```bash
+node dist/cli/index.js discover --host --include-cwd
 ```
 
 Scan the current directory:
@@ -252,6 +259,8 @@ and suggest the most useful paths to scan next.
 - `~/Projects`
 - `~/workspace`
 - `~/Library/Application Support` on macOS
+
+By default it excludes the current working directory subtree, so host discovery behaves like a machine-level search instead of simply rediscovering the repo you launched it from. If you want both behaviors, add `--include-cwd`.
 
 It does **not** do a blind full-disk crawl. The goal is to help non-expert users find likely agent action surfaces without first understanding where OpenClaw or skill packages are installed.
 
