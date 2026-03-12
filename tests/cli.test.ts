@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import fg from "fast-glob";
 import { describe, expect, it } from "vitest";
 
 import { runCli, type CliChoice, type CliPrompter } from "../src/cli/index";
@@ -128,6 +129,7 @@ describe("CLI", () => {
       expect(output).toContain("Your live setup is still broader than the boundary you just approved");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
+      expect(output).toContain("traceroot.tap.plan.md");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
     } finally {
@@ -849,15 +851,29 @@ describe("CLI", () => {
         path.join(tempDir, "docker-compose.traceroot.override.yml"),
         "utf8"
       );
+      const tapPlan = await readFile(
+        path.join(tempDir, "traceroot.tap.plan.md"),
+        "utf8"
+      );
+      const wrapperDir = path.join(tempDir, ".traceroot", "tap");
+      const wrapperEntries = await fg("*.sh", {
+        cwd: wrapperDir,
+        onlyFiles: true
+      });
 
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
       expect(capture.read().stdout).toContain("Compose override");
+      expect(capture.read().stdout).toContain("Action audit guide");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
       expect(applyPlan).toContain("TraceRoot Audit Apply Plan");
       expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
+      expect(applyPlan).toContain("traceroot.tap.plan.md");
+      expect(tapPlan).toContain("TraceRoot Action Audit Guide");
+      expect(tapPlan).toContain("send-email");
+      expect(wrapperEntries.length).toBeGreaterThan(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

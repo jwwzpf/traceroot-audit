@@ -59,6 +59,11 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         lines.push(`- 🌐 Compose override: ${bundle.composeOverridePath}`);
       }
 
+      if (bundle.tapPlanPath && bundle.tapWrapperDir) {
+        lines.push(`- 🎬 Action audit guide: ${bundle.tapPlanPath}`);
+        lines.push(`- 🧷 Ready-to-use command hooks: ${bundle.tapWrapperDir}`);
+      }
+
       lines.push("", "🚀 Best next steps:");
 
       if (bundle.movedSecrets.length > 0) {
@@ -73,6 +78,12 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         );
       } else {
         lines.push("- Review your runtime binding and keep it on localhost if possible.");
+      }
+
+      if (bundle.tapPlanPath && bundle.tapWrappers.length > 0) {
+        lines.push(
+          `- Switch the highest-risk skill/tool commands to the ${bundle.tapWrappers.length} prepared TraceRoot command hook${bundle.tapWrappers.length === 1 ? "" : "s"} listed in ${bundle.tapPlanPath}.`
+        );
       }
 
       lines.push(

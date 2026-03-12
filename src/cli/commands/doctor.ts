@@ -63,6 +63,11 @@ function renderDoctorSummary(options: {
     lines.push(`- 🌐 Compose override: ${displayPath(options.bundle.composeOverridePath)}`);
   }
 
+  if (options.bundle.tapPlanPath && options.bundle.tapWrapperDir) {
+    lines.push(`- 🎬 Action audit guide: ${displayPath(options.bundle.tapPlanPath)}`);
+    lines.push(`- 🧷 Ready-to-use command hooks: ${displayPath(options.bundle.tapWrapperDir)}`);
+  }
+
   if (options.boundaryStatus.aligned) {
     lines.push(
       "",
@@ -133,6 +138,13 @@ function renderDoctorSummary(options: {
         lines.push(`- ${outcome}`);
       }
     }
+  }
+
+  if (options.bundle.tapWrappers.length > 0) {
+    lines.push(
+      "",
+      `🎬 TraceRoot also prepared ${options.bundle.tapWrappers.length} ready-to-use command hook${options.bundle.tapWrappers.length === 1 ? "" : "s"} so likely skill/tool actions can start leaving an audit trail.`
+    );
   }
 
   if (stillNeedsUser.length > 0) {
