@@ -890,15 +890,15 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
-      expect(capture.read().stdout).toContain("Compose override");
-      expect(capture.read().stdout).toContain("Action audit guide");
+      expect(capture.read().stdout).toContain("更安全的 compose 覆盖文件");
+      expect(capture.read().stdout).toContain("动作审计说明");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
       expect(applyPlan).toContain("TraceRoot Audit Apply Plan");
       expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
       expect(applyPlan).toContain("traceroot.tap.plan.md");
-      expect(tapPlan).toContain("TraceRoot Action Audit Guide");
+      expect(tapPlan).toContain("TraceRoot 动作审计说明");
       expect(tapPlan).toContain("send-email");
       expect(tapPlan).toContain("npm run send-email");
       expect(tapPlan).toContain("scripts.send-email");

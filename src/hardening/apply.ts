@@ -271,7 +271,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: "purchase-or-payment",
       severity: "critical",
-      recommendation: "Require confirmation before payment-like actions and keep payment secrets out of unrelated runtimes."
+      recommendation: "这类动作会碰到付款或下单，应该强制人工确认，并把支付类 secrets 留在 runtime 外面。"
     };
   }
 
@@ -279,7 +279,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: "finance-access",
       severity: "critical",
-      recommendation: "Require confirmation before finance-related actions and keep broker or banking credentials out of autonomous runtimes."
+      recommendation: "这类动作会碰到交易、券商或银行数据，应该强制人工确认，并把金融类凭证放在 autonomous runtime 外面。"
     };
   }
 
@@ -287,7 +287,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: "send-email",
       severity: "high-risk",
-      recommendation: "Require confirmation before outbound email actions."
+      recommendation: "这类动作会对外发邮件，最好先让用户确认，再真正发出去。"
     };
   }
 
@@ -295,7 +295,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: "publish-or-send-message",
       severity: "high-risk",
-      recommendation: "Require confirmation before public posts or outbound messages."
+      recommendation: "这类动作会公开发帖或向外发消息，最好先让用户确认，再真正发出去。"
     };
   }
 
@@ -303,7 +303,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: "delete-or-modify-files",
       severity: "high-risk",
-      recommendation: "Keep destructive file actions behind an explicit approval step."
+      recommendation: "这类动作会删文件或改文件，最好放在明确的人工确认之后。"
     };
   }
 
@@ -311,7 +311,7 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
     return {
       action: `run-${fileName.replace(/\.[^.]+$/, "")}`,
       severity: "risky",
-      recommendation: "Review this automation path and keep only the permissions it truly needs."
+      recommendation: "这条自动化链路同时会联网和碰文件，最好再收一下权限，只保留真正需要的能力。"
     };
   }
 
@@ -557,10 +557,15 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
   const tapPlanPath = path.join(rootDir, "traceroot.tap.plan.md");
   const lines = [
-    "# TraceRoot Action Audit Guide",
+    "# TraceRoot 动作审计说明",
     "",
-    "TraceRoot prepared ready-to-use command hooks for likely high-signal action scripts.",
-    "Switch the highest-risk skill/tool commands to these hooks if you want runtime actions to leave a local audit trail.",
+    "TraceRoot 已经帮你找到了几个最值得先接入审计的动作。",
+    "你不用自己研究怎么接。做法很简单：把你平时启动这个动作的命令，换成下面 TraceRoot 给你准备好的接入文件。",
+    "",
+    "换完以后，TraceRoot 就能：",
+    "- 记住这个动作什么时候开始、有没有成功",
+    "- 把高风险动作单独标出来",
+    "- 让你之后用 `traceroot-audit logs` 回看这条审计记录",
     ""
   ];
 
@@ -568,37 +573,42 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     lines.push(
       `## ${wrapper.action}`,
       "",
-      `- **Risk level:** ${wrapper.severity}`,
-      `- **Original script:** \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\``,
-      `- **TraceRoot command hook:** \`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\``,
-      `- **Why this matters:** ${wrapper.recommendation}`,
+      `- **风险级别：** ${wrapper.severity}`,
+      `- **原始脚本：** \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\``,
+      `- **TraceRoot 给你准备好的接入文件：** \`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\``,
+      `- **为什么值得先接它：** ${wrapper.recommendation}`,
       ""
     );
 
     if (wrapper.entrypoints.length > 0) {
-      lines.push("### Quick switch suggestions", "");
+      lines.push("### 你现在就可以这样改", "");
 
       for (const entrypoint of wrapper.entrypoints) {
         if (entrypoint.kind === "npm-script") {
           lines.push(
-            `- \`npm run ${entrypoint.name}\` currently runs \`${entrypoint.currentCommand}\``,
-            `- Suggested change: set \`scripts.${entrypoint.name}\` to \`${entrypoint.suggestedCommand}\``,
+            `- 你现在平时运行的是：\`npm run ${entrypoint.name}\``,
+            `- 它背后实际执行的是：\`${entrypoint.currentCommand}\``,
+            `- 建议你改成：把 \`scripts.${entrypoint.name}\` 换成 \`${entrypoint.suggestedCommand}\``,
+            "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
             ""
           );
           continue;
         }
 
         lines.push(
-          `- CLI entrypoint \`${entrypoint.name}\` currently points to \`${entrypoint.currentCommand}\``,
-          `- Suggested change: point it to \`${entrypoint.suggestedCommand}\``,
+          `- 你现在平时用的是这个命令入口：\`${entrypoint.name}\``,
+          `- 它现在指向：\`${entrypoint.currentCommand}\``,
+          `- 建议你改成：让它指向 \`${entrypoint.suggestedCommand}\``,
+          "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
           ""
         );
       }
     } else {
       lines.push(
-        "### Quick switch suggestions",
+        "### 你现在就可以这样改",
         "",
-        "- If your runtime or skill config points directly at this script, replace that path with the TraceRoot command hook above.",
+        `- 如果你的 runtime 或 skill 配置里直接写的是 \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\`，就把它换成上面的 TraceRoot 接入文件。`,
+        "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
         ""
       );
     }

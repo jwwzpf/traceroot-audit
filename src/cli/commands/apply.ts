@@ -46,48 +46,48 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
           .map((intent) => intent.title)
           .join(", ")}`,
         "",
-        "✨ Generated safer companion files:",
-        `- 📜 Recommended manifest: ${bundle.manifestPath}`,
-        `- 🧭 Apply plan: ${bundle.planPath}`
+        "✨ TraceRoot 已经先帮你准备好了这些文件：",
+        `- 📜 更小权限的 manifest 建议：${bundle.manifestPath}`,
+        `- 🧭 应用步骤说明：${bundle.planPath}`
       ];
 
       if (bundle.envExamplePath) {
-        lines.push(`- 🔐 Runtime env template: ${bundle.envExamplePath}`);
+        lines.push(`- 🔐 更干净的运行时环境变量模板：${bundle.envExamplePath}`);
       }
 
       if (bundle.composeOverridePath) {
-        lines.push(`- 🌐 Compose override: ${bundle.composeOverridePath}`);
+        lines.push(`- 🌐 更安全的 compose 覆盖文件：${bundle.composeOverridePath}`);
       }
 
       if (bundle.tapPlanPath && bundle.tapWrapperDir) {
-        lines.push(`- 🎬 Action audit guide: ${bundle.tapPlanPath}`);
-        lines.push(`- 🧷 Ready-to-use command hooks: ${bundle.tapWrapperDir}`);
+        lines.push(`- 🎬 动作审计说明：${bundle.tapPlanPath}`);
+        lines.push(`- 🧷 TraceRoot 已经帮你准备好的接入文件：${bundle.tapWrapperDir}`);
       }
 
-      lines.push("", "🚀 Best next steps:");
+      lines.push("", "🚀 你现在最值得先做的事：");
 
       if (bundle.movedSecrets.length > 0) {
         lines.push(
-          `- Move unrelated secrets out of the live runtime env: ${bundle.movedSecrets.join(", ")}`
+          `- 先把这些和当前工作流无关的 secrets 挪出运行时环境变量：${bundle.movedSecrets.join(", ")}`
         );
       }
 
       if (bundle.composeOverridePath && bundle.composeSourcePath) {
         lines.push(
-          `- Re-start the runtime with the safer override: docker compose -f ${bundle.composeSourcePath} -f ${bundle.composeOverridePath} up -d`
+          `- 用更安全的 compose 配置重新启动 runtime：docker compose -f ${bundle.composeSourcePath} -f ${bundle.composeOverridePath} up -d`
         );
       } else {
-        lines.push("- Review your runtime binding and keep it on localhost if possible.");
+        lines.push("- 检查一下 runtime 的网络暴露范围，能只留在本机就尽量只留在本机。");
       }
 
       if (bundle.tapPlanPath && bundle.tapWrappers.length > 0) {
         lines.push(
-          `- Switch the highest-risk skill/tool commands to the ${bundle.tapWrappers.length} prepared TraceRoot command hook${bundle.tapWrappers.length === 1 ? "" : "s"} listed in ${bundle.tapPlanPath}.`
+          `- 如果你平时会运行发邮件、发帖、下单这类高风险动作，请打开 ${bundle.tapPlanPath}，照着里面“原来怎么启动 → 现在改成什么”那一栏替换掉。TraceRoot 已经帮你准备好了 ${bundle.tapWrappers.length} 个接入文件。`
         );
       }
 
       lines.push(
-        `- Compare your active manifest with ${bundle.manifestPath} and carry over the reduced capability set.`
+        `- 最后把你当前正在使用的 manifest 和 ${bundle.manifestPath} 对照一下，把更小的能力范围同步进去。`
       );
 
       runtime.io.stdout(`${lines.join("\n")}\n`);
