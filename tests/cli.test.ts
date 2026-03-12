@@ -115,8 +115,16 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot Audit Doctor");
+      expect(output).toContain("Boundary shrink preview");
+      expect(output).toContain("Today: email, filesystem, network");
+      expect(output).toContain("Approved: email, network");
       expect(output).toContain("TraceRoot is preparing a smaller approved boundary");
       expect(output).toContain("We already prepared a safer bundle for you");
+      expect(output).toContain("TraceRoot already prepared 3 of 4 needed fixes");
+      expect(output).toContain("TraceRoot already prepared fixes for you");
+      expect(output).toContain("If you apply the bundle, TraceRoot will already help you");
+      expect(output).toContain("Still needs your decision");
+      expect(output).toContain("Apply right now");
       expect(output).toContain("Your live setup is still broader than the boundary you just approved");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");

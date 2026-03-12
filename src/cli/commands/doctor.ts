@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { Command } from "commander";
 
 import { buildCurrentHardeningState, buildHardeningPlan } from "../../hardening/analysis";
@@ -12,10 +14,27 @@ import type { CliRuntime } from "../index";
 
 function renderDoctorSummary(options: {
   target: string;
+  plan: Awaited<ReturnType<typeof buildHardeningPlan>>;
   selectedWorkflows: string[];
   bundle: Awaited<ReturnType<typeof writeApplyBundle>>;
   boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
 }): string {
+  function displayPath(filePath: string): string {
+    const relativePath = path.relative(options.plan.rootDir, filePath);
+    if (!relativePath || relativePath === "") {
+      return ".";
+    }
+
+    return relativePath.startsWith("..") ? filePath : `./${relativePath}`;
+  }
+
+  function formatCapabilities(capabilities: string[]): string {
+    return capabilities.length > 0 ? capabilities.join(", ") : "none detected";
+  }
+
+  const currentPower = formatCapabilities(options.plan.currentCapabilities);
+  const approvedPower = formatCapabilities(options.plan.recommendedCapabilities);
+
   const lines = [
     "TraceRoot Audit Doctor",
     "======================",
@@ -23,17 +42,24 @@ function renderDoctorSummary(options: {
     `🎯 Target: ${options.target}`,
     `🧩 Approved workflows: ${options.selectedWorkflows.join(", ")}`,
     "",
+    "📉 Boundary shrink preview:",
+    `- Today: ${currentPower}`,
+    `- Approved: ${approvedPower}`,
+    `- Approval policy: ${options.plan.approvalPolicy}`,
+    `- File write policy: ${options.plan.fileWritePolicy}`,
+    `- Exposure policy: ${options.plan.exposurePolicy}`,
+    "",
     "✨ We already prepared a safer bundle for you:",
-    `- 📜 Recommended manifest: ${options.bundle.manifestPath}`,
-    `- 🧭 Apply plan: ${options.bundle.planPath}`
+    `- 📜 Recommended manifest: ${displayPath(options.bundle.manifestPath)}`,
+    `- 🧭 Apply plan: ${displayPath(options.bundle.planPath)}`
   ];
 
   if (options.bundle.envExamplePath) {
-    lines.push(`- 🔐 Runtime env template: ${options.bundle.envExamplePath}`);
+    lines.push(`- 🔐 Runtime env template: ${displayPath(options.bundle.envExamplePath)}`);
   }
 
   if (options.bundle.composeOverridePath) {
-    lines.push(`- 🌐 Compose override: ${options.bundle.composeOverridePath}`);
+    lines.push(`- 🌐 Compose override: ${displayPath(options.bundle.composeOverridePath)}`);
   }
 
   if (options.boundaryStatus.aligned) {
@@ -46,28 +72,100 @@ function renderDoctorSummary(options: {
     return `${lines.join("\n")}\n`;
   }
 
+  const preparedFixes: string[] = [];
+  const preparedOutcomes: string[] = [];
+  const stillNeedsUser = [];
+
+  for (const violation of options.boundaryStatus.violations) {
+    if (
+      violation.code === "public-exposure" &&
+      options.bundle.composeOverridePath &&
+      options.bundle.composeSourcePath
+    ) {
+      preparedFixes.push(
+        `🌐 Public exposure → compose override ready (${displayPath(options.bundle.composeOverridePath)})`
+      );
+      preparedOutcomes.push("🌐 keep the runtime on localhost instead of exposing it more broadly");
+      continue;
+    }
+
+    if (violation.code === "missing-confirmation") {
+      preparedFixes.push(
+        `📜 Missing approval guard → hardened manifest ready (${displayPath(options.bundle.manifestPath)})`
+      );
+      preparedOutcomes.push("📜 enforce confirmation before side-effecting actions");
+      continue;
+    }
+
+    if (violation.code === "secret-exposure" && options.bundle.envExamplePath) {
+      preparedFixes.push(
+        `🔐 Secret cleanup → runtime env template ready (${displayPath(options.bundle.envExamplePath)})`
+      );
+      preparedOutcomes.push("🔐 split unrelated secrets out of the live runtime env");
+      continue;
+    }
+
+    stillNeedsUser.push(violation);
+  }
+
   lines.push(
     "",
     "🚧 Your live setup is still broader than the boundary you just approved."
   );
 
-  for (const violation of options.boundaryStatus.violations.slice(0, 4)) {
-    const icon =
-      violation.severity === "critical"
-        ? "🛑"
-        : violation.severity === "high"
-          ? "⚠️"
-          : "ℹ️";
-    lines.push(`- ${icon} ${violation.title}: ${violation.message}`);
+  if (options.boundaryStatus.violations.length > 0) {
+    lines.push(
+      `🧮 TraceRoot already prepared ${preparedFixes.length} of ${options.boundaryStatus.violations.length} needed fixes.`
+    );
+  }
+
+  if (preparedFixes.length > 0) {
+    lines.push("", "✅ TraceRoot already prepared fixes for you:");
+
+    for (const fix of preparedFixes) {
+      lines.push(`- ${fix}`);
+    }
+
+    if (preparedOutcomes.length > 0) {
+      lines.push("", "🎁 If you apply the bundle, TraceRoot will already help you:");
+      for (const outcome of preparedOutcomes) {
+        lines.push(`- ${outcome}`);
+      }
+    }
+  }
+
+  if (stillNeedsUser.length > 0) {
+    lines.push("", "👀 Still needs your decision:");
+
+    for (const violation of stillNeedsUser.slice(0, 4)) {
+      const icon =
+        violation.severity === "critical"
+          ? "🛑"
+          : violation.severity === "high"
+            ? "⚠️"
+            : "ℹ️";
+      lines.push(`- ${icon} ${violation.title}: ${violation.message}`);
+    }
+  } else {
+    lines.push("", "👀 The remaining work is mostly applying the bundle to your live setup.");
   }
 
   const recommendations = [...new Set(options.boundaryStatus.violations.map((violation) => violation.recommendation))];
   if (recommendations.length > 0) {
-    lines.push("", "🔧 Start with these fixes:");
+    lines.push("", "🔧 Start here:");
 
     for (const recommendation of recommendations.slice(0, 3)) {
       lines.push(`- ${recommendation}`);
     }
+  }
+
+  if (options.bundle.composeOverridePath && options.bundle.composeSourcePath) {
+    lines.push(
+      "",
+      "⚡ Apply right now:",
+      `- cd "${options.plan.rootDir}"`,
+      `- docker compose -f ${path.basename(options.bundle.composeSourcePath)} -f ${path.basename(options.bundle.composeOverridePath)} up -d`
+    );
   }
 
   lines.push(
@@ -166,6 +264,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         runtime.io.stdout(
           renderDoctorSummary({
             target: effectiveTarget,
+            plan,
             selectedWorkflows: plan.selectedProfiles.map(
               (profile) => `${profile.icon} ${profile.title}`
             ),
