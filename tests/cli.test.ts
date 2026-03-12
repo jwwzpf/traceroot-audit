@@ -100,6 +100,20 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "mail-runtime",
+            scripts: {
+              "send-email": "tsx mailer.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
 
       const capture = createCapture();
       const exitCode = await runCli(
@@ -763,7 +777,6 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
-
       await runCli(
         ["node", "traceroot-audit", "harden", tempDir],
         createCapture().io,
@@ -822,6 +835,20 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "mail-runtime",
+            scripts: {
+              "send-email": "tsx mailer.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
 
       await runCli(
         ["node", "traceroot-audit", "harden", tempDir],
@@ -873,6 +900,8 @@ describe("CLI", () => {
       expect(applyPlan).toContain("traceroot.tap.plan.md");
       expect(tapPlan).toContain("TraceRoot Action Audit Guide");
       expect(tapPlan).toContain("send-email");
+      expect(tapPlan).toContain("npm run send-email");
+      expect(tapPlan).toContain("scripts.send-email");
       expect(wrapperEntries.length).toBeGreaterThan(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });

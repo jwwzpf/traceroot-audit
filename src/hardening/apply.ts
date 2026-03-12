@@ -33,6 +33,14 @@ export interface TapWrapperFile {
   wrapperPath: string;
   sourcePath: string;
   recommendation: string;
+  entrypoints: TapEntrypoint[];
+}
+
+export interface TapEntrypoint {
+  kind: "npm-script" | "bin";
+  name: string;
+  currentCommand: string;
+  suggestedCommand: string;
 }
 
 function manifestOutputPath(rootDir: string, manifestFormat: "json" | "yaml"): string {
@@ -244,6 +252,12 @@ interface TapActionSpec {
   recommendation: string;
 }
 
+interface PackageEntrypointCandidate {
+  kind: "npm-script" | "bin";
+  name: string;
+  command: string;
+}
+
 function classifyTapAction(file: ScannableFile): TapActionSpec | null {
   const relativePath = file.relativePath.toLowerCase();
   const fileName = path.basename(relativePath);
@@ -394,6 +408,100 @@ function surfaceKindForProfileSurface(surface: string): "runtime" | "skill" | "p
   return "project";
 }
 
+async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypointCandidate[]> {
+  const packageJsonPath = path.join(rootDir, "package.json");
+
+  try {
+    const content = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(content) as {
+      scripts?: Record<string, unknown>;
+      bin?: string | Record<string, unknown>;
+    };
+    const candidates: PackageEntrypointCandidate[] = [];
+
+    if (parsed.scripts && typeof parsed.scripts === "object") {
+      for (const [name, value] of Object.entries(parsed.scripts)) {
+        if (typeof value !== "string") {
+          continue;
+        }
+
+        candidates.push({
+          kind: "npm-script",
+          name,
+          command: value
+        });
+      }
+    }
+
+    if (typeof parsed.bin === "string") {
+      candidates.push({
+        kind: "bin",
+        name: path.basename(rootDir),
+        command: parsed.bin
+      });
+    } else if (parsed.bin && typeof parsed.bin === "object") {
+      for (const [name, value] of Object.entries(parsed.bin)) {
+        if (typeof value !== "string") {
+          continue;
+        }
+
+        candidates.push({
+          kind: "bin",
+          name,
+          command: value
+        });
+      }
+    }
+
+    return candidates;
+  } catch {
+    return [];
+  }
+}
+
+function matchesEntrypointCommand(command: string, relativePath: string): boolean {
+  const normalizedCommand = command.replace(/\\/g, "/").toLowerCase();
+  const normalizedRelativePath = relativePath.replace(/\\/g, "/").toLowerCase();
+  const prefixedPath = `./${normalizedRelativePath}`;
+  const fileName = path.basename(normalizedRelativePath);
+
+  return (
+    normalizedCommand.includes(normalizedRelativePath) ||
+    normalizedCommand.includes(prefixedPath) ||
+    normalizedCommand.includes(fileName)
+  );
+}
+
+function buildSuggestedEntrypoints(options: {
+  rootDir: string;
+  wrapperPath: string;
+  sourceRelativePath: string;
+  candidates: PackageEntrypointCandidate[];
+}): TapEntrypoint[] {
+  const wrapperRelativePath = path.relative(options.rootDir, options.wrapperPath).replace(/\\/g, "/");
+  const sourceRelativePath = options.sourceRelativePath.replace(/\\/g, "/");
+
+  return options.candidates
+    .filter((candidate) => matchesEntrypointCommand(candidate.command, sourceRelativePath))
+    .map((candidate) => {
+      if (candidate.kind === "npm-script") {
+        return {
+          kind: candidate.kind,
+          name: candidate.name,
+          currentCommand: candidate.command,
+          suggestedCommand: wrapperRelativePath
+        };
+      }
+
+      return {
+        kind: candidate.kind,
+        name: candidate.name,
+        currentCommand: candidate.command,
+        suggestedCommand: wrapperRelativePath
+      };
+    });
+}
+
 async function buildTapWrappers(rootDir: string, profileSurface: string): Promise<{
   tapWrapperDir: string | null;
   tapPlanPath: string | null;
@@ -404,6 +512,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   const tapWrappers: TapWrapperFile[] = [];
   const wrapperDir = path.join(rootDir, ".traceroot", "tap");
   const surfaceKind = surfaceKindForProfileSurface(profileSurface);
+  const packageEntrypoints = await detectPackageEntrypoints(rootDir);
 
   for (const file of files) {
     const spec = classifyTapAction(file);
@@ -428,7 +537,13 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       severity: spec.severity,
       wrapperPath,
       sourcePath: path.join(rootDir, file.relativePath),
-      recommendation: spec.recommendation
+      recommendation: spec.recommendation,
+      entrypoints: buildSuggestedEntrypoints({
+        rootDir,
+        wrapperPath,
+        sourceRelativePath: file.relativePath,
+        candidates: packageEntrypoints
+      })
     });
   }
 
@@ -459,6 +574,34 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       `- **Why this matters:** ${wrapper.recommendation}`,
       ""
     );
+
+    if (wrapper.entrypoints.length > 0) {
+      lines.push("### Quick switch suggestions", "");
+
+      for (const entrypoint of wrapper.entrypoints) {
+        if (entrypoint.kind === "npm-script") {
+          lines.push(
+            `- \`npm run ${entrypoint.name}\` currently runs \`${entrypoint.currentCommand}\``,
+            `- Suggested change: set \`scripts.${entrypoint.name}\` to \`${entrypoint.suggestedCommand}\``,
+            ""
+          );
+          continue;
+        }
+
+        lines.push(
+          `- CLI entrypoint \`${entrypoint.name}\` currently points to \`${entrypoint.currentCommand}\``,
+          `- Suggested change: point it to \`${entrypoint.suggestedCommand}\``,
+          ""
+        );
+      }
+    } else {
+      lines.push(
+        "### Quick switch suggestions",
+        "",
+        "- If your runtime or skill config points directly at this script, replace that path with the TraceRoot command hook above.",
+        ""
+      );
+    }
   }
 
   await writeFile(tapPlanPath, `${lines.join("\n")}\n`, "utf8");
