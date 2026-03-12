@@ -264,6 +264,71 @@ describe("CLI", () => {
     }
   });
 
+  it("records wrapped high-risk actions through tap and surfaces them in logs", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-tap-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-tap-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      process.env.HOME = tempHome;
+
+      const tapCapture = createCapture();
+      const tapExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "Require confirmation before outbound email actions.",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        tapCapture.io
+      );
+
+      expect(tapExitCode).toBe(0);
+      expect(tapCapture.read().stdout).toContain("TraceRoot Action Tap");
+      expect(tapCapture.read().stdout).toContain("send-email");
+
+      const eventsPath = path.join(tempHome, ".traceroot", "audit", "events.jsonl");
+      const eventsContent = await readFile(eventsPath, "utf8");
+      expect(eventsContent).toContain('"category":"action-event"');
+      expect(eventsContent).toContain('"status":"attempted"');
+      expect(eventsContent).toContain('"status":"succeeded"');
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--limit", "10"],
+        logsCapture.io
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("Agent action");
+      expect(logsCapture.read().stdout).toContain("send-email");
+      expect(logsCapture.read().stdout).toContain("Require confirmation before outbound email actions.");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("renders SARIF output for scan", async () => {
     const capture = createCapture();
     const exitCode = await runCli(

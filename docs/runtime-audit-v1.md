@@ -45,12 +45,15 @@ The first local runtime-audit loop should stay deliberately small:
 - `traceroot-audit doctor /path/to/runtime --watch`
 - local JSONL event storage in `~/.traceroot/audit/events.jsonl`
 - `traceroot-audit logs` for recent timeline review
+- `traceroot-audit tap --action ... -- command ...` for wrapped high-risk actions
 
 This first slice is valuable even before action-level adapters exist, because it already gives users:
 
 - a persistent local audit trail
 - visible drift alerts while the runtime is live
 - a way to review what changed later from the terminal
+
+The next practical extension should be thin wrapped-action adapters, not universal tracing. That keeps the product honest while still letting it record real side-effecting events.
 
 ## Core user story
 

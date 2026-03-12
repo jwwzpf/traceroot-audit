@@ -62,6 +62,8 @@ function categoryLabel(event: AuditEvent): string {
       return "Boundary drift";
     case "surface-change":
       return "Surface changed";
+    case "action-event":
+      return "Agent action";
     default:
       return event.category;
   }
@@ -87,6 +89,10 @@ function renderEvent(event: AuditEvent): string[] {
 
   if (event.target) {
     lines.push(`   📍 Target: ${event.target}`);
+  }
+
+  if (event.action) {
+    lines.push(`   🧩 Action: ${event.action}`);
   }
 
   if (event.recommendation) {

@@ -16,6 +16,7 @@ import { registerInitCommand } from "./commands/init";
 import { registerLogsCommand } from "./commands/logs";
 import { registerRulesCommand } from "./commands/rules";
 import { registerScanCommand } from "./commands/scan";
+import { registerTapCommand } from "./commands/tap";
 
 export interface CliIO {
   stdout: (text: string) => void;
@@ -144,6 +145,7 @@ function createDefaultPrompter(): CliPrompter {
 
 export function createProgram(runtime: CliRuntime): Command {
   const program = new Command();
+  program.enablePositionalOptions();
   program.configureOutput({
     writeOut: (text) => runtime.io.stdout(text),
     writeErr: (text) => runtime.io.stderr(text)
@@ -166,6 +168,7 @@ export function createProgram(runtime: CliRuntime): Command {
   registerLogsCommand(program, runtime);
   registerRulesCommand(program, runtime);
   registerExplainCommand(program, runtime);
+  registerTapCommand(program, runtime);
 
   return program;
 }

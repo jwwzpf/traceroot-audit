@@ -59,6 +59,12 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit logs
 ```
 
+And the first action-level event adapter is now available for local skills and scripts:
+
+```bash
+npx traceroot-audit tap --action send-email --severity high-risk -- node send-email.js
+```
+
 If you want the lower-level commands, they still exist:
 
 Inspect what this directory looks like before you scan it:
@@ -109,6 +115,12 @@ Review the local runtime audit timeline:
 node dist/cli/index.js logs
 node dist/cli/index.js logs --today
 node dist/cli/index.js logs --tail
+```
+
+Wrap a real high-risk action so TraceRoot records it before and after execution:
+
+```bash
+node dist/cli/index.js tap --action send-email --severity high-risk -- node send-email.js
 ```
 
 Record current findings as a baseline:

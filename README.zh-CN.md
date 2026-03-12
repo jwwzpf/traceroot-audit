@@ -59,6 +59,12 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit logs
 ```
 
+第一条动作级事件接入也已经能用了，适合包裹本地 skill / script：
+
+```bash
+npx traceroot-audit tap --action send-email --severity high-risk -- node send-email.js
+```
+
 如果你想使用更底层的命令，它们仍然都在：
 
 先判断当前目录更像哪种扫描对象：
@@ -109,6 +115,12 @@ node dist/cli/index.js guard --host --interval 60
 node dist/cli/index.js logs
 node dist/cli/index.js logs --today
 node dist/cli/index.js logs --tail
+```
+
+包裹一个真实高风险动作，让 TraceRoot 在执行前后都写入审计事件：
+
+```bash
+node dist/cli/index.js tap --action send-email --severity high-risk -- node send-email.js
 ```
 
 把当前问题记录成 baseline：
