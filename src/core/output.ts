@@ -415,6 +415,12 @@ export function renderDiscoveryJsonOutput(result: DiscoveryResult): string {
 }
 
 export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): string {
+  const bestFirstCandidates = result.candidates.filter(
+    (candidate) => candidate.tier === "best-first"
+  );
+  const possibleCandidates = result.candidates.filter(
+    (candidate) => candidate.tier === "possible"
+  );
   const lines = [
     "TraceRoot Audit Host Discovery",
     "==============================",
@@ -445,12 +451,30 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
 
   lines.push("");
 
-  for (const [index, candidate] of result.candidates.entries()) {
+  if (bestFirstCandidates.length > 0) {
     lines.push(
-      `${index + 1}. ${formatSurface(candidate)}`,
+      "🎯 Best first checks:",
+      "These look the most like OpenClaw, MCP, skill, or runtime surfaces that deserve an immediate scan.",
+      ""
+    );
+  } else {
+    lines.push(
+      "🧭 Possible surfaces:",
+      "We did not find strong OpenClaw-specific paths, so these are the most likely machine-level candidates.",
+      ""
+    );
+  }
+
+  const primaryList =
+    bestFirstCandidates.length > 0 ? bestFirstCandidates : result.candidates.slice(0, 5);
+
+  for (const [index, candidate] of primaryList.entries()) {
+    lines.push(
+      `${index + 1}. ${candidate.categoryLabel} (${candidate.surface.confidence} confidence)`,
       `   📍 Path: ${candidate.displayPath}`,
       `   📦 Scannable files: ${candidate.filesDiscovered}`,
-      `   🧠 Why: ${candidate.surface.reasons[0] ?? "best-effort host discovery guess"}`
+      `   🧠 Why: ${candidate.surface.reasons[0] ?? "best-effort host discovery guess"}`,
+      `   ✨ Why it matters: ${candidate.attention}`
     );
 
     if (candidate.strongSignals.length > 0) {
@@ -460,9 +484,31 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
     lines.push("");
   }
 
+  if (bestFirstCandidates.length > 0 && possibleCandidates.length > 0) {
+    lines.push(
+      "🧪 Other possible surfaces:",
+      "These may still be worth scanning, but they look less specific than the best-first checks above.",
+      ""
+    );
+
+    for (const [index, candidate] of possibleCandidates.slice(0, 3).entries()) {
+      lines.push(
+        `${index + 1}. ${candidate.categoryLabel} (${candidate.surface.confidence} confidence)`,
+        `   📍 Path: ${candidate.displayPath}`,
+        `   ✨ Why it matters: ${candidate.attention}`
+      );
+
+      if (candidate.strongSignals.length > 0) {
+        lines.push(`   🔎 Signals: ${candidate.strongSignals.join(", ")}`);
+      }
+
+      lines.push("");
+    }
+  }
+
   lines.push("🚀 Try next:");
 
-  for (const candidate of result.candidates.slice(0, 3)) {
+  for (const candidate of primaryList.slice(0, 3)) {
     lines.push(`- ${hostScanCommandPath(candidate.absolutePath)}`);
   }
 
@@ -488,7 +534,11 @@ export function renderHostDiscoveryJsonOutput(result: HostDiscoveryResult): stri
         },
         filesDiscovered: candidate.filesDiscovered,
         manifestPath: candidate.manifestPath,
-        strongSignals: candidate.strongSignals
+        strongSignals: candidate.strongSignals,
+        score: candidate.score,
+        tier: candidate.tier,
+        categoryLabel: candidate.categoryLabel,
+        attention: candidate.attention
       }))
     },
     null,

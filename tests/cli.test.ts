@@ -240,7 +240,9 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Host Discovery");
       expect(capture.read().stdout).toContain("Likely agent action surfaces found: 2");
+      expect(capture.read().stdout).toContain("Best first checks");
       expect(capture.read().stdout).toContain("Current directory excluded");
+      expect(capture.read().stdout).toContain("OpenClaw runtime");
       expect(capture.read().stdout).toContain("~/.openclaw");
       expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
     } finally {
@@ -281,6 +283,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("Current directory included");
       expect(capture.read().stdout).toContain("~/scratch/openclaw-runtime");
+      expect(capture.read().stdout).toContain("Possible surfaces");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {

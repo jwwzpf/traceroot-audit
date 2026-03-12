@@ -52,6 +52,10 @@ export interface HostDiscoveryCandidate {
   filesDiscovered: number;
   manifestPath: string | null;
   strongSignals: string[];
+  score: number;
+  tier: "best-first" | "possible";
+  categoryLabel: string;
+  attention: string;
 }
 
 export interface HostDiscoveryResult {
@@ -121,6 +125,10 @@ const actionKeywordPattern = /(openclaw|claw|agent|skill|tool|plugin|mcp|runtime
 const manifestFilePattern = /^traceroot\.manifest\.(json|ya?ml)$/i;
 const dockerComposeFilePattern = /^docker-compose[^/]*\.ya?ml$/i;
 const envFilePattern = /^\.env(?:\..+)?$/i;
+const openClawPathPattern = /(^|\/)(?:\.openclaw|openclaw|claw)(\/|$)/i;
+const mcpPathPattern = /(^|\/)(?:\.mcp|mcp(?:-servers?)?)(\/|$)|\.mcp\.(json|ya?ml)$/i;
+const skillPathLikePattern = /(^|\/)(?:skills?|tools?|plugins?)(\/|$)/i;
+const genericAppPathPattern = /(^|\/)(?:frontend|backend|mobile|apps?|web)(\/|$)/i;
 
 function hostSearchRoots(
   homeDir: string,
@@ -251,6 +259,109 @@ function summarizeStrongSignals(discovery: DiscoveryResult): string[] {
       )
       .slice(0, 3)
   ].slice(0, 5);
+}
+
+function candidateMetadata(
+  discovery: DiscoveryResult,
+  candidatePath: string
+): Pick<HostDiscoveryCandidate, "score" | "tier" | "categoryLabel" | "attention"> {
+  const normalizedCandidatePath = candidatePath.replace(/\\/g, "/");
+  const normalizedSignals = [
+    ...discovery.manifestFiles,
+    ...discovery.envFiles,
+    ...discovery.runtimeConfigFiles,
+    ...discovery.scriptFiles
+  ].map((value) => value.replace(/\\/g, "/"));
+
+  const hasManifest = discovery.manifestFiles.length > 0;
+  const hasDockerCompose = discovery.runtimeConfigFiles.some((relativePath) =>
+    dockerComposeFilePattern.test(path.basename(relativePath))
+  );
+  const hasEnv = discovery.envFiles.length > 0;
+  const hasOpenClawMarker =
+    openClawPathPattern.test(normalizedCandidatePath) ||
+    normalizedSignals.some((value) => openClawPathPattern.test(value));
+  const hasMcpMarker =
+    mcpPathPattern.test(normalizedCandidatePath) ||
+    normalizedSignals.some((value) => mcpPathPattern.test(value));
+  const hasSkillMarker =
+    skillPathLikePattern.test(normalizedCandidatePath) ||
+    normalizedSignals.some((value) => skillPathLikePattern.test(value));
+  const hasActionMarker =
+    pathHasActionSegment(candidatePath) ||
+    normalizedSignals.some((value) => actionKeywordPattern.test(value));
+  const looksGenericApp =
+    genericAppPathPattern.test(normalizedCandidatePath) &&
+    !hasOpenClawMarker &&
+    !hasMcpMarker &&
+    !hasSkillMarker &&
+    !hasManifest;
+
+  let score = 0;
+
+  if (hasOpenClawMarker) {
+    score += 24;
+  }
+
+  if (hasMcpMarker) {
+    score += 20;
+  }
+
+  if (hasManifest) {
+    score += 18;
+  }
+
+  if (hasSkillMarker) {
+    score += 14;
+  }
+
+  if (hasDockerCompose) {
+    score += 12;
+  }
+
+  if (hasEnv) {
+    score += 6;
+  }
+
+  if (hasActionMarker) {
+    score += 6;
+  }
+
+  if (discovery.surface.confidence === "high") {
+    score += 4;
+  } else if (discovery.surface.confidence === "medium") {
+    score += 2;
+  }
+
+  if (looksGenericApp) {
+    score -= 8;
+  }
+
+  let categoryLabel = "possible agent-capable project";
+  let attention = "worth checking if this project actually drives AI actions on your machine";
+
+  if (hasOpenClawMarker && hasDockerCompose) {
+    categoryLabel = "OpenClaw runtime";
+    attention = "worth checking first: runtime wiring and exposure signals were found";
+  } else if (hasManifest || hasSkillMarker) {
+    categoryLabel = "skill / tool package";
+    attention = "worth checking first: explicit reusable agent actions were detected";
+  } else if (hasMcpMarker) {
+    categoryLabel = "MCP / tool server";
+    attention = "worth checking first: MCP or tool-server wiring was detected";
+  } else if (hasDockerCompose || hasEnv) {
+    categoryLabel = "runtime config";
+    attention = "worth checking if this runtime is broader or more exposed than you intended";
+  }
+
+  const tier = score >= 24 ? "best-first" : "possible";
+
+  return {
+    score,
+    tier,
+    categoryLabel,
+    attention
+  };
 }
 
 function pathHasActionSegment(absolutePath: string): boolean {
@@ -392,17 +503,50 @@ export async function discoverHost(
         continue;
       }
 
+      const metadata = candidateMetadata(discovery, candidate.absolutePath);
+
       discoveredCandidates.push({
         absolutePath: candidate.absolutePath,
         displayPath: displayPathForHuman(candidate.absolutePath, homeDir),
         surface: discovery.surface,
         filesDiscovered: discovery.filesDiscovered,
         manifestPath: discovery.manifestPath,
-        strongSignals
+        strongSignals,
+        score: metadata.score,
+        tier: metadata.tier,
+        categoryLabel: metadata.categoryLabel,
+        attention: metadata.attention
       });
     } catch {
       continue;
     }
+  }
+
+  discoveredCandidates.sort((left, right) => {
+    if (left.tier !== right.tier) {
+      return left.tier === "best-first" ? -1 : 1;
+    }
+
+    const scoreDelta = right.score - left.score;
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+
+    return left.absolutePath.localeCompare(right.absolutePath);
+  });
+
+  const dedupedCandidates = [];
+
+  for (const candidate of discoveredCandidates) {
+    const hasKeptAncestor = dedupedCandidates.some((keptCandidate) =>
+      isSameOrDescendant(candidate.absolutePath, keptCandidate.absolutePath)
+    );
+
+    if (hasKeptAncestor) {
+      continue;
+    }
+
+    dedupedCandidates.push(candidate);
   }
 
   return {
@@ -411,7 +555,7 @@ export async function discoverHost(
     cwd,
     includeCwd,
     searchedRoots: searchableRoots.map((rootSpec) => displayPathForHuman(rootSpec.absolutePath, homeDir)),
-    candidates: discoveredCandidates
+    candidates: dedupedCandidates.slice(0, 8)
   };
 }
 
