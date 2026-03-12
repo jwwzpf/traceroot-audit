@@ -247,28 +247,28 @@ function recommendationActions(
   const actions: string[] = [];
 
   if (extraCapabilities.length > 0) {
-    actions.push(`remove or disable unnecessary capabilities: ${extraCapabilities.join(", ")}`);
+    actions.push(`把这些当前工作流其实用不到的能力先收掉：${extraCapabilities.join(", ")}`);
   }
 
   if (selections.exposureMode === "localhost-only") {
-    actions.push("bind the runtime to localhost only and avoid LAN/public exposure");
+    actions.push("尽量把 runtime 只留在本机，不要再暴露给局域网或外部。");
   }
 
   if (selections.outboundApproval !== "allow-autonomous") {
-    actions.push("require explicit approval before outbound side-effecting actions");
+    actions.push("发消息、发帖、下单这类外发动作，先要求人工确认。");
   }
 
   if (selections.filesystemScope === "workspace-only") {
-    actions.push("restrict filesystem writes to the intended workspace only");
+    actions.push("把文件写入范围收回到当前工作目录，不要放大到整台机器。");
   }
 
   if (selections.filesystemScope === "no-write") {
-    actions.push("disable local filesystem write access for this workflow");
+    actions.push("当前这类工作流不需要写文件时，就把本地写入能力关掉。");
   }
 
   const reviewSecrets = secretExposure.filter((entry) => entry.action === "review");
   if (reviewSecrets.length > 0) {
-    actions.push(`move ${reviewSecrets.length} unrelated secrets out of the runtime env`);
+    actions.push(`把这 ${reviewSecrets.length} 个和当前工作流无关的 secrets 挪出 runtime 环境变量。`);
   }
 
   return actions.slice(0, 5);
@@ -276,32 +276,32 @@ function recommendationActions(
 
 function approvalPolicyLabel(mode: OutboundApprovalMode): string {
   if (mode === "always-confirm") {
-    return "always confirm before sending or posting";
+    return "所有外发动作都先确认";
   }
 
   if (mode === "confirm-high-risk") {
-    return "confirm high-risk outbound actions";
+    return "只在高风险外发动作前确认";
   }
 
-  return "allow autonomous outbound actions";
+  return "允许自主执行外发动作";
 }
 
 function fileScopeLabel(scope: FilesystemScope): string {
   if (scope === "no-write") {
-    return "no local file writes";
+    return "不允许本地写文件";
   }
 
   if (scope === "workspace-only") {
-    return "workspace-only file writes";
+    return "只允许写当前工作目录";
   }
 
-  return "broad file writes allowed";
+  return "允许更宽的本地写入范围";
 }
 
 function exposureLabel(mode: ExposureMode): string {
   return mode === "localhost-only"
-    ? "localhost only; no network exposure"
-    : "LAN access allowed";
+    ? "只留在本机，不暴露给网络"
+    : "允许局域网访问";
 }
 
 function buildRecommendedManifest(

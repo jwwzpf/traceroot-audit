@@ -61,7 +61,7 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
 
       if (bundle.tapPlanPath && bundle.tapWrapperDir) {
         lines.push(`- 🎬 动作审计说明：${bundle.tapPlanPath}`);
-        lines.push(`- 🧷 TraceRoot 已经帮你准备好的接入文件：${bundle.tapWrapperDir}`);
+        lines.push(`- 🧷 TraceRoot 准备好的审计接入文件：${bundle.tapWrapperDir}`);
       }
 
       lines.push("", "🚀 你现在最值得先做的事：");
@@ -81,9 +81,28 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
       }
 
       if (bundle.tapPlanPath && bundle.tapWrappers.length > 0) {
-        lines.push(
-          `- 如果你平时会运行发邮件、发帖、下单这类高风险动作，请打开 ${bundle.tapPlanPath}，照着里面“原来怎么启动 → 现在改成什么”那一栏替换掉。TraceRoot 已经帮你准备好了 ${bundle.tapWrappers.length} 个接入文件。`
-        );
+        if (bundle.tapInstalledCommands.length > 0) {
+          lines.push(
+            `- 动作审计这一步，TraceRoot 已经先帮你接好了 ${bundle.tapInstalledCommands.length} 个常见启动命令。以后你还是照常运行 ${bundle.tapInstalledCommands
+              .filter((command) => command.kind === "npm-script")
+              .map((command) => `npm run ${command.name}`)
+              .join("、")} 就行。`
+          );
+
+          if (bundle.tapInstallBackupPath) {
+            lines.push(
+              `- 我们也帮你把原来的 package.json 备份好了：${bundle.tapInstallBackupPath}`
+            );
+          }
+
+          lines.push(
+            `- 如果你想看看 TraceRoot 是怎么帮你接上的，可以打开 ${bundle.tapPlanPath}。`
+          );
+        } else {
+          lines.push(
+            `- 如果你平时会运行发邮件、发帖、下单这类高风险动作，请打开 ${bundle.tapPlanPath}。TraceRoot 已经帮你准备好了 ${bundle.tapWrappers.length} 个接入文件；能自动接的常见启动命令，我们之后也会继续替你自动接上。`
+          );
+        }
       }
 
       lines.push(

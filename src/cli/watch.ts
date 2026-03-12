@@ -92,7 +92,7 @@ function summarizeBoundaryViolations(status: BoundaryStatus): string {
     .map((violation) => violation.title)
     .join("; ");
 
-  return `Current setup is still broader than the approved boundary (${status.violations.length} issues): ${preview}.`;
+  return `当前配置仍然比你批准的边界更宽（${status.violations.length} 个点）：${preview}。`;
 }
 
 function severityForHostCandidate(
@@ -122,20 +122,20 @@ function renderWorkflowSummary(profilePath: string, selectedIntentIds: string[])
     .join(", ");
 
   return [
-    `🛡️ Approved boundary: ${profilePath}`,
-    `🧩 Approved workflows: ${workflows || "none recorded"}`
+    `🛡️ 已批准边界：${profilePath}`,
+    `🧩 已批准工作流：${workflows || "暂时没有记录"}`
   ];
 }
 
 function renderBoundaryStatus(status: BoundaryStatus): string[] {
   if (status.aligned) {
     return [
-      "✅ Current setup matches the approved boundary.",
-      "💓 Guard will watch for any future drift beyond it."
+      "✅ 当前配置已经和你批准的边界对齐了。",
+      "💓 TraceRoot 会继续盯着，后面只要再变宽就会提醒你。"
     ];
   }
 
-  const lines = ["🚧 Current setup is still broader than the approved boundary."];
+  const lines = ["🚧 当前配置仍然比你批准的边界更宽。"];
 
   for (const violation of status.violations.slice(0, 4)) {
     const icon =
@@ -151,7 +151,7 @@ function renderBoundaryStatus(status: BoundaryStatus): string[] {
     ...new Set(status.violations.map((violation) => violation.recommendation))
   ];
   if (recommendations.length > 0) {
-    lines.push("", "🔧 Best next fixes:");
+    lines.push("", "🔧 最值得先修的地方：");
 
     for (const recommendation of recommendations.slice(0, 3)) {
       lines.push(`- ${recommendation}`);
@@ -457,16 +457,16 @@ export async function runTargetWatch(options: {
     if (hardeningProfileResult.profilePath) {
       initialLines.push(
         hardeningProfileResult.profile
-          ? `🛡️ Approved boundary loaded: ${hardeningProfileResult.profilePath}`
-          : `⚠️ Saved boundary could not be loaded cleanly: ${hardeningProfileResult.error ?? "unknown error"}`
+          ? `🛡️ 已加载批准边界：${hardeningProfileResult.profilePath}`
+          : `⚠️ 之前保存的边界没能顺利读出来：${hardeningProfileResult.error ?? "unknown error"}`
       );
     }
 
     initialLines.push(
-      "💓 Doctor Watch is now keeping an eye on:",
-      "- risk score increases",
-      "- new findings appearing",
-      "- boundary drift beyond what you approved",
+      "💓 Doctor Watch 现在会继续盯着：",
+      "- 风险分突然升高",
+      "- 新风险突然出现",
+      "- 当前配置又比你批准的边界更宽",
       ""
     );
   } else {
@@ -474,8 +474,8 @@ export async function runTargetWatch(options: {
       `🎯 Target: ${target}`,
       `⏱️ Interval: every ${intervalSeconds}s`,
       `🗂 Audit log: ${auditPaths.eventsPath}`,
-      `📊 Initial risk score: ${initialScan.riskScore.toFixed(1)}/10`,
-      `📈 Initial findings: ${initialScan.summary.total} (${initialScan.summary.critical} critical, ${initialScan.summary.high} high, ${initialScan.summary.medium} medium)`
+      `📊 初始风险分：${initialScan.riskScore.toFixed(1)}/10`,
+      `📈 初始发现：${initialScan.summary.total}（critical ${initialScan.summary.critical} / high ${initialScan.summary.high} / medium ${initialScan.summary.medium}）`
     );
 
     if (hardeningProfileResult.profilePath) {
@@ -487,8 +487,8 @@ export async function runTargetWatch(options: {
               hardeningProfileResult.profile.selectedIntents.map((intent) => intent.id)
             )
           : [
-              `🛡️ Approved boundary: ${hardeningProfileResult.profilePath}`,
-              `⚠️ Saved boundary could not be loaded cleanly: ${hardeningProfileResult.error ?? "unknown error"}`
+              `🛡️ 已批准边界：${hardeningProfileResult.profilePath}`,
+              `⚠️ 之前保存的边界没能顺利读出来：${hardeningProfileResult.error ?? "unknown error"}`
             ])
       );
 
@@ -499,14 +499,14 @@ export async function runTargetWatch(options: {
 
     initialLines.push(
       "",
-      "💓 Guard is watching for:",
-      "- risk score increases",
-      "- new findings appearing",
-      "- findings disappearing after fixes"
+      "💓 TraceRoot Guard 现在会继续盯着：",
+      "- 风险分突然升高",
+      "- 新风险突然出现",
+      "- 修复后哪些风险消失了"
     );
 
     if (hardeningProfileResult.profile) {
-      initialLines.push("- power drifting beyond your approved boundary");
+      initialLines.push("- 当前配置有没有重新超出你批准的边界");
     }
 
     initialLines.push("");
@@ -604,8 +604,8 @@ export async function runTargetWatch(options: {
     if (!diff.changed && !boundaryDiff?.changed) {
       const heartbeat =
         currentBoundaryStatus?.aligned === false
-          ? `💓 ${timestamp()} No new risk or boundary changes. Current setup is still broader than the approved boundary (${currentBoundaryStatus.violations.length} issues). Score still ${latestScan.riskScore.toFixed(1)}/10.\n`
-          : `💓 ${timestamp()} No risk or boundary changes detected. Score still ${latestScan.riskScore.toFixed(1)}/10.\n`;
+          ? `💓 ${timestamp()} 这轮没有新的风险变化，不过当前配置仍然比你批准的边界更宽（${currentBoundaryStatus.violations.length} 个点）。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`
+          : `💓 ${timestamp()} 这轮没有发现新的风险或边界变化。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`;
 
       runtime.io.stdout(heartbeat);
       previousSnapshot = currentSnapshot;

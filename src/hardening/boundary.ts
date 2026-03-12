@@ -54,9 +54,9 @@ export function evaluateBoundaryStatus(
     violations.push({
       code: "unexpected-capabilities",
       severity,
-      title: "More power than approved",
-      message: `This runtime currently exposes capabilities beyond the profile you approved: ${formatCapabilityList(unexpectedCapabilities)}.`,
-      recommendation: `Remove or disable these capabilities unless this workflow truly needs them: ${formatCapabilityList(unexpectedCapabilities)}.`,
+      title: "当前权限比你批准的更宽",
+      message: `这个 runtime 现在仍然带着你刚才没有批准的能力：${formatCapabilityList(unexpectedCapabilities)}。`,
+      recommendation: `如果当前工作流根本不需要这些能力，就把它们关掉或移出：${formatCapabilityList(unexpectedCapabilities)}。`,
       fingerprint: `unexpected-capabilities:${formatCapabilityList(unexpectedCapabilities)}`
     });
   }
@@ -68,11 +68,11 @@ export function evaluateBoundaryStatus(
     violations.push({
       code: "public-exposure",
       severity: "critical",
-      title: "Public or network exposure is still possible",
+      title: "这个 runtime 现在仍然可能被别的机器访问",
       message:
-        "The approved profile expects a localhost-only runtime, but the current target still looks reachable from other machines.",
+        "你批准的是“只在本机运行”，但当前配置看起来仍然能从局域网或其他机器打进来。",
       recommendation:
-        "Bind the runtime to localhost only and remove unnecessary published ports or public interfaces.",
+        "把 runtime 收回到 localhost，并移除不必要的对外端口或公开接口。",
       fingerprint: "public-exposure"
     });
   }
@@ -83,11 +83,11 @@ export function evaluateBoundaryStatus(
     violations.push({
       code: "missing-confirmation",
       severity: "high",
-      title: "Approval guard is not being enforced",
+      title: "高风险动作还没有真正卡住确认步骤",
       message:
-        "The approved profile requires explicit confirmation for side-effecting actions, but the active manifest does not currently enforce that guard.",
+        "你批准的边界要求外发或副作用动作先确认，但当前 manifest 还没有把这个保护真正打开。",
       recommendation:
-        "Apply the hardened manifest or set `confirmation_required: true` in the active runtime manifest.",
+        "应用 TraceRoot 生成的 hardened manifest，或者在当前 manifest 里把 `confirmation_required` 打开。",
       fingerprint: "missing-confirmation"
     });
   }
@@ -98,13 +98,13 @@ export function evaluateBoundaryStatus(
     violations.push({
       code: "secret-exposure",
       severity: unexpectedSecrets.length >= 3 ? "high" : "medium",
-      title: "Unrelated secrets are still visible",
+      title: "还有一些和当前工作流无关的 secrets 仍然暴露着",
       message:
         unexpectedSecrets.length === 1
-          ? `This runtime still exposes a secret outside the workflows you approved: ${preview}.`
-          : `This runtime still exposes ${unexpectedSecrets.length} secrets outside the workflows you approved: ${preview}${unexpectedSecrets.length > 4 ? ", ..." : ""}.`,
+          ? `当前 runtime 仍然能看到一个和你刚批准的工作流无关的 secret：${preview}。`
+          : `当前 runtime 仍然能看到 ${unexpectedSecrets.length} 个和你刚批准的工作流无关的 secrets：${preview}${unexpectedSecrets.length > 4 ? ", ..." : ""}。`,
       recommendation:
-        "Move unrelated secrets out of the agent runtime env and keep only the credentials required for the approved workflows.",
+        "把和当前工作流无关的 secrets 挪出 runtime 环境变量，只留下真正需要的那几项。",
       fingerprint: `secret-exposure:${unexpectedSecrets.join(",")}`
     });
   }

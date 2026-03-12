@@ -77,23 +77,23 @@ function renderProfileJson(plan: HardeningPlan) {
 
 function renderHardeningMarkdown(plan: HardeningPlan): string {
   const lines = [
-    "# TraceRoot Audit Hardening Plan",
+    "# TraceRoot 收紧计划",
     "",
     `- **Target:** \`${plan.target}\``,
     `- **Surface:** \`${plan.surfaceLabel}\``,
-    `- **Selected workflows:** ${plan.selectedProfiles
+    `- **你选中的工作流：** ${plan.selectedProfiles
       .map((profile) => `${profile.icon} ${profile.title}`)
       .join(", ")}`,
-    `- **Approval policy:** ${plan.approvalPolicy}`,
-    `- **File write policy:** ${plan.fileWritePolicy}`,
-    `- **Exposure policy:** ${plan.exposurePolicy}`,
+    `- **审批方式：** ${plan.approvalPolicy}`,
+    `- **文件写入范围：** ${plan.fileWritePolicy}`,
+    `- **网络暴露范围：** ${plan.exposurePolicy}`,
     "",
-    "## Immediate actions",
+    "## 最值得先收紧的地方",
     ""
   ];
 
   if (plan.immediateActions.length === 0) {
-    lines.push("- No immediate reductions were suggested.");
+    lines.push("- 暂时没有明显需要立刻收紧的地方。");
   } else {
     for (const action of plan.immediateActions) {
       lines.push(`- ${action}`);
@@ -102,38 +102,38 @@ function renderHardeningMarkdown(plan: HardeningPlan): string {
 
   lines.push(
     "",
-    "## Capability comparison",
+    "## 权限对比",
     "",
-    `- **Current:** ${plan.currentCapabilities.length > 0 ? plan.currentCapabilities.join(", ") : "none detected"}`,
-    `- **Recommended:** ${plan.recommendedCapabilities.join(", ")}`,
-    `- **Extra to remove or review:** ${plan.extraCapabilities.length > 0 ? plan.extraCapabilities.join(", ") : "none"}`,
-    `- **Missing but expected for this workflow:** ${plan.missingCapabilities.length > 0 ? plan.missingCapabilities.join(", ") : "none"}`,
+    `- **现在：** ${plan.currentCapabilities.length > 0 ? plan.currentCapabilities.join(", ") : "没有明显权限信号"}`,
+    `- **建议最小范围：** ${plan.recommendedCapabilities.join(", ")}`,
+    `- **还可以继续收掉的：** ${plan.extraCapabilities.length > 0 ? plan.extraCapabilities.join(", ") : "没有"}`,
+    `- **这次工作流理论上还需要，但当前没看到的：** ${plan.missingCapabilities.length > 0 ? plan.missingCapabilities.join(", ") : "没有"}`,
     "",
-    "## Secret review",
+    "## Secret 检查",
     ""
   );
 
   if (plan.secretExposure.length === 0) {
-    lines.push("- No environment secrets were detected in the scanned files.");
+    lines.push("- 扫描到的文件里暂时没有发现环境变量 secrets。");
   } else {
     for (const exposure of plan.secretExposure) {
       lines.push(
-        `- \`${exposure.variable}\` → ${exposure.group} (${exposure.action === "keep" ? "keep" : "review or move out"})`
+        `- \`${exposure.variable}\` → ${exposure.group}（${exposure.action === "keep" ? "可以保留" : "建议 review 或移出"}）`
       );
     }
   }
 
-  lines.push("", "## Top findings", "");
+  lines.push("", "## 当前最重要的风险", "");
 
   if (plan.topFindings.length === 0) {
-    lines.push("- No existing findings were detected.");
+    lines.push("- 当前没有明显风险。");
   } else {
     for (const finding of plan.topFindings) {
       lines.push(`- [${finding.severity.toUpperCase()}] ${finding.ruleId} ${finding.title}: ${finding.message}`);
     }
   }
 
-  lines.push("", "## Recommended manifest", "", "```json", JSON.stringify(plan.recommendedManifest, null, 2), "```", "");
+  lines.push("", "## TraceRoot 建议的 manifest", "", "```json", JSON.stringify(plan.recommendedManifest, null, 2), "```", "");
 
   return `${lines.join("\n")}\n`;
 }

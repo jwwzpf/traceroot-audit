@@ -130,17 +130,16 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot Audit Doctor");
-      expect(output).toContain("Boundary shrink preview");
-      expect(output).toContain("Today: email, filesystem, network");
-      expect(output).toContain("Approved: email, network");
-      expect(output).toContain("TraceRoot is preparing a smaller approved boundary");
-      expect(output).toContain("We already prepared a safer bundle for you");
-      expect(output).toContain("TraceRoot already prepared 3 of 4 needed fixes");
-      expect(output).toContain("TraceRoot already prepared fixes for you");
-      expect(output).toContain("If you apply the bundle, TraceRoot will already help you");
-      expect(output).toContain("Still needs your decision");
-      expect(output).toContain("Apply right now");
-      expect(output).toContain("Your live setup is still broader than the boundary you just approved");
+      expect(output).toContain("权限收缩预览");
+      expect(output).toContain("现在：email, filesystem, network");
+      expect(output).toContain("收紧后：email, network");
+      expect(output).toContain("TraceRoot 正在帮你收紧边界");
+      expect(output).toContain("TraceRoot 已经先帮你准备好了这些内容");
+      expect(output).toContain("TraceRoot 已经先帮你准备好了这些修复");
+      expect(output).toContain("你把这套 bundle 应用进去后");
+      expect(output).toContain("下面这些还需要你拍板");
+      expect(output).toContain("现在就可以这样做");
+      expect(output).toContain("你当前的 live 配置仍然比你刚批准的边界更宽");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
       expect(output).toContain("traceroot.tap.plan.md");
@@ -190,7 +189,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("Doctor is staying with you and will keep watching this boundary now");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
-      expect(output).toContain("Doctor Watch is now keeping an eye on");
+      expect(output).toContain("Doctor Watch 现在会继续盯着");
       expect(output).toContain("Audit log:");
       expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
@@ -268,7 +267,7 @@ describe("CLI", () => {
       expect(logsOutput).toContain("Target filter");
       expect(logsOutput).toContain("Boundary drift");
       expect(logsOutput).toContain("Watch started");
-      expect(logsOutput).toContain("Current setup is still broader than the approved boundary");
+      expect(logsOutput).toContain("当前配置仍然比你批准的边界更宽");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -723,12 +722,12 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Hardening");
-      expect(capture.read().stdout).toContain("🧩 Selected workflows: 📧 邮件整理与回复, 💬 客服 / 聊天支持 / 消息代发");
-      expect(capture.read().stdout).toContain("🔐 Secret review:");
+      expect(capture.read().stdout).toContain("🧩 你选中的工作流：📧 邮件整理与回复, 💬 客服 / 聊天支持 / 消息代发");
+      expect(capture.read().stdout).toContain("🔐 Secret 检查：");
       expect(capture.read().stdout).toContain("traceroot-audit apply");
       expect(manifestSuggestion.capabilities).toEqual(["email", "network"]);
       expect(profile.extraCapabilities).toContain("filesystem");
-      expect(report).toContain("TraceRoot Audit Hardening Plan");
+      expect(report).toContain("TraceRoot 收紧计划");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -754,8 +753,8 @@ describe("CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(output).toContain("TraceRoot Audit Guard");
-    expect(output).toContain("Initial risk score");
-    expect(output).toContain("No risk or boundary changes detected");
+    expect(output).toContain("初始风险分");
+    expect(output).toContain("这轮没有发现新的风险或边界变化");
   });
 
   it("loads an approved boundary during guard and shows when the setup is still broader", async () => {
@@ -805,12 +804,12 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
-      expect(output).toContain("Approved boundary");
-      expect(output).toContain("Initial findings: 3");
-      expect(output).toContain("Current setup is still broader than the approved boundary");
-      expect(output).toContain("Best next fixes");
-      expect(output).toContain("More power than approved");
-      expect(output).toContain("Public or network exposure is still possible");
+      expect(output).toContain("已批准边界");
+      expect(output).toContain("初始发现：3");
+      expect(output).toContain("当前配置仍然比你批准的边界更宽");
+      expect(output).toContain("最值得先修的地方");
+      expect(output).toContain("当前权限比你批准的更宽");
+      expect(output).toContain("这个 runtime 现在仍然可能被别的机器访问");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -892,16 +891,27 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
       expect(capture.read().stdout).toContain("更安全的 compose 覆盖文件");
       expect(capture.read().stdout).toContain("动作审计说明");
+      expect(capture.read().stdout).toContain("以后你还是照常运行 npm run send-email 就行");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
-      expect(applyPlan).toContain("TraceRoot Audit Apply Plan");
+      expect(applyPlan).toContain("TraceRoot 应用说明");
       expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
       expect(applyPlan).toContain("traceroot.tap.plan.md");
       expect(tapPlan).toContain("TraceRoot 动作审计说明");
       expect(tapPlan).toContain("send-email");
       expect(tapPlan).toContain("npm run send-email");
-      expect(tapPlan).toContain("scripts.send-email");
+      expect(tapPlan).toContain("TraceRoot 已经帮你接好了");
+      expect(tapPlan).toContain("你不用手动改任何东西了");
+      const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
+      expect(packageJson).toContain(".traceroot/tap/");
+      expect(packageJson).toContain("\"send-email\"");
+      await expect(
+        readFile(
+          path.join(tempDir, ".traceroot", "backups", "package.json.before-action-audit.json"),
+          "utf8"
+        )
+      ).resolves.toContain("\"send-email\": \"tsx mailer.ts\"");
       expect(wrapperEntries.length).toBeGreaterThan(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });

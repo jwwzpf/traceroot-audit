@@ -558,20 +558,20 @@ export function renderHardeningHumanOutput(plan: HardeningPlan): string {
     "",
     `🎯 Target: ${plan.target}`,
     `🧭 Surface: ${plan.surfaceLabel}`,
-    `🧩 Selected workflows: ${plan.selectedProfiles
+    `🧩 你选中的工作流：${plan.selectedProfiles
       .map((profile) => `${profile.icon} ${profile.title}`)
       .join(", ")}`,
     "",
-    "✨ What you asked TraceRoot to do:",
-    `- Approval mode: ${plan.approvalPolicy}`,
-    `- File policy: ${plan.fileWritePolicy}`,
-    `- Exposure policy: ${plan.exposurePolicy}`,
+    "✨ 你刚才让 TraceRoot 帮你守住的是：",
+    `- 审批方式：${plan.approvalPolicy}`,
+    `- 文件写入范围：${plan.fileWritePolicy}`,
+    `- 网络暴露范围：${plan.exposurePolicy}`,
     "",
-    "🧯 Immediate hardening actions:"
+    "🧯 最值得先收紧的地方："
   ];
 
   if (plan.immediateActions.length === 0) {
-    lines.push("- No immediate reductions were suggested.");
+    lines.push("- 暂时没有明显需要立刻收紧的地方。");
   } else {
     for (const action of plan.immediateActions) {
       lines.push(`- ${action}`);
@@ -580,11 +580,11 @@ export function renderHardeningHumanOutput(plan: HardeningPlan): string {
 
   lines.push(
     "",
-    "⚡ Power comparison:",
-    `- Current capabilities: ${plan.currentCapabilities.length > 0 ? plan.currentCapabilities.join(", ") : "none detected"}`,
-    `- Recommended minimum: ${plan.recommendedCapabilities.join(", ")}`,
-    `- Extra power to shrink: ${plan.extraCapabilities.length > 0 ? plan.extraCapabilities.join(", ") : "none"}`,
-    `- Missing but expected for your selected workflows: ${plan.missingCapabilities.length > 0 ? plan.missingCapabilities.join(", ") : "none"}`,
+    "⚡ 权限对比：",
+    `- 现在：${plan.currentCapabilities.length > 0 ? plan.currentCapabilities.join(", ") : "没有明显权限信号"}`,
+    `- 建议最小范围：${plan.recommendedCapabilities.join(", ")}`,
+    `- 还可以继续收掉的：${plan.extraCapabilities.length > 0 ? plan.extraCapabilities.join(", ") : "没有"}`,
+    `- 这次工作流理论上还需要，但当前没看到的：${plan.missingCapabilities.length > 0 ? plan.missingCapabilities.join(", ") : "没有"}`,
     ""
   );
 
@@ -592,17 +592,17 @@ export function renderHardeningHumanOutput(plan: HardeningPlan): string {
     const keepSecrets = plan.secretExposure.filter((entry) => entry.action === "keep");
     const reviewSecrets = plan.secretExposure.filter((entry) => entry.action === "review");
 
-    lines.push("🔐 Secret review:");
+    lines.push("🔐 Secret 检查：");
     lines.push(
-      `- Keep in runtime: ${keepSecrets.length > 0 ? keepSecrets.map((entry) => entry.variable).join(", ") : "none detected"}`,
-      `- Review or move out: ${reviewSecrets.length > 0 ? reviewSecrets.map((entry) => entry.variable).join(", ") : "none"}`
+      `- 可以留在 runtime 里的：${keepSecrets.length > 0 ? keepSecrets.map((entry) => entry.variable).join(", ") : "没有明显需要保留的"}`,
+      `- 建议 review 或移出的：${reviewSecrets.length > 0 ? reviewSecrets.map((entry) => entry.variable).join(", ") : "没有"}`
     );
     lines.push("");
   }
 
   lines.push(
-    "🚨 Existing findings that still matter:",
-    `- ${plan.findingsSummary.total} findings currently detected (${plan.findingsSummary.critical} critical, ${plan.findingsSummary.high} high, ${plan.findingsSummary.medium} medium)`
+    "🚨 当前仍然需要你注意的风险：",
+    `- 目前一共发现 ${plan.findingsSummary.total} 条（critical ${plan.findingsSummary.critical} / high ${plan.findingsSummary.high} / medium ${plan.findingsSummary.medium}）`
   );
 
   for (const finding of plan.topFindings) {
@@ -611,7 +611,7 @@ export function renderHardeningHumanOutput(plan: HardeningPlan): string {
     );
   }
 
-  lines.push("", "📄 Recommended manifest preview:", `${JSON.stringify(plan.recommendedManifest, null, 2)}`);
+  lines.push("", "📄 TraceRoot 建议的 manifest 预览：", `${JSON.stringify(plan.recommendedManifest, null, 2)}`);
 
   return `${lines.join("\n")}\n`;
 }

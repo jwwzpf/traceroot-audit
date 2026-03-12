@@ -43,36 +43,36 @@ function renderDoctorSummary(options: {
     `🎯 Target: ${options.target}`,
     `🧩 Approved workflows: ${options.selectedWorkflows.join(", ")}`,
     "",
-    "📉 Boundary shrink preview:",
-    `- Today: ${currentPower}`,
-    `- Approved: ${approvedPower}`,
-    `- Approval policy: ${options.plan.approvalPolicy}`,
-    `- File write policy: ${options.plan.fileWritePolicy}`,
-    `- Exposure policy: ${options.plan.exposurePolicy}`,
+    "📉 权限收缩预览：",
+    `- 现在：${currentPower}`,
+    `- 收紧后：${approvedPower}`,
+    `- 审批方式：${options.plan.approvalPolicy}`,
+    `- 文件写入范围：${options.plan.fileWritePolicy}`,
+    `- 网络暴露范围：${options.plan.exposurePolicy}`,
     "",
-    "✨ We already prepared a safer bundle for you:",
-    `- 📜 Recommended manifest: ${displayPath(options.bundle.manifestPath)}`,
-    `- 🧭 Apply plan: ${displayPath(options.bundle.planPath)}`
+    "✨ TraceRoot 已经先帮你准备好了这些内容：",
+    `- 📜 更小权限的 manifest 建议：${displayPath(options.bundle.manifestPath)}`,
+    `- 🧭 应用步骤说明：${displayPath(options.bundle.planPath)}`
   ];
 
   if (options.bundle.envExamplePath) {
-    lines.push(`- 🔐 Runtime env template: ${displayPath(options.bundle.envExamplePath)}`);
+    lines.push(`- 🔐 更干净的运行时环境变量模板：${displayPath(options.bundle.envExamplePath)}`);
   }
 
   if (options.bundle.composeOverridePath) {
-    lines.push(`- 🌐 Compose override: ${displayPath(options.bundle.composeOverridePath)}`);
+    lines.push(`- 🌐 更安全的 compose 覆盖文件：${displayPath(options.bundle.composeOverridePath)}`);
   }
 
   if (options.bundle.tapPlanPath && options.bundle.tapWrapperDir) {
-    lines.push(`- 🎬 Action audit guide: ${displayPath(options.bundle.tapPlanPath)}`);
-    lines.push(`- 🧷 Ready-to-use command hooks: ${displayPath(options.bundle.tapWrapperDir)}`);
+    lines.push(`- 🎬 动作审计说明：${displayPath(options.bundle.tapPlanPath)}`);
+    lines.push(`- 🧷 TraceRoot 准备好的审计接入文件: ${displayPath(options.bundle.tapWrapperDir)}`);
   }
 
   if (options.boundaryStatus.aligned) {
     lines.push(
       "",
-      "✅ Good news: your current setup already matches the approved boundary.",
-      `💓 Keep watching it with: traceroot-audit doctor "${options.target}" --watch --interval 60`
+      "✅ 好消息：你当前的配置已经和刚批准的边界对齐了。",
+      `💓 如果你想继续陪跑守护它，可以运行：traceroot-audit doctor "${options.target}" --watch --interval 60`
     );
 
     return `${lines.join("\n")}\n`;
@@ -89,25 +89,25 @@ function renderDoctorSummary(options: {
       options.bundle.composeSourcePath
     ) {
       preparedFixes.push(
-        `🌐 Public exposure → compose override ready (${displayPath(options.bundle.composeOverridePath)})`
+        `🌐 公开暴露这一步 → 更安全的 compose 覆盖文件已经准备好了（${displayPath(options.bundle.composeOverridePath)}）`
       );
-      preparedOutcomes.push("🌐 keep the runtime on localhost instead of exposing it more broadly");
+      preparedOutcomes.push("🌐 尽量把 runtime 收回到本机，不再继续暴露给更大的网络范围");
       continue;
     }
 
     if (violation.code === "missing-confirmation") {
       preparedFixes.push(
-        `📜 Missing approval guard → hardened manifest ready (${displayPath(options.bundle.manifestPath)})`
+        `📜 确认保护这一步 → hardened manifest 已经准备好了（${displayPath(options.bundle.manifestPath)}）`
       );
-      preparedOutcomes.push("📜 enforce confirmation before side-effecting actions");
+      preparedOutcomes.push("📜 在真正执行外发或副作用动作前，先把确认步骤卡住");
       continue;
     }
 
     if (violation.code === "secret-exposure" && options.bundle.envExamplePath) {
       preparedFixes.push(
-        `🔐 Secret cleanup → runtime env template ready (${displayPath(options.bundle.envExamplePath)})`
+        `🔐 secret 清理这一步 → 运行时环境变量模板已经准备好了（${displayPath(options.bundle.envExamplePath)}）`
       );
-      preparedOutcomes.push("🔐 split unrelated secrets out of the live runtime env");
+      preparedOutcomes.push("🔐 把和当前工作流无关的 secrets 从 live runtime 环境里分出去");
       continue;
     }
 
@@ -116,24 +116,24 @@ function renderDoctorSummary(options: {
 
   lines.push(
     "",
-    "🚧 Your live setup is still broader than the boundary you just approved."
+    "🚧 你当前的 live 配置仍然比你刚批准的边界更宽。"
   );
 
   if (options.boundaryStatus.violations.length > 0) {
     lines.push(
-      `🧮 TraceRoot already prepared ${preparedFixes.length} of ${options.boundaryStatus.violations.length} needed fixes.`
+      `🧮 在 ${options.boundaryStatus.violations.length} 个需要处理的点里，TraceRoot 已经先帮你准备好了 ${preparedFixes.length} 个。`
     );
   }
 
   if (preparedFixes.length > 0) {
-    lines.push("", "✅ TraceRoot already prepared fixes for you:");
+    lines.push("", "✅ TraceRoot 已经先帮你准备好了这些修复：");
 
     for (const fix of preparedFixes) {
       lines.push(`- ${fix}`);
     }
 
     if (preparedOutcomes.length > 0) {
-      lines.push("", "🎁 If you apply the bundle, TraceRoot will already help you:");
+      lines.push("", "🎁 你把这套 bundle 应用进去后，TraceRoot 已经能先帮你做到：");
       for (const outcome of preparedOutcomes) {
         lines.push(`- ${outcome}`);
       }
@@ -141,14 +141,36 @@ function renderDoctorSummary(options: {
   }
 
   if (options.bundle.tapWrappers.length > 0) {
-    lines.push(
-      "",
-      `🎬 TraceRoot also prepared ${options.bundle.tapWrappers.length} ready-to-use command hook${options.bundle.tapWrappers.length === 1 ? "" : "s"} so likely skill/tool actions can start leaving an audit trail.`
-    );
+    lines.push("");
+
+    if (options.bundle.tapInstalledCommands.length > 0) {
+      const installedScripts = options.bundle.tapInstalledCommands
+        .filter((command) => command.kind === "npm-script")
+        .map((command) => `npm run ${command.name}`);
+
+      lines.push(
+        `🎬 动作审计这一步，TraceRoot 已经先帮你接好了 ${options.bundle.tapInstalledCommands.length} 个常见启动命令。`
+      );
+
+      if (installedScripts.length > 0) {
+        lines.push(`- 以后你还是照常运行：${installedScripts.join("、")}`);
+      }
+
+      if (options.bundle.tapInstallBackupPath) {
+        lines.push(
+          `- 原来的 package.json 备份在：${displayPath(options.bundle.tapInstallBackupPath)}`
+        );
+      }
+    } else {
+      lines.push(
+        `🎬 TraceRoot 也已经帮你找到了 ${options.bundle.tapWrappers.length} 个最值得先接入审计的高风险动作。`
+      );
+      lines.push(`- 你可以在 ${displayPath(options.bundle.tapPlanPath)} 里看到它们。`);
+    }
   }
 
   if (stillNeedsUser.length > 0) {
-    lines.push("", "👀 Still needs your decision:");
+    lines.push("", "👀 下面这些还需要你拍板：");
 
     for (const violation of stillNeedsUser.slice(0, 4)) {
       const icon =
@@ -160,12 +182,12 @@ function renderDoctorSummary(options: {
       lines.push(`- ${icon} ${violation.title}: ${violation.message}`);
     }
   } else {
-    lines.push("", "👀 The remaining work is mostly applying the bundle to your live setup.");
+    lines.push("", "👀 剩下的工作，基本就是把这套 bundle 真正应用到 live setup 里。");
   }
 
   const recommendations = [...new Set(options.boundaryStatus.violations.map((violation) => violation.recommendation))];
   if (recommendations.length > 0) {
-    lines.push("", "🔧 Start here:");
+    lines.push("", "🔧 最值得先做的事：");
 
     for (const recommendation of recommendations.slice(0, 3)) {
       lines.push(`- ${recommendation}`);
@@ -175,7 +197,7 @@ function renderDoctorSummary(options: {
   if (options.bundle.composeOverridePath && options.bundle.composeSourcePath) {
     lines.push(
       "",
-      "⚡ Apply right now:",
+      "⚡ 现在就可以这样做：",
       `- cd "${options.plan.rootDir}"`,
       `- docker compose -f ${path.basename(options.bundle.composeSourcePath)} -f ${path.basename(options.bundle.composeOverridePath)} up -d`
     );
@@ -183,7 +205,7 @@ function renderDoctorSummary(options: {
 
   lines.push(
     "",
-    "🚀 Best next command:",
+    "🚀 下一步最适合这样跑：",
     `- traceroot-audit doctor "${options.target}" --watch --interval 60`
   );
 
@@ -252,7 +274,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
             `🎯 Target: ${effectiveTarget}`,
             `🧭 Surface: ${plan.surfaceLabel}`,
             `🧩 Workflows: ${plan.selectedProfiles.map((profile) => `${profile.icon} ${profile.title}`).join(", ")}`,
-            "🛠️ TraceRoot is preparing a smaller approved boundary and safer patch bundle..."
+            "🛠️ TraceRoot 正在帮你收紧边界，并准备更安全的补丁包..."
           ].join("\n") + "\n"
         );
 

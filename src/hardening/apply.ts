@@ -25,6 +25,8 @@ export interface ApplyBundleResult {
   tapWrapperDir: string | null;
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
+  tapInstallBackupPath: string | null;
+  tapInstalledCommands: TapInstalledCommand[];
 }
 
 export interface TapWrapperFile {
@@ -41,6 +43,14 @@ export interface TapEntrypoint {
   name: string;
   currentCommand: string;
   suggestedCommand: string;
+  installStatus: "manual" | "installed" | "already-installed";
+}
+
+export interface TapInstalledCommand {
+  kind: "npm-script" | "bin";
+  name: string;
+  beforeCommand: string;
+  afterCommand: string;
 }
 
 function manifestOutputPath(rootDir: string, manifestFormat: "json" | "yaml"): string {
@@ -183,62 +193,75 @@ function renderApplyPlan(options: {
   composeSourcePath: string | null;
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
+  tapInstalledCommands: TapInstalledCommand[];
 }): string {
   const lines = [
-    "# TraceRoot Audit Apply Plan",
+    "# TraceRoot 应用说明",
     "",
-    `- **Approved workflows:** ${options.profile.selectedIntents
+    `- **你刚才批准的工作流：** ${options.profile.selectedIntents
       .map((intent) => intent.title)
       .join(", ")}`,
-    `- **Approval policy:** ${options.profile.approvalPolicy}`,
-    `- **File write policy:** ${options.profile.fileWritePolicy}`,
-    `- **Exposure policy:** ${options.profile.exposurePolicy}`,
+    `- **审批方式：** ${options.profile.approvalPolicy}`,
+    `- **文件写入范围：** ${options.profile.fileWritePolicy}`,
+    `- **网络暴露范围：** ${options.profile.exposurePolicy}`,
     "",
-    "## Generated files",
+    "## TraceRoot 已经帮你准备好的内容",
     "",
-    `- Recommended manifest: \`${path.basename(options.manifestPath)}\``
+    `- 更小权限的 manifest 建议：\`${path.basename(options.manifestPath)}\``
   ];
 
   if (options.envExamplePath) {
-    lines.push(`- Runtime env template: \`${path.basename(options.envExamplePath)}\``);
+    lines.push(`- 更干净的运行时环境变量模板：\`${path.basename(options.envExamplePath)}\``);
   }
 
   if (options.composeOverridePath && options.composeSourcePath) {
     lines.push(
-      `- Compose override: \`${path.basename(options.composeOverridePath)}\` (apply with \`${path.basename(options.composeSourcePath)}\`)`
+      `- 更安全的 compose 覆盖文件：\`${path.basename(options.composeOverridePath)}\`（和 \`${path.basename(options.composeSourcePath)}\` 一起用）`
     );
   }
 
   if (options.tapPlanPath && options.tapWrappers.length > 0) {
-    lines.push(
-      `- Action audit guide: \`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\``
-    );
+    if (options.tapInstalledCommands.length > 0) {
+      lines.push(
+        `- 动作审计说明：\`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\`（常见启动命令已经帮你接好）`
+      );
+    } else {
+      lines.push(
+        `- 动作审计说明：\`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\``
+      );
+    }
   }
 
-  lines.push("", "## Suggested next steps", "");
+  lines.push("", "## 接下来最值得先做的事", "");
 
   lines.push(
-    `1. Compare your active manifest with \`${path.basename(options.manifestPath)}\` and carry over the smaller capability set.`
+    `1. 先把你正在使用的 manifest 和 \`${path.basename(options.manifestPath)}\` 对照一下，把更小的能力范围同步进去。`
   );
 
   if (options.envExamplePath) {
     lines.push(
-      `2. Create a runtime-only env file from \`${path.basename(options.envExamplePath)}\` and move unrelated secrets out of the live agent env.`
+      `2. 按 \`${path.basename(options.envExamplePath)}\` 整理一份只给 runtime 用的环境变量，把当前工作流根本用不到的 secrets 挪出去。`
     );
   }
 
   if (options.composeOverridePath && options.composeSourcePath) {
     lines.push(
-      `3. Start your runtime with both compose files: \`docker compose -f ${path.basename(options.composeSourcePath)} -f ${path.basename(options.composeOverridePath)} up -d\`.`
+      `3. 用两份 compose 一起重启 runtime：\`docker compose -f ${path.basename(options.composeSourcePath)} -f ${path.basename(options.composeOverridePath)} up -d\`。`
     );
   } else {
-    lines.push("3. If your runtime is exposed on the network, bind it to localhost only before running it again.");
+    lines.push("3. 如果 runtime 现在能被局域网或外部访问，下一次启动前尽量把它收回到 localhost。");
   }
 
   if (options.tapPlanPath && options.tapWrappers.length > 0) {
-    lines.push(
-      `4. Switch your highest-risk skill/tool commands to the TraceRoot command hooks listed in \`${path.basename(options.tapPlanPath)}\` so runtime actions start leaving an audit trail.`
-    );
+    if (options.tapInstalledCommands.length > 0) {
+      lines.push(
+        `4. 动作审计这一步常见命令已经帮你接好了。你继续照常运行原来的命令，TraceRoot 就会开始记审计记录。`
+      );
+    } else {
+      lines.push(
+        `4. 打开 \`${path.basename(options.tapPlanPath)}\`，TraceRoot 已经帮你挑出最值得先接入审计的高风险动作。`
+      );
+    }
   }
 
   lines.push("");
@@ -256,6 +279,11 @@ interface PackageEntrypointCandidate {
   kind: "npm-script" | "bin";
   name: string;
   command: string;
+}
+
+interface TapInstallResult {
+  backupPath: string | null;
+  installedCommands: TapInstalledCommand[];
 }
 
 function classifyTapAction(file: ScannableFile): TapActionSpec | null {
@@ -489,7 +517,8 @@ function buildSuggestedEntrypoints(options: {
           kind: candidate.kind,
           name: candidate.name,
           currentCommand: candidate.command,
-          suggestedCommand: wrapperRelativePath
+          suggestedCommand: wrapperRelativePath,
+          installStatus: "manual"
         };
       }
 
@@ -497,15 +526,134 @@ function buildSuggestedEntrypoints(options: {
         kind: candidate.kind,
         name: candidate.name,
         currentCommand: candidate.command,
-        suggestedCommand: wrapperRelativePath
+        suggestedCommand: wrapperRelativePath,
+        installStatus: "manual"
       };
     });
+}
+
+async function installTapEntrypoints(options: {
+  rootDir: string;
+  tapWrappers: TapWrapperFile[];
+}): Promise<TapInstallResult> {
+  const packageJsonPath = path.join(options.rootDir, "package.json");
+
+  let rawPackageJson: string;
+
+  try {
+    rawPackageJson = await readFile(packageJsonPath, "utf8");
+  } catch {
+    return {
+      backupPath: null,
+      installedCommands: []
+    };
+  }
+
+  let parsedPackageJson: {
+    scripts?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+
+  try {
+    parsedPackageJson = JSON.parse(rawPackageJson) as {
+      scripts?: Record<string, unknown>;
+      [key: string]: unknown;
+    };
+  } catch {
+    return {
+      backupPath: null,
+      installedCommands: []
+    };
+  }
+
+  if (!parsedPackageJson.scripts || typeof parsedPackageJson.scripts !== "object") {
+    return {
+      backupPath: null,
+      installedCommands: []
+    };
+  }
+
+  const groupedEntrypoints = new Map<
+    string,
+    Array<{ wrapper: TapWrapperFile; entrypoint: TapEntrypoint }>
+  >();
+
+  for (const wrapper of options.tapWrappers) {
+    for (const entrypoint of wrapper.entrypoints) {
+      if (entrypoint.kind !== "npm-script") {
+        continue;
+      }
+
+      const existing = groupedEntrypoints.get(entrypoint.name) ?? [];
+      existing.push({ wrapper, entrypoint });
+      groupedEntrypoints.set(entrypoint.name, existing);
+    }
+  }
+
+  const installedCommands: TapInstalledCommand[] = [];
+
+  for (const [scriptName, candidates] of groupedEntrypoints.entries()) {
+    if (candidates.length !== 1) {
+      continue;
+    }
+
+    const [{ entrypoint }] = candidates;
+    const currentValue = parsedPackageJson.scripts[scriptName];
+
+    if (typeof currentValue !== "string") {
+      continue;
+    }
+
+    if (currentValue === entrypoint.suggestedCommand) {
+      entrypoint.installStatus = "already-installed";
+      installedCommands.push({
+        kind: entrypoint.kind,
+        name: entrypoint.name,
+        beforeCommand: currentValue,
+        afterCommand: currentValue
+      });
+      continue;
+    }
+
+    if (currentValue !== entrypoint.currentCommand) {
+      continue;
+    }
+
+    parsedPackageJson.scripts[scriptName] = entrypoint.suggestedCommand;
+    entrypoint.installStatus = "installed";
+    installedCommands.push({
+      kind: entrypoint.kind,
+      name: entrypoint.name,
+      beforeCommand: entrypoint.currentCommand,
+      afterCommand: entrypoint.suggestedCommand
+    });
+  }
+
+  if (installedCommands.length === 0) {
+    return {
+      backupPath: null,
+      installedCommands: []
+    };
+  }
+
+  const backupDir = path.join(options.rootDir, ".traceroot", "backups");
+  const backupPath = path.join(backupDir, "package.json.before-action-audit.json");
+  await mkdir(backupDir, { recursive: true });
+  await writeFile(backupPath, rawPackageJson, "utf8");
+  await writeFile(`${packageJsonPath}`, `${JSON.stringify(parsedPackageJson, null, 2)}\n`, "utf8");
+
+  return {
+    backupPath,
+    installedCommands
+  };
 }
 
 async function buildTapWrappers(rootDir: string, profileSurface: string): Promise<{
   tapWrapperDir: string | null;
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
+  tapInstallBackupPath: string | null;
+  tapInstalledCommands: TapInstalledCommand[];
 }> {
   const resolvedTarget = await resolveTarget(rootDir);
   const files = await discoverFiles(resolvedTarget);
@@ -551,16 +699,25 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     return {
       tapWrapperDir: null,
       tapPlanPath: null,
-      tapWrappers: []
+      tapWrappers: [],
+      tapInstallBackupPath: null,
+      tapInstalledCommands: []
     };
   }
+
+  const tapInstallResult = await installTapEntrypoints({
+    rootDir,
+    tapWrappers
+  });
 
   const tapPlanPath = path.join(rootDir, "traceroot.tap.plan.md");
   const lines = [
     "# TraceRoot 动作审计说明",
     "",
     "TraceRoot 已经帮你找到了几个最值得先接入审计的动作。",
-    "你不用自己研究怎么接。做法很简单：把你平时启动这个动作的命令，换成下面 TraceRoot 给你准备好的接入文件。",
+    tapInstallResult.installedCommands.length > 0
+      ? `TraceRoot 已经自动帮你接好了 ${tapInstallResult.installedCommands.length} 个常见启动命令。以后你还是照常运行原来的命令就行。`
+      : "你不用自己研究怎么接。做法很简单：把你平时启动这个动作的命令，换成下面 TraceRoot 给你准备好的接入文件。",
     "",
     "换完以后，TraceRoot 就能：",
     "- 记住这个动作什么时候开始、有没有成功",
@@ -568,6 +725,13 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     "- 让你之后用 `traceroot-audit logs` 回看这条审计记录",
     ""
   ];
+
+  if (tapInstallResult.backupPath) {
+    lines.push(
+      `原来的 package.json 我们也已经帮你备份好了：\`${path.relative(rootDir, tapInstallResult.backupPath).replace(/\\/g, "/")}\``,
+      ""
+    );
+  }
 
   for (const wrapper of tapWrappers) {
     lines.push(
@@ -585,11 +749,31 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
       for (const entrypoint of wrapper.entrypoints) {
         if (entrypoint.kind === "npm-script") {
+          if (entrypoint.installStatus === "installed") {
+            lines.push(
+              `- 你以后还是照常运行：\`npm run ${entrypoint.name}\``,
+              `- TraceRoot 已经帮你接好了：它现在会先经过 \`${entrypoint.suggestedCommand}\` 再执行原来的动作`,
+              "- 你不用手动改任何东西了。",
+              ""
+            );
+            continue;
+          }
+
+          if (entrypoint.installStatus === "already-installed") {
+            lines.push(
+              `- 这个命令已经接好了：\`npm run ${entrypoint.name}\``,
+              `- 它现在已经是 TraceRoot 的接入路径：\`${entrypoint.suggestedCommand}\``,
+              "- 你继续像以前一样运行它就可以了。",
+              ""
+            );
+            continue;
+          }
+
           lines.push(
             `- 你现在平时运行的是：\`npm run ${entrypoint.name}\``,
             `- 它背后实际执行的是：\`${entrypoint.currentCommand}\``,
-            `- 建议你改成：把 \`scripts.${entrypoint.name}\` 换成 \`${entrypoint.suggestedCommand}\``,
-            "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
+            `- 如果你愿意手动接上，也可以把 \`scripts.${entrypoint.name}\` 换成 \`${entrypoint.suggestedCommand}\``,
+            "- 接上以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
             ""
           );
           continue;
@@ -619,7 +803,9 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   return {
     tapWrapperDir: wrapperDir,
     tapPlanPath,
-    tapWrappers
+    tapWrappers,
+    tapInstallBackupPath: tapInstallResult.backupPath,
+    tapInstalledCommands: tapInstallResult.installedCommands
   };
 }
 
@@ -673,7 +859,8 @@ export async function writeApplyBundle(options: {
       composeOverridePath,
       composeSourcePath,
       tapPlanPath: tapBundle.tapPlanPath,
-      tapWrappers: tapBundle.tapWrappers
+      tapWrappers: tapBundle.tapWrappers,
+      tapInstalledCommands: tapBundle.tapInstalledCommands
     }),
     "utf8"
   );
@@ -693,6 +880,8 @@ export async function writeApplyBundle(options: {
       .map((entry) => entry.variable),
     tapWrapperDir: tapBundle.tapWrapperDir,
     tapPlanPath: tapBundle.tapPlanPath,
-    tapWrappers: tapBundle.tapWrappers
+    tapWrappers: tapBundle.tapWrappers,
+    tapInstallBackupPath: tapBundle.tapInstallBackupPath,
+    tapInstalledCommands: tapBundle.tapInstalledCommands
   };
 }
