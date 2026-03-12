@@ -3,6 +3,7 @@ import { loadManifest } from "../manifest/loader";
 import { builtInRules } from "../rules";
 import type { ScanContext } from "../rules/types";
 import { discoverFiles, resolveTarget } from "../utils/files";
+import { analyzeSurface } from "./surfaces";
 import {
   calculateRiskScore,
   createFindingFingerprint,
@@ -23,6 +24,13 @@ export async function scanTarget(
   const resolvedTarget = await resolveTarget(targetInput);
   const files = await discoverFiles(resolvedTarget);
   const manifestLoadResult = await loadManifest(resolvedTarget.rootDir);
+  const surfaceAnalysis = analyzeSurface({
+    rootDir: resolvedTarget.rootDir,
+    targetPath: resolvedTarget.absolutePath,
+    targetType: resolvedTarget.type,
+    files,
+    manifestPath: manifestLoadResult.manifestPath
+  });
   const baselineLoadResult =
     options.useBaseline === false
       ? {
@@ -61,6 +69,7 @@ export async function scanTarget(
   return {
     target: targetInput,
     targetPath: resolvedTarget.absolutePath,
+    surface: surfaceAnalysis.surface,
     riskScore: calculateRiskScore(orderedFindings),
     summary: summarizeFindings(orderedFindings),
     findings: orderedFindings,

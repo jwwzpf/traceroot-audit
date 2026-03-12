@@ -1,11 +1,15 @@
 import pc from "picocolors";
 
+import type { DiscoveryResult, HostDiscoveryResult } from "./discovery";
+import { hostScanCommandPath } from "./discovery";
+import type { HardeningPlan } from "../hardening/analysis";
 import {
   createFindingFingerprint,
   type Finding,
   type ScanResult
 } from "./findings";
 import { builtInRules } from "../rules";
+import { surfaceLabel } from "./surfaces";
 import { severityLabel, type FailOnSeverity } from "./severities";
 
 function severityIcon(severity: Finding["severity"]): string {
@@ -75,6 +79,24 @@ function compactLocation(finding: Finding): string {
     : finding.file;
 }
 
+function humanList(label: string, values: string[], limit = 4): string {
+  if (values.length === 0) {
+    return `${label}: none`;
+  }
+
+  const visibleValues = values.slice(0, limit);
+  const suffix =
+    values.length > visibleValues.length ? ` (+${values.length - visibleValues.length} more)` : "";
+
+  return `${label}: ${visibleValues.join(", ")}${suffix}`;
+}
+
+function formatSurface(result: {
+  surface: ScanResult["surface"] | DiscoveryResult["surface"] | HostDiscoveryResult["candidates"][number]["surface"];
+}): string {
+  return `${surfaceLabel(result.surface.kind)} (${result.surface.confidence} confidence)`;
+}
+
 export function renderHumanOutput(
   result: ScanResult,
   failOn: FailOnSeverity,
@@ -85,6 +107,7 @@ export function renderHumanOutput(
     "======================",
     "",
     `🎯 Target: ${result.target}`,
+    `🧭 Scan surface: ${formatSurface(result)}`,
     `📊 Risk score: ${result.riskScore.toFixed(1)}/10`
   ];
 
@@ -137,6 +160,12 @@ export function renderJsonOutput(result: ScanResult): string {
   return `${JSON.stringify(
     {
       target: result.target,
+      surface: {
+        kind: result.surface.kind,
+        label: surfaceLabel(result.surface.kind),
+        confidence: result.surface.confidence,
+        reasons: result.surface.reasons
+      },
       riskScore: result.riskScore,
       baseline: {
         path: result.baselinePath,
@@ -168,6 +197,7 @@ export function renderMarkdownOutput(
       "# TraceRoot Audit Report",
       "",
       markdownField("Target", `\`${escapeInlineCode(result.target)}\``),
+      markdownField("Scan surface", `\`${escapeInlineCode(formatSurface(result))}\``),
       markdownField("Risk score", `\`${result.riskScore.toFixed(1)}/10\``)
     ];
 
@@ -228,6 +258,7 @@ export function renderMarkdownOutput(
     "# TraceRoot Audit Report",
     "",
     markdownField("Target", `\`${escapeInlineCode(result.target)}\``),
+    markdownField("Scan surface", `\`${escapeInlineCode(formatSurface(result))}\``),
     markdownField("Risk score", `\`${result.riskScore.toFixed(1)}/10\``)
   ];
 
@@ -299,6 +330,231 @@ export function renderMarkdownOutput(
   return `${lines.join("\n")}\n`;
 }
 
+export function renderDiscoveryHumanOutput(result: DiscoveryResult): string {
+  const lines = [
+    "TraceRoot Audit Discovery",
+    "=========================",
+    "",
+    `🎯 Target: ${result.target}`,
+    `🧭 Detected surface: ${formatSurface(result)}`,
+    `📦 Scannable files found: ${result.filesDiscovered}`
+  ];
+
+  if (result.manifestPath) {
+    lines.push(`📜 Manifest: ${result.manifestPath}`);
+  }
+
+  if (result.manifestError) {
+    lines.push(`⚠️ Manifest error: ${result.manifestError}`);
+  }
+
+  lines.push("", "🧠 Why this target looks like that:");
+
+  for (const reason of result.surface.reasons) {
+    lines.push(`- ${reason}`);
+  }
+
+  lines.push(
+    "",
+    "🔎 What TraceRoot Audit can inspect here:",
+    `- ${humanList("Manifest files", result.manifestFiles)}`,
+    `- ${humanList("Environment files", result.envFiles)}`,
+    `- ${humanList("Runtime config files", result.runtimeConfigFiles)}`,
+    `- ${humanList("Executable action files", result.scriptFiles)}`,
+    "",
+    "📌 Suggested scan targets:"
+  );
+
+  for (const suggestion of result.suggestedTargets) {
+    lines.push(
+      `- ${surfaceLabel(suggestion.kind)} → ${suggestion.displayPath}`,
+      `  Why: ${suggestion.reason}`
+    );
+  }
+
+  if (result.suggestedTargets.length > 0) {
+    const suggestedCommands = [
+      ...new Set(result.suggestedTargets.slice(0, 4).map((suggestion) => suggestion.displayPath))
+    ];
+
+    lines.push("", "🚀 Try next:");
+
+    for (const displayPath of suggestedCommands.slice(0, 3)) {
+      lines.push(`- traceroot-audit scan ${displayPath}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderDiscoveryJsonOutput(result: DiscoveryResult): string {
+  return `${JSON.stringify(
+    {
+      target: result.target,
+      targetPath: result.targetPath,
+      rootDir: result.rootDir,
+      targetType: result.targetType,
+      surface: {
+        kind: result.surface.kind,
+        label: surfaceLabel(result.surface.kind),
+        confidence: result.surface.confidence,
+        reasons: result.surface.reasons
+      },
+      manifestPath: result.manifestPath,
+      manifestError: result.manifestError ?? null,
+      filesDiscovered: result.filesDiscovered,
+      manifestFiles: result.manifestFiles,
+      envFiles: result.envFiles,
+      runtimeConfigFiles: result.runtimeConfigFiles,
+      scriptFiles: result.scriptFiles,
+      suggestedTargets: result.suggestedTargets
+    },
+    null,
+    2
+  )}\n`;
+}
+
+export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): string {
+  const lines = [
+    "TraceRoot Audit Host Discovery",
+    "==============================",
+    "",
+    "🖥️ Scope: common agent/runtime locations on this machine",
+    `🏠 Home: ${result.homeDir}`,
+    `🔎 Roots searched: ${result.searchedRoots.length}`,
+    `📌 Likely agent action surfaces found: ${result.candidates.length}`
+  ];
+
+  if (result.candidates.length === 0) {
+    lines.push(
+      "",
+      "No obvious local agent surfaces were found in the common locations we checked.",
+      "",
+      "Try next:",
+      "- traceroot-audit discover .",
+      "- traceroot-audit discover /path/to/openclaw",
+      "- traceroot-audit scan /path/to/skills"
+    );
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push("");
+
+  for (const [index, candidate] of result.candidates.entries()) {
+    lines.push(
+      `${index + 1}. ${formatSurface(candidate)}`,
+      `   📍 Path: ${candidate.displayPath}`,
+      `   📦 Scannable files: ${candidate.filesDiscovered}`,
+      `   🧠 Why: ${candidate.surface.reasons[0] ?? "best-effort host discovery guess"}`
+    );
+
+    if (candidate.strongSignals.length > 0) {
+      lines.push(`   🔎 Signals: ${candidate.strongSignals.join(", ")}`);
+    }
+
+    lines.push("");
+  }
+
+  lines.push("🚀 Try next:");
+
+  for (const candidate of result.candidates.slice(0, 3)) {
+    lines.push(`- ${hostScanCommandPath(candidate.absolutePath)}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderHostDiscoveryJsonOutput(result: HostDiscoveryResult): string {
+  return `${JSON.stringify(
+    {
+      target: result.target,
+      homeDir: result.homeDir,
+      searchedRoots: result.searchedRoots,
+      candidates: result.candidates.map((candidate) => ({
+        absolutePath: candidate.absolutePath,
+        displayPath: candidate.displayPath,
+        surface: {
+          kind: candidate.surface.kind,
+          label: surfaceLabel(candidate.surface.kind),
+          confidence: candidate.surface.confidence,
+          reasons: candidate.surface.reasons
+        },
+        filesDiscovered: candidate.filesDiscovered,
+        manifestPath: candidate.manifestPath,
+        strongSignals: candidate.strongSignals
+      }))
+    },
+    null,
+    2
+  )}\n`;
+}
+
+export function renderHardeningHumanOutput(plan: HardeningPlan): string {
+  const lines = [
+    "TraceRoot Audit Hardening",
+    "=========================",
+    "",
+    `🎯 Target: ${plan.target}`,
+    `🧭 Surface: ${plan.surfaceLabel}`,
+    `🧩 Selected workflows: ${plan.selectedProfiles
+      .map((profile) => `${profile.icon} ${profile.title}`)
+      .join(", ")}`,
+    "",
+    "✨ What you asked TraceRoot to do:",
+    `- Approval mode: ${plan.approvalPolicy}`,
+    `- File policy: ${plan.fileWritePolicy}`,
+    `- Exposure policy: ${plan.exposurePolicy}`,
+    "",
+    "🧯 Immediate hardening actions:"
+  ];
+
+  if (plan.immediateActions.length === 0) {
+    lines.push("- No immediate reductions were suggested.");
+  } else {
+    for (const action of plan.immediateActions) {
+      lines.push(`- ${action}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "⚡ Power comparison:",
+    `- Current capabilities: ${plan.currentCapabilities.length > 0 ? plan.currentCapabilities.join(", ") : "none detected"}`,
+    `- Recommended minimum: ${plan.recommendedCapabilities.join(", ")}`,
+    `- Extra power to shrink: ${plan.extraCapabilities.length > 0 ? plan.extraCapabilities.join(", ") : "none"}`,
+    `- Missing but expected for your selected workflows: ${plan.missingCapabilities.length > 0 ? plan.missingCapabilities.join(", ") : "none"}`,
+    ""
+  );
+
+  if (plan.secretExposure.length > 0) {
+    const keepSecrets = plan.secretExposure.filter((entry) => entry.action === "keep");
+    const reviewSecrets = plan.secretExposure.filter((entry) => entry.action === "review");
+
+    lines.push("🔐 Secret review:");
+    lines.push(
+      `- Keep in runtime: ${keepSecrets.length > 0 ? keepSecrets.map((entry) => entry.variable).join(", ") : "none detected"}`,
+      `- Review or move out: ${reviewSecrets.length > 0 ? reviewSecrets.map((entry) => entry.variable).join(", ") : "none"}`
+    );
+    lines.push("");
+  }
+
+  lines.push(
+    "🚨 Existing findings that still matter:",
+    `- ${plan.findingsSummary.total} findings currently detected (${plan.findingsSummary.critical} critical, ${plan.findingsSummary.high} high, ${plan.findingsSummary.medium} medium)`
+  );
+
+  for (const finding of plan.topFindings) {
+    lines.push(
+      `- ${severityIcon(finding.severity)} ${finding.ruleId} ${finding.title}: ${finding.message}`
+    );
+  }
+
+  lines.push("", "📄 Recommended manifest preview:", `${JSON.stringify(plan.recommendedManifest, null, 2)}`);
+
+  return `${lines.join("\n")}\n`;
+}
+
 function sarifLevel(severity: Finding["severity"]): "error" | "warning" | "note" {
   if (severity === "critical") {
     return "error";
@@ -348,7 +604,7 @@ export function renderSarifOutput(result: ScanResult): string {
           driver: {
             name: "TraceRoot Audit",
             informationUri: "https://github.com/jwwzpf/traceroot-audit",
-            semanticVersion: "0.1.0",
+            semanticVersion: "0.2.0",
             rules: sarifRules
           }
         },

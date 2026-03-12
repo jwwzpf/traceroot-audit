@@ -62,6 +62,13 @@ web_modules/
 # Output of 'npm pack'
 *.tgz
 
+# Local macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# This repo is published and developed with pnpm; local npm lockfiles should stay untracked
+package-lock.json
+
 # Yarn Integrity file
 .yarn-integrity
 

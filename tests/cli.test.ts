@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { runCli } from "../src/cli/index";
+import { runCli, type CliChoice, type CliPrompter } from "../src/cli/index";
 
 function createCapture() {
   let stdout = "";
@@ -23,6 +23,46 @@ function createCapture() {
   };
 }
 
+function createStaticPrompter(answers: {
+  chooseOne?: string[];
+  chooseMany?: string[][];
+  confirm?: boolean[];
+}): CliPrompter {
+  const chooseOneAnswers = [...(answers.chooseOne ?? [])];
+  const chooseManyAnswers = [...(answers.chooseMany ?? [])];
+  const confirmAnswers = [...(answers.confirm ?? [])];
+
+  return {
+    async chooseOne(_question: string, choices: CliChoice[]) {
+      const answer = chooseOneAnswers.shift();
+
+      if (!answer || !choices.some((choice) => choice.value === answer)) {
+        throw new Error(`Unexpected chooseOne answer: ${answer ?? "undefined"}`);
+      }
+
+      return answer;
+    },
+    async chooseMany(_question: string, choices: CliChoice[]) {
+      const answer = chooseManyAnswers.shift();
+
+      if (!answer || answer.some((value) => !choices.some((choice) => choice.value === value))) {
+        throw new Error(`Unexpected chooseMany answer: ${answer?.join(", ") ?? "undefined"}`);
+      }
+
+      return answer;
+    },
+    async confirm() {
+      const answer = confirmAnswers.shift();
+
+      if (typeof answer !== "boolean") {
+        throw new Error("Unexpected confirm answer");
+      }
+
+      return answer;
+    }
+  };
+}
+
 describe("CLI", () => {
   it("renders JSON output for scan", async () => {
     const capture = createCapture();
@@ -35,6 +75,7 @@ describe("CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(output.target).toBe("./examples/risky-skill");
+    expect(["project", "skill", "runtime"]).toContain(output.surface.kind);
     expect(Array.isArray(output.findings)).toBe(true);
     expect(output.summary.high).toBeGreaterThanOrEqual(1);
   });
@@ -114,10 +155,104 @@ describe("CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(capture.read().stdout).toContain("🎯 Target:");
+    expect(capture.read().stdout).toContain("🧭 Scan surface:");
     expect(capture.read().stdout).toContain("🛑 [CRITICAL] C002");
   });
 
-  it("defaults scan to the current directory", async () => {
+  it("discovers a runtime-oriented target in human output", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(
+      ["node", "traceroot-audit", "discover", "./examples/exposed-runtime"],
+      capture.io
+    );
+
+    expect(exitCode).toBe(0);
+    expect(capture.read().stdout).toContain("TraceRoot Audit Discovery");
+    expect(capture.read().stdout).toContain("🧭 Detected surface: runtime config");
+    expect(capture.read().stdout).toContain("docker-compose.yml");
+  });
+
+  it("renders JSON output for discover", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(
+      ["node", "traceroot-audit", "discover", "./examples/safe-skill", "--format", "json"],
+      capture.io
+    );
+
+    const output = JSON.parse(capture.read().stdout);
+
+    expect(exitCode).toBe(0);
+    expect(output.surface.kind).toBe("skill");
+    expect(output.suggestedTargets[0].displayPath).toBe(".");
+    expect(output.scriptFiles).toContain("scripts/check.ts");
+  });
+
+  it("discovers likely surfaces across the host in human output", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+
+    try {
+      await mkdir(path.join(tempHome, ".openclaw"), { recursive: true });
+      await writeFile(
+        path.join(tempHome, ".openclaw", "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      await mkdir(path.join(tempHome, "Code", "openclaw", "skills", "send-email-skill"), {
+        recursive: true
+      });
+      await writeFile(
+        path.join(
+          tempHome,
+          "Code",
+          "openclaw",
+          "skills",
+          "send-email-skill",
+          "traceroot.manifest.json"
+        ),
+        JSON.stringify(
+          {
+            name: "send-email-skill",
+            version: "0.1.0",
+            author: "test",
+            source: "https://example.com/send-email-skill",
+            capabilities: ["network", "email"],
+            risk_level: "high",
+            side_effects: true,
+            idempotency: "unknown",
+            interrupt_support: "unknown"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      process.chdir(tempHome);
+
+      const capture = createCapture();
+      const exitCode = await runCli(["node", "traceroot-audit", "discover", "--host"], capture.io);
+
+      expect(exitCode).toBe(0);
+      expect(capture.read().stdout).toContain("TraceRoot Audit Host Discovery");
+      expect(capture.read().stdout).toContain("Likely agent action surfaces found: 2");
+      expect(capture.read().stdout).toContain("~/.openclaw");
+      expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults discover to the current directory", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-scan-default-"));
     const previousCwd = process.cwd();
 
@@ -145,11 +280,11 @@ describe("CLI", () => {
       process.chdir(tempDir);
 
       const capture = createCapture();
-      const exitCode = await runCli(["node", "traceroot-audit", "scan"], capture.io);
+      const exitCode = await runCli(["node", "traceroot-audit", "discover"], capture.io);
 
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("🎯 Target: .");
-      expect(capture.read().stdout).toContain("✅ No findings detected.");
+      expect(capture.read().stdout).toContain("🧭 Detected surface:");
     } finally {
       process.chdir(previousCwd);
       await rm(tempDir, { recursive: true, force: true });
@@ -236,6 +371,57 @@ describe("CLI", () => {
     }
   });
 
+  it("runs the hardening wizard and writes companion files", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-harden-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
+        "utf8"
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "harden", tempDir],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply", "chat-support"]],
+          chooseOne: ["always-confirm", "workspace-only", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const manifestSuggestion = JSON.parse(
+        await readFile(path.join(tempDir, "traceroot.manifest.hardened.json"), "utf8")
+      );
+      const profile = JSON.parse(
+        await readFile(path.join(tempDir, "traceroot.hardened.profile.json"), "utf8")
+      );
+      const report = await readFile(path.join(tempDir, "traceroot.hardened.report.md"), "utf8");
+
+      expect(exitCode).toBe(0);
+      expect(capture.read().stdout).toContain("TraceRoot Audit Hardening");
+      expect(capture.read().stdout).toContain("🧩 Selected workflows: 📧 邮件整理与回复, 💬 客服 / 聊天支持 / 消息代发");
+      expect(capture.read().stdout).toContain("🔐 Secret review:");
+      expect(manifestSuggestion.capabilities).toEqual(["browser", "email", "network"]);
+      expect(profile.extraCapabilities).toContain("filesystem");
+      expect(report).toContain("TraceRoot Audit Hardening Plan");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("explains a built-in rule", async () => {
     const capture = createCapture();
     const exitCode = await runCli(["node", "traceroot-audit", "explain", "C002"], capture.io);
@@ -257,6 +443,6 @@ describe("CLI", () => {
     const exitCode = await runCli(["node", "traceroot-audit", "--version"], capture.io);
 
     expect(exitCode).toBe(0);
-    expect(capture.read().stdout.trim()).toBe("0.1.1");
+    expect(capture.read().stdout.trim()).toBe("0.2.0");
   });
 });

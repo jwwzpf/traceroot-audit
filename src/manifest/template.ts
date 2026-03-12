@@ -58,7 +58,7 @@ export async function writeManifestTemplate(
     }
   }
 
-  const manifest = await createManifestTemplate(targetDir);
+  const manifest = await buildManifestTemplate(targetDir);
   const content =
     options.format === "json"
       ? `${JSON.stringify(manifest, null, 2)}\n`
@@ -73,7 +73,7 @@ export async function writeManifestTemplate(
   };
 }
 
-async function createManifestTemplate(targetDir: string): Promise<TraceRootManifest> {
+export async function buildManifestTemplate(targetDir: string): Promise<TraceRootManifest> {
   const packageJson = await loadPackageJson(targetDir);
   const repositoryUrl = extractRepositoryUrl(packageJson?.repository);
   const homepageUrl = asNonEmptyString(packageJson?.homepage);

@@ -6,9 +6,9 @@
 [![CI](https://github.com/jwwzpf/traceroot-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/jwwzpf/traceroot-audit/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 
-**Open-source trust and security scanner for agent skills and local agent runtimes.**
+**Open-source scanner for the local files that define what an AI agent can really do.**
 
-TraceRoot Audit helps developers quickly detect risky agent skills, unsafe execution patterns, overbroad permissions, missing trust metadata, weak provenance signals, and insecure runtime exposure in OpenClaw-like local agent ecosystems.
+TraceRoot Audit helps developers inspect the action surface behind OpenClaw-like local agent ecosystems: runtime configs, skills and tool packages, agent-capable scripts, and the local files that wire shell, network, filesystem, email, and other real actions together.
 
 ![TraceRoot Audit demo GIF](./docs/assets/traceroot-demo.gif)
 
@@ -22,7 +22,7 @@ Agent skills can now trigger real actions like:
 - email changes
 - purchases or other side effects
 
-TraceRoot Audit keeps the first release narrow: local scanning, simple trust metadata, and actionable findings.
+TraceRoot Audit keeps the product narrow: it scans local action-capable surfaces and turns them into practical findings.
 
 ## Local development
 
@@ -43,19 +43,40 @@ npm run build
 Run without global install:
 
 ```bash
+npx traceroot-audit discover .
+npx traceroot-audit discover --host
 npx traceroot-audit scan .
+npx traceroot-audit harden --host
+```
+
+Inspect what this directory looks like before you scan it:
+
+```bash
+node dist/cli/index.js discover
+```
+
+Let TraceRoot look for common agent/runtime locations on this machine:
+
+```bash
+node dist/cli/index.js discover --host
 ```
 
 Scan the current directory:
 
 ```bash
-node dist/cli/index.js scan
+npx traceroot-audit scan .
 ```
 
 Create a starter trust manifest:
 
 ```bash
 node dist/cli/index.js init
+```
+
+Start the interactive hardening wizard:
+
+```bash
+node dist/cli/index.js harden --host
 ```
 
 Record current findings as a baseline:
@@ -65,6 +86,18 @@ node dist/cli/index.js baseline
 ```
 
 ## Quick start
+
+Discover what TraceRoot can scan in the current project:
+
+```bash
+node dist/cli/index.js discover .
+```
+
+Find likely OpenClaw/runtime/skill surfaces on this machine:
+
+```bash
+node dist/cli/index.js discover --host
+```
 
 Scan the current project:
 
@@ -76,6 +109,18 @@ Scan an OpenClaw-like local runtime repo:
 
 ```bash
 node dist/cli/index.js scan /path/to/openclaw
+```
+
+Scan a specific skill or tool package:
+
+```bash
+node dist/cli/index.js scan /path/to/openclaw/skills/send-email-skill
+```
+
+Run the interactive hardening wizard against a target you already know:
+
+```bash
+node dist/cli/index.js harden /path/to/openclaw
 ```
 
 Scan the bundled risky example:
@@ -137,6 +182,78 @@ Explain a rule:
 ```bash
 node dist/cli/index.js explain C002
 ```
+
+## Interactive hardening wizard
+
+TraceRoot Audit now includes a guided `harden` flow for users who do not want to reason through capabilities manually.
+
+It walks through:
+
+1. finding a likely OpenClaw/runtime/skill surface
+2. choosing one or more workflows you actually want the AI to perform
+3. choosing approval, file-write, and exposure policies
+4. generating a smaller, safer suggested profile for that workflow mix
+
+Example:
+
+```bash
+node dist/cli/index.js harden --host
+```
+
+The first release of the wizard supports these workflow choices:
+
+- 📧 Email triage and reply
+- 🧵 Social posting and publishing
+- 🛒 Shopping and ordering automation
+- 💻 PR review and code feedback
+- 💬 Chat support and message handling
+- 📈 Market monitoring and chart analysis
+
+After the wizard runs, TraceRoot can generate:
+
+- `traceroot.hardened.report.md`
+- `traceroot.hardened.profile.json`
+- `traceroot.manifest.hardened.json` or `.yaml`
+
+## What to scan
+
+TraceRoot Audit works best when you point it at the local files that define what an agent can really do:
+
+- local runtime configs like `.env`, `docker-compose.yml`, and runtime wiring files
+- skill, tool, plugin, and MCP server packages
+- scripts and source files that an agent can execute to take actions
+
+If you are not sure where to start, run:
+
+```bash
+node dist/cli/index.js discover .
+```
+
+If you do not know where OpenClaw, skills, or runtime configs live on your machine, run:
+
+```bash
+node dist/cli/index.js discover --host
+```
+
+`discover` will classify the target as one of:
+
+- `agent project`
+- `skill / tool package`
+- `runtime config`
+
+and suggest the most useful paths to scan next.
+
+`discover --host` uses a targeted search of common local locations such as:
+
+- `~/.openclaw`
+- `~/.mcp`
+- `~/.config`
+- `~/Code`
+- `~/Projects`
+- `~/workspace`
+- `~/Library/Application Support` on macOS
+
+It does **not** do a blind full-disk crawl. The goal is to help non-expert users find likely agent action surfaces without first understanding where OpenClaw or skill packages are installed.
 
 ## Ignore generated or irrelevant paths
 
@@ -256,7 +373,7 @@ To use it:
 
 1. Configure npm trusted publishing for this package and repository.
 2. Bump `package.json` version.
-3. Push a tag like `v0.1.0`.
+3. Push a tag like `v0.2.0`.
 
 The workflow will lint, test, build, dry-run the package, publish to npm, and attach the generated tarball to the GitHub Release.
 

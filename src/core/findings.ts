@@ -1,3 +1,4 @@
+import type { SurfaceDetection } from "./surfaces";
 import { compareSeverity, exceedsFailThreshold, severityWeights, type FailOnSeverity, type Severity } from "./severities";
 
 export interface Finding {
@@ -21,6 +22,7 @@ export interface FindingSummary {
 export interface ScanResult {
   target: string;
   targetPath: string;
+  surface: SurfaceDetection;
   riskScore: number;
   summary: FindingSummary;
   findings: Finding[];
