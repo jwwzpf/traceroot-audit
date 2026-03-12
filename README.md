@@ -45,10 +45,10 @@ Run without global install:
 ```bash
 npx traceroot-audit doctor
 npx traceroot-audit doctor /path/to/openclaw
-npx traceroot-audit guard /path/to/openclaw --interval 60
+npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 ```
 
-For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, and prepares a safer patch bundle.
+For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
 
 If you want the lower-level commands, they still exist:
 
@@ -112,6 +112,12 @@ If you already know the target directory:
 
 ```bash
 node dist/cli/index.js doctor /path/to/openclaw
+```
+
+Keep watching the same target without switching to another mental model:
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 ```
 
 Advanced workflow:
@@ -220,6 +226,12 @@ For most users, the main command is now `doctor`.
 node dist/cli/index.js doctor
 ```
 
+If you want TraceRoot to stay with you and keep watching the boundary afterwards:
+
+```bash
+node dist/cli/index.js doctor --watch --interval 60
+```
+
 `doctor` will:
 
 1. find a likely OpenClaw / runtime / skill surface
@@ -285,12 +297,12 @@ node dist/cli/index.js apply /path/to/openclaw
 
 ## Boundary guard
 
-Once you have approved a safer profile, `guard` can keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later.
+Once you have approved a safer profile, `doctor --watch` is now the recommended way to keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later. The lower-level `guard` command still exists for advanced flows.
 
 Example:
 
 ```bash
-node dist/cli/index.js guard /path/to/openclaw --interval 60
+node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 ```
 
 With a saved `traceroot.hardened.profile.json`, guard now highlights:

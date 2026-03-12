@@ -83,7 +83,7 @@ export function registerHardenCommand(program: Command, runtime: CliRuntime): vo
             "Next steps:",
             `- Run \`traceroot-audit apply "${effectiveTarget}"\` to generate a safer patch bundle.`,
             "- Review the generated manifest suggestion and compare it with your current setup.",
-            "- Re-run `traceroot-audit guard` after you apply the changes."
+            `- Re-run \`traceroot-audit doctor "${effectiveTarget}" --watch --interval 60\` after you apply the changes.`
           ].join("\n") + "\n"
         );
       }

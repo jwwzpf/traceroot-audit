@@ -45,10 +45,10 @@ npm run build
 ```bash
 npx traceroot-audit doctor
 npx traceroot-audit doctor /path/to/openclaw
-npx traceroot-audit guard /path/to/openclaw --interval 60
+npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 ```
 
-对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包。
+对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包；如果加上 `--watch`，它还会继续替你守着这个边界。
 
 如果你想使用更底层的命令，它们仍然都在：
 
@@ -112,6 +112,12 @@ node dist/cli/index.js doctor
 
 ```bash
 node dist/cli/index.js doctor /path/to/openclaw
+```
+
+如果你希望同一个入口继续守着这个边界：
+
+```bash
+node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 ```
 
 进阶工作流：
@@ -234,6 +240,12 @@ node dist/cli/index.js doctor
 node dist/cli/index.js doctor /path/to/openclaw
 ```
 
+如果你希望 TraceRoot 跑完之后继续守着这个边界：
+
+```bash
+node dist/cli/index.js doctor --watch --interval 60
+```
+
 ## 交互式硬化向导
 
 TraceRoot Audit 现在提供了一个真正面向普通用户的 `harden` 向导，不要求用户自己去想权限应该怎么收。
@@ -285,12 +297,12 @@ node dist/cli/index.js apply /path/to/openclaw
 
 ## 边界守护
 
-当你已经通过 `harden` 批准了一套更安全的配置后，`guard` 可以继续盯着这个目标，告诉你当前配置是不是仍然比批准过的边界更宽，或者后续有没有重新漂移出去。
+当你已经通过 `harden` 批准了一套更安全的配置后，`doctor --watch` 是最推荐的继续使用方式。它会继续盯着这个目标，告诉你当前配置是不是仍然比批准过的边界更宽，或者后续有没有重新漂移出去。`guard` 仍然保留给更偏底层的用法。
 
 示例：
 
 ```bash
-node dist/cli/index.js guard /path/to/openclaw --interval 60
+node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 ```
 
 如果目录里有保存下来的 `traceroot.hardened.profile.json`，`guard` 现在会重点提醒：

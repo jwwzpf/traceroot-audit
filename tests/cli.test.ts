@@ -128,7 +128,51 @@ describe("CLI", () => {
       expect(output).toContain("Your live setup is still broader than the boundary you just approved");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
-      expect(output).toContain("traceroot-audit guard");
+      expect(output).toContain("traceroot-audit doctor");
+      expect(output).toContain("--watch --interval 60");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("can keep watching from doctor without switching to another command", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\nSTRIPE_SECRET_KEY=sk_test_123\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
+        "utf8"
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir, "--watch", "--cycles", "1", "--interval", "1"],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Doctor is staying with you and will keep watching this boundary now");
+      expect(output).toContain("TraceRoot Audit Doctor Watch");
+      expect(output).toContain("Doctor Watch is now keeping an eye on");
+      expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

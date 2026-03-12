@@ -9,6 +9,7 @@ import { loadHardeningProfile } from "../../hardening/profile";
 import { writeHardeningFiles } from "../../hardening/writer";
 import { promptHardeningSelections, resolveWizardTarget } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
+import { runTargetWatch } from "../watch";
 
 import type { CliRuntime } from "../index";
 
@@ -66,7 +67,7 @@ function renderDoctorSummary(options: {
     lines.push(
       "",
       "✅ Good news: your current setup already matches the approved boundary.",
-      `💓 Keep watching it with: traceroot-audit guard "${options.target}" --interval 60`
+      `💓 Keep watching it with: traceroot-audit doctor "${options.target}" --watch --interval 60`
     );
 
     return `${lines.join("\n")}\n`;
@@ -171,7 +172,7 @@ function renderDoctorSummary(options: {
   lines.push(
     "",
     "🚀 Best next command:",
-    `- traceroot-audit guard "${options.target}" --interval 60`
+    `- traceroot-audit doctor "${options.target}" --watch --interval 60`
   );
 
   return `${lines.join("\n")}\n`;
@@ -192,12 +193,28 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
       "--include-cwd",
       "when used with host discovery, also include the current working directory subtree"
     )
+    .option(
+      "--watch",
+      "after preparing the safer bundle, keep watching this target for new drift"
+    )
+    .option(
+      "--interval <seconds>",
+      "when used with --watch, seconds between checks",
+      "60"
+    )
+    .option(
+      "--cycles <count>",
+      "when used with --watch, number of watch cycles before exiting"
+    )
     .action(
       async (
         target: string | undefined,
         options: {
           host?: boolean;
           includeCwd?: boolean;
+          watch?: boolean;
+          interval?: string;
+          cycles?: string;
         }
       ) => {
         const effectiveTarget = await resolveWizardTarget(runtime, {
@@ -272,6 +289,43 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
             boundaryStatus
           })
         );
+
+        if (!options.watch) {
+          return;
+        }
+
+        const intervalSeconds = Number.parseInt(options.interval ?? "60", 10);
+        const maxCycles = options.cycles
+          ? Number.parseInt(options.cycles, 10)
+          : undefined;
+
+        if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+          runtime.io.stderr("`--interval` must be a positive integer number of seconds.\n");
+          runtime.exitCode = 1;
+          return;
+        }
+
+        if (
+          options.cycles !== undefined &&
+          (!Number.isInteger(maxCycles) || (maxCycles ?? 0) <= 0)
+        ) {
+          runtime.io.stderr("`--cycles` must be a positive integer when provided.\n");
+          runtime.exitCode = 1;
+          return;
+        }
+
+        runtime.io.stdout(
+          "\n💓 Doctor is staying with you and will keep watching this boundary now.\n\n"
+        );
+
+        await runTargetWatch({
+          runtime,
+          target: effectiveTarget,
+          intervalSeconds,
+          maxCycles,
+          header: "TraceRoot Audit Doctor Watch",
+          compactStart: true
+        });
       }
     );
 }
