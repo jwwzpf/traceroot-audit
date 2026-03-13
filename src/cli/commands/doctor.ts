@@ -249,6 +249,18 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
       "--notify-webhook <url>",
       "when used with --watch, also send high-risk action reminders to your webhook"
     )
+    .option(
+      "--notify-channel <channel>",
+      "when used with --watch, also send high-risk action reminders through one of your connected OpenClaw chat channels"
+    )
+    .option(
+      "--notify-target <target>",
+      "where TraceRoot should send those reminders in the chosen chat channel"
+    )
+    .option(
+      "--notify-account <account>",
+      "optional OpenClaw account name to use for that chat channel"
+    )
     .action(
       async (
         target: string | undefined,
@@ -259,6 +271,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           interval?: string;
           cycles?: string;
           notifyWebhook?: string;
+          notifyChannel?: string;
+          notifyTarget?: string;
+          notifyAccount?: string;
         }
       ) => {
         const effectiveTarget = await resolveWizardTarget(runtime, {
@@ -361,7 +376,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           header: "TraceRoot Audit Doctor Watch",
           compactStart: true,
           notifications: {
-            webhookUrl: options.notifyWebhook
+            webhookUrl: options.notifyWebhook,
+            openclawChannel: options.notifyChannel,
+            openclawTarget: options.notifyTarget,
+            openclawAccount: options.notifyAccount
           }
         });
       }

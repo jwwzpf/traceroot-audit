@@ -2,9 +2,11 @@ import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import { actionLabel } from "../audit/presentation";
 import {
-  hasWebhookNotification,
+  hasNotificationChannel,
   resolveNotificationConfig,
+  sendOpenClawChannelNotification,
   sendWebhookNotification,
+  validateNotificationConfig,
   type NotificationConfig,
   type ResolvedNotificationConfig
 } from "../audit/notifier";
@@ -323,12 +325,15 @@ async function notifyActionEvent(
   notificationConfig: ResolvedNotificationConfig,
   state: { warned: boolean }
 ): Promise<void> {
-  if (!hasWebhookNotification(notificationConfig)) {
+  if (!hasNotificationChannel(notificationConfig)) {
     return;
   }
 
   try {
-    await sendWebhookNotification(event, notificationConfig);
+    await Promise.all([
+      sendWebhookNotification(event, notificationConfig),
+      sendOpenClawChannelNotification(event, notificationConfig)
+    ]);
   } catch (error) {
     if (!state.warned) {
       const message =
@@ -608,6 +613,13 @@ export async function runTargetWatch(options: {
   const auditWriteState = { warned: false };
   const notificationState = { warned: false };
   const notificationConfig = resolveNotificationConfig(options.notifications);
+  const notificationValidationError = validateNotificationConfig(notificationConfig);
+
+  if (notificationValidationError) {
+    runtime.io.stderr(`${notificationValidationError}\n`);
+    runtime.exitCode = 1;
+    return;
+  }
   const alertState = {
     lastSentAtByFingerprint: new Map<string, number>()
   };
@@ -727,7 +739,12 @@ export async function runTargetWatch(options: {
     initialLines.push("");
   }
 
-  if (hasWebhookNotification(notificationConfig)) {
+  if (notificationConfig.openclawChannel && notificationConfig.openclawTarget) {
+    initialLines.push(
+      `📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：${notificationConfig.openclawChannel} → ${notificationConfig.openclawTarget}`,
+      ""
+    );
+  } else if (hasNotificationChannel(notificationConfig)) {
     initialLines.push(
       "📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你接好的通知入口。",
       ""

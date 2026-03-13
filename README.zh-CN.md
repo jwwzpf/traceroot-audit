@@ -47,6 +47,8 @@ npx traceroot-audit doctor
 npx traceroot-audit doctor /path/to/openclaw
 npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
+npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel telegram --notify-target @your-alerts
+npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp --notify-target +4917612345678
 ```
 
 对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包；如果加上 `--watch`，它还会继续替你守着这个边界。
@@ -153,6 +155,10 @@ node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 
 # 如果你想把高风险动作同步发到自己的提醒入口：
 node dist/cli/index.js doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
+
+# 如果 OpenClaw 已经接好了聊天入口，TraceRoot 也可以把提醒同步发过去：
+node dist/cli/index.js doctor /path/to/openclaw --watch --notify-channel telegram --notify-target @your-alerts
+node dist/cli/index.js doctor /path/to/openclaw --watch --notify-channel whatsapp --notify-target +4917612345678
 ```
 
 之后可以直接回看本地审计记录：
@@ -341,7 +347,7 @@ node dist/cli/index.js apply /path/to/openclaw
 
 当你已经通过 `harden` 批准了一套更安全的配置后，`doctor --watch` 是最推荐的继续使用方式。它会继续盯着这个目标，告诉你当前配置是不是仍然比批准过的边界更宽，或者后续有没有重新漂移出去。`guard` 仍然保留给更偏底层的用法。
 
-如果你已经有自己的提醒入口，`doctor --watch` 也可以把高风险动作同步发到 webhook。这样 TraceRoot 会一边继续在本地记审计时间线，一边把值得你立刻留意的动作提醒出去；相同动作短时间内不会反复提醒，避免把你轰炸到不想再看。默认情况下，陪跑模式也会尽量保持安静：没有新变化时，它不会每一轮都刷存在感。
+如果你已经有自己的提醒入口，`doctor --watch` 也可以把高风险动作同步发到 webhook。如果 OpenClaw 已经接好了聊天入口，TraceRoot 也可以通过 `--notify-channel` 和 `--notify-target` 把同样的提醒发到 Telegram、WhatsApp 这类渠道。这样 TraceRoot 会一边继续在本地记审计时间线，一边把值得你立刻留意的动作提醒出去；相同动作短时间内不会反复提醒，避免把你轰炸到不想再看。默认情况下，陪跑模式也会尽量保持安静：没有新变化时，它不会每一轮都刷存在感。
 
 示例：
 

@@ -47,6 +47,8 @@ npx traceroot-audit doctor
 npx traceroot-audit doctor /path/to/openclaw
 npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
+npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel telegram --notify-target @your-alerts
+npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp --notify-target +4917612345678
 ```
 
 For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
@@ -153,6 +155,10 @@ node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
 
 # If you want high-risk actions mirrored into your own alert endpoint:
 node dist/cli/index.js doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
+
+# If OpenClaw already has a chat channel connected, TraceRoot can mirror reminders there too:
+node dist/cli/index.js doctor /path/to/openclaw --watch --notify-channel telegram --notify-target @your-alerts
+node dist/cli/index.js doctor /path/to/openclaw --watch --notify-channel whatsapp --notify-target +4917612345678
 ```
 
 Advanced workflow:
@@ -341,7 +347,7 @@ node dist/cli/index.js apply /path/to/openclaw
 
 Once you have approved a safer profile, `doctor --watch` is now the recommended way to keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later. The lower-level `guard` command still exists for advanced flows.
 
-If you already have your own alert endpoint, `doctor --watch` can also mirror high-risk action reminders to a webhook while still keeping the full local audit timeline on disk. Repeated copies of the same risky action are automatically quieted for a short window so TraceRoot does not spam you, and calm watch cycles stay quiet by default instead of printing a heartbeat every round.
+If you already have your own alert endpoint, `doctor --watch` can mirror high-risk action reminders to a webhook. If OpenClaw already has a chat channel connected, TraceRoot can also relay the same reminder through channels like Telegram or WhatsApp by using `--notify-channel` and `--notify-target`. TraceRoot still keeps the full local audit timeline on disk either way. Repeated copies of the same risky action are automatically quieted for a short window so TraceRoot does not spam you, and calm watch cycles stay quiet by default instead of printing a heartbeat every round.
 
 Example:
 

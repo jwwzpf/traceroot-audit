@@ -10,6 +10,9 @@ interface GuardOptions {
   interval: string;
   cycles?: string;
   notifyWebhook?: string;
+  notifyChannel?: string;
+  notifyTarget?: string;
+  notifyAccount?: string;
 }
 
 export function registerGuardCommand(program: Command, runtime: CliRuntime): void {
@@ -37,6 +40,18 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
     .option(
       "--notify-webhook <url>",
       "also send high-risk action reminders to your webhook"
+    )
+    .option(
+      "--notify-channel <channel>",
+      "also send high-risk action reminders through one of your connected OpenClaw chat channels"
+    )
+    .option(
+      "--notify-target <target>",
+      "where TraceRoot should send those reminders in the chosen chat channel"
+    )
+    .option(
+      "--notify-account <account>",
+      "optional OpenClaw account name to use for that chat channel"
     )
     .action(async (target: string, options: GuardOptions) => {
       const intervalSeconds = Number.parseInt(options.interval, 10);
@@ -73,7 +88,10 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
         intervalSeconds,
         maxCycles,
         notifications: {
-          webhookUrl: options.notifyWebhook
+          webhookUrl: options.notifyWebhook,
+          openclawChannel: options.notifyChannel,
+          openclawTarget: options.notifyTarget,
+          openclawAccount: options.notifyAccount
         }
       });
     });

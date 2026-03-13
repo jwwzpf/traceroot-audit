@@ -1,18 +1,48 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import { actionLabel } from "./presentation";
 import type { AuditEvent, AuditSeverity } from "./types";
 import { displayUserPath } from "../utils/paths";
 
+const execFileAsync = promisify(execFile);
+
+export const SUPPORTED_OPENCLAW_NOTIFY_CHANNELS = [
+  "whatsapp",
+  "telegram",
+  "discord",
+  "googlechat",
+  "slack",
+  "mattermost",
+  "signal",
+  "imessage",
+  "msteams"
+] as const;
+
 export interface NotificationConfig {
   webhookUrl?: string;
+  openclawChannel?: string;
+  openclawTarget?: string;
+  openclawAccount?: string;
+  openclawBin?: string;
   cooldownSeconds?: number;
 }
 
 export interface ResolvedNotificationConfig {
   webhookUrl?: string;
+  openclawChannel?: string;
+  openclawTarget?: string;
+  openclawAccount?: string;
+  openclawBin: string;
   cooldownMs: number;
 }
 
 function normalizeWebhookUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeText(value?: string): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
@@ -66,6 +96,30 @@ function buildTextSummary(event: AuditEvent): string {
   return parts.join("\n");
 }
 
+function buildChatRelayText(event: AuditEvent): string {
+  const lines = [
+    `${event.severity === "critical" ? "🚨" : event.severity === "high-risk" ? "🛑" : "⚠️"} TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
+    `动作：${actionLabel(event.action)}`
+  ];
+
+  if (event.target) {
+    lines.push(`位置：${displayUserPath(event.target)}`);
+  }
+
+  const status = statusLabel(event);
+  if (status) {
+    lines.push(`状态：${status}`);
+  }
+
+  if (event.recommendation) {
+    lines.push(`建议：${event.recommendation}`);
+  }
+
+  lines.push("本地审计时间线也已经同步更新了。");
+
+  return lines.join("\n");
+}
+
 export function resolveNotificationConfig(
   config: NotificationConfig = {}
 ): ResolvedNotificationConfig {
@@ -84,12 +138,63 @@ export function resolveNotificationConfig(
     webhookUrl:
       normalizeWebhookUrl(config.webhookUrl) ??
       normalizeWebhookUrl(process.env.TRACEROOT_NOTIFY_WEBHOOK_URL),
+    openclawChannel:
+      normalizeText(config.openclawChannel) ??
+      normalizeText(process.env.TRACEROOT_NOTIFY_CHANNEL),
+    openclawTarget:
+      normalizeText(config.openclawTarget) ??
+      normalizeText(process.env.TRACEROOT_NOTIFY_TARGET),
+    openclawAccount:
+      normalizeText(config.openclawAccount) ??
+      normalizeText(process.env.TRACEROOT_NOTIFY_ACCOUNT),
+    openclawBin:
+      normalizeText(config.openclawBin) ??
+      normalizeText(process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN) ??
+      "openclaw",
     cooldownMs: cooldownSeconds * 1000
   };
 }
 
 export function hasWebhookNotification(config: ResolvedNotificationConfig): boolean {
   return typeof config.webhookUrl === "string" && config.webhookUrl.length > 0;
+}
+
+export function hasOpenClawChannelNotification(
+  config: ResolvedNotificationConfig
+): boolean {
+  return (
+    typeof config.openclawChannel === "string" &&
+    config.openclawChannel.length > 0 &&
+    typeof config.openclawTarget === "string" &&
+    config.openclawTarget.length > 0
+  );
+}
+
+export function hasNotificationChannel(config: ResolvedNotificationConfig): boolean {
+  return hasWebhookNotification(config) || hasOpenClawChannelNotification(config);
+}
+
+export function validateNotificationConfig(
+  config: ResolvedNotificationConfig
+): string | undefined {
+  if (config.openclawChannel && !config.openclawTarget) {
+    return "如果你想把提醒发到聊天入口，请同时提供 `--notify-target`。";
+  }
+
+  if (config.openclawTarget && !config.openclawChannel) {
+    return "如果你提供了 `--notify-target`，也请同时提供 `--notify-channel`。";
+  }
+
+  if (
+    config.openclawChannel &&
+    !SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.includes(
+      config.openclawChannel as (typeof SUPPORTED_OPENCLAW_NOTIFY_CHANNELS)[number]
+    )
+  ) {
+    return `TraceRoot 目前支持把提醒发到这些 OpenClaw 聊天入口：${SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.join("、")}。`;
+  }
+
+  return undefined;
 }
 
 export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> {
@@ -130,5 +235,39 @@ export async function sendWebhookNotification(
 
   if (!response.ok) {
     throw new Error(`Webhook returned ${response.status}`);
+  }
+}
+
+export async function sendOpenClawChannelNotification(
+  event: AuditEvent,
+  config: ResolvedNotificationConfig
+): Promise<void> {
+  if (!hasOpenClawChannelNotification(config)) {
+    return;
+  }
+
+  const args = [
+    "message",
+    "send",
+    "--channel",
+    config.openclawChannel!,
+    "--target",
+    config.openclawTarget!,
+    "--message",
+    buildChatRelayText(event)
+  ];
+
+  if (config.openclawAccount) {
+    args.push("--account", config.openclawAccount);
+  }
+
+  try {
+    await execFileAsync(config.openclawBin, args);
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "unknown OpenClaw channel delivery error";
+    throw new Error(`OpenClaw channel relay failed: ${message}`);
   }
 }

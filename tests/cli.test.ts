@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -92,6 +92,65 @@ async function createWebhookReceiver() {
           resolve();
         });
       });
+    }
+  };
+}
+
+async function createFakeOpenClawMessenger() {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-messenger-"));
+  const outputPath = path.join(tempDir, "messages.jsonl");
+  const executablePath = path.join(tempDir, "openclaw");
+
+  await writeFile(
+    executablePath,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const outputPath = ${JSON.stringify(outputPath)};
+fs.appendFileSync(outputPath, JSON.stringify({ argv: process.argv.slice(2) }) + "\\n", "utf8");
+process.stdout.write("ok");
+`,
+    "utf8"
+  );
+  await chmod(executablePath, 0o755);
+
+  return {
+    executablePath,
+    async waitForRequest(timeoutMs = 5000): Promise<string[]> {
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < timeoutMs) {
+        try {
+          const content = await readFile(outputPath, "utf8");
+          const lines = content
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as { argv: string[] });
+          if (lines.length > 0) {
+            return lines[0].argv;
+          }
+        } catch {
+          // wait for first write
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      throw new Error("Timed out waiting for OpenClaw relay request");
+    },
+    async getCount(): Promise<number> {
+      try {
+        const content = await readFile(outputPath, "utf8");
+        return content
+          .trim()
+          .split("\n")
+          .filter(Boolean).length;
+      } catch {
+        return 0;
+      }
+    },
+    async close(): Promise<void> {
+      await rm(tempDir, { recursive: true, force: true });
     }
   };
 }
@@ -846,6 +905,258 @@ describe("CLI", () => {
       expect(webhook.getCount()).toBe(1);
     } finally {
       await webhook.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("can send a chat-channel reminder through OpenClaw when doctor watch sees a high-risk action", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1",
+          "--notify-channel",
+          "whatsapp",
+          "--notify-target",
+          "+4917612345678"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const tapExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这封外部邮件是不是真的该发出去。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      const argv = await messenger.waitForRequest();
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(tapExitCode).toBe(0);
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("whatsapp → +4917612345678");
+      expect(argv).toContain("message");
+      expect(argv).toContain("send");
+      expect(argv).toContain("--channel");
+      expect(argv).toContain("whatsapp");
+      expect(argv).toContain("--target");
+      expect(argv).toContain("+4917612345678");
+      expect(argv.join(" ")).toContain("TraceRoot 刚盯到一个高风险动作");
+      expect(argv.join(" ")).toContain("动作：对外发邮件");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not spam duplicate chat-channel reminders for the same action in a short window", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-dedupe-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-dedupe-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "3",
+          "--interval",
+          "1",
+          "--notify-channel",
+          "telegram",
+          "--notify-target",
+          "@ops"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const tapArgs = [
+        "node",
+        "traceroot-audit",
+        "tap",
+        "--action",
+        "send-email",
+        "--severity",
+        "high-risk",
+        "--target",
+        tempDir,
+        "--runtime",
+        "openclaw",
+        "--surface-kind",
+        "runtime",
+        "--recommendation",
+        "先确认这封外部邮件是不是真的该发出去。",
+        "--",
+        process.execPath,
+        "-e",
+        "process.exit(0)"
+      ];
+
+      await runCli(tapArgs, createCapture().io);
+      await messenger.waitForRequest();
+      await runCli(tapArgs, createCapture().io);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await watchPromise;
+
+      expect(await messenger.getCount()).toBe(1);
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("explains missing chat target when a notify channel is chosen without one", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-validation-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-validation-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1",
+          "--notify-channel",
+          "telegram"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      expect(exitCode).toBe(1);
+      expect(capture.read().stderr).toContain("请同时提供 `--notify-target`");
+    } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {
