@@ -973,6 +973,17 @@ describe("CLI", () => {
         ),
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "tool-array-config.yaml"),
+        [
+          "tools:",
+          "  - name: emailer",
+          "    command:",
+          "      - tsx",
+          "      - mailer.ts"
+        ].join("\n"),
+        "utf8"
+      );
       await mkdir(path.join(tempDir, "skills", "mailer-tool", "src"), { recursive: true });
       await writeFile(
         path.join(tempDir, "skills", "mailer-tool", "src", "send.ts"),
@@ -1052,6 +1063,10 @@ describe("CLI", () => {
           };
         };
       };
+      const toolArrayConfig = await readFile(
+        path.join(tempDir, "tool-array-config.yaml"),
+        "utf8"
+      );
       const nestedPackageJson = JSON.parse(
         await readFile(path.join(tempDir, "skills", "mailer-tool", "package.json"), "utf8")
       ) as {
@@ -1090,6 +1105,7 @@ describe("CLI", () => {
       expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「mailer-tool」 命令入口");
       expect(tapPlan).toContain("mcp-config.json 里的 MCP 服务 「mailer」 入口");
       expect(tapPlan).toContain("mcp-array-config.json 里的 MCP 服务 「poster」 入口");
+      expect(tapPlan).toContain("tool-array-config.yaml 里的工具 「emailer」 入口");
       expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
@@ -1099,6 +1115,8 @@ describe("CLI", () => {
       expect(mcpConfig.servers.mailer.args[0]).toContain(".traceroot/tap/");
       expect(mcpArrayConfig.mcpServers.poster.command[0]).toBe("node");
       expect(mcpArrayConfig.mcpServers.poster.command[1]).toContain(".traceroot/tap/");
+      expect(toolArrayConfig).toContain("- node");
+      expect(toolArrayConfig).toContain(".traceroot/tap/");
       expect(nestedPackageJson.scripts.start).toContain("node .traceroot/tap/");
       expect(nestedPackageJson.bin["mailer-tool"]).toContain(".traceroot/tap/");
       await expect(

@@ -875,6 +875,7 @@ function isStructuralFieldName(value: string | undefined): boolean {
 function displayLabelForConfigCandidate(options: {
   filePath: string;
   segments: Array<string | number>;
+  objectName?: string;
 }): string {
   const normalizedFilePath = options.filePath.replace(/\\/g, "/");
   const lowerFilePath = normalizedFilePath.toLowerCase();
@@ -883,6 +884,7 @@ function displayLabelForConfigCandidate(options: {
     .map((segment) => segment.toLowerCase());
 
   const mcpServerName =
+    options.objectName ??
     lastNamedSegment(options.segments, "mcpServers") ??
     lastNamedSegment(options.segments, "servers");
 
@@ -891,13 +893,17 @@ function displayLabelForConfigCandidate(options: {
   }
 
   const toolName =
-    lastNamedSegment(options.segments, "tools") ?? lastNamedSegment(options.segments, "tool");
+    options.objectName ??
+    lastNamedSegment(options.segments, "tools") ??
+    lastNamedSegment(options.segments, "tool");
   if (toolName && !isStructuralFieldName(toolName)) {
     return `${normalizedFilePath} 里的工具 ${quotedName(toolName)} 入口`;
   }
 
   const skillName =
-    lastNamedSegment(options.segments, "skills") ?? lastNamedSegment(options.segments, "skill");
+    options.objectName ??
+    lastNamedSegment(options.segments, "skills") ??
+    lastNamedSegment(options.segments, "skill");
   if (skillName && !isStructuralFieldName(skillName)) {
     return `${normalizedFilePath} 里的技能 ${quotedName(skillName)} 入口`;
   }
@@ -919,6 +925,7 @@ function collectConfigEntrypoints(
     relativePath: string;
     format: "json" | "yaml";
     segments?: Array<string | number>;
+    objectName?: string;
   }
 ): ConfigEntrypointCandidate[] {
   const segments = options.segments ?? [];
@@ -941,6 +948,17 @@ function collectConfigEntrypoints(
     return candidates;
   }
 
+  const objectName =
+    typeof (node as Record<string, unknown>).name === "string"
+      ? String((node as Record<string, unknown>).name)
+      : typeof (node as Record<string, unknown>).id === "string"
+        ? String((node as Record<string, unknown>).id)
+        : typeof (node as Record<string, unknown>).key === "string"
+          ? String((node as Record<string, unknown>).key)
+          : typeof (node as Record<string, unknown>).slug === "string"
+            ? String((node as Record<string, unknown>).slug)
+            : options.objectName;
+
   for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
     const nextSegments = [...segments, key];
     const siblingArgsEntry = Object.entries(node as Record<string, unknown>).find(
@@ -955,7 +973,8 @@ function collectConfigEntrypoints(
         name: `${options.relativePath}:${propertyPath}`,
         displayLabel: displayLabelForConfigCandidate({
           filePath: options.relativePath,
-          segments: nextSegments
+          segments: nextSegments,
+          objectName
         }),
         commandValueStyle: "string",
         command: value,
@@ -984,7 +1003,8 @@ function collectConfigEntrypoints(
         name: `${options.relativePath}:${propertyPath}`,
         displayLabel: displayLabelForConfigCandidate({
           filePath: options.relativePath,
-          segments: nextSegments
+          segments: nextSegments,
+          objectName
         }),
         commandValueStyle: "argv",
         command: value[0]!,
@@ -1000,7 +1020,8 @@ function collectConfigEntrypoints(
     candidates.push(
       ...collectConfigEntrypoints(value, {
         ...options,
-        segments: nextSegments
+        segments: nextSegments,
+        objectName
       })
     );
   }
