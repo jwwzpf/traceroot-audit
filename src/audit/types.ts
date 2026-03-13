@@ -13,7 +13,7 @@ export interface AuditEvent {
   timestamp: string;
   severity: AuditSeverity;
   category: AuditCategory;
-  source: "doctor-watch" | "guard-watch" | "host-watch" | "tap-wrapper";
+  source: "doctor-watch" | "guard-watch" | "host-watch" | "tap-wrapper" | "runtime-feed";
   target: string | null;
   message: string;
   runtime?: string;

@@ -1,6 +1,11 @@
 import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import { actionLabel } from "../audit/presentation";
+import {
+  createRuntimeFeedCursor,
+  discoverRuntimeEventFeeds,
+  readNewRuntimeFeedEvents
+} from "../audit/feeds";
 import { discoverHost } from "../core/discovery";
 import {
   createHostSnapshot,
@@ -511,6 +516,8 @@ export async function runTargetWatch(options: {
     .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
     .slice(0, 3);
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
+  const runtimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
+  const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
   let previousBoundaryStatus: BoundaryStatus | null = null;
 
   if (hardeningProfileResult.profile) {
@@ -597,6 +604,19 @@ export async function runTargetWatch(options: {
     initialLines.push("");
   }
 
+  if (runtimeFeeds.length > 0) {
+    initialLines.push(
+      "🔌 TraceRoot 还会继续听这些运行时事件入口：",
+      ...runtimeFeeds.slice(0, 3).map((feed) => `- ${feed.displayPath}`)
+    );
+
+    if (runtimeFeeds.length > 3) {
+      initialLines.push(`- 还有 ${runtimeFeeds.length - 3} 个入口也会一起监听`);
+    }
+
+    initialLines.push("");
+  }
+
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
 
   if (recentStartupAlerts.length > 0) {
@@ -673,7 +693,21 @@ export async function runTargetWatch(options: {
       await sleep(intervalSeconds * 1000);
     }
 
+    const latestRuntimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
+    for (const feed of latestRuntimeFeeds) {
+      if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
+        runtimeFeeds.push(feed);
+        runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
+      }
+    }
+
     const latestScan = await scanTarget(target);
+    const feedEvents = await readNewRuntimeFeedEvents({
+      feeds: runtimeFeeds,
+      cursor: runtimeFeedCursor,
+      targetRoot: resolvedTarget.rootDir
+    });
+    await writeAuditEvents(runtime, feedEvents, auditWriteState);
     const currentSnapshot = createScanSnapshot(latestScan);
     const diff = diffScanSnapshots(previousSnapshot, currentSnapshot);
     let boundaryDiff = null;

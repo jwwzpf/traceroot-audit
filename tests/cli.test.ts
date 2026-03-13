@@ -439,6 +439,88 @@ describe("CLI", () => {
     }
   });
 
+  it("surfaces a live alert when doctor watch ingests a runtime event feed", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-feed-alert-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-feed-alert-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(
+        path.join(tempDir, "logs", "openclaw-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          action: "send-email",
+          severity: "high-risk",
+          status: "attempted",
+          runtime: "openclaw",
+          message: "OpenClaw 正在准备发一封外部邮件。",
+          recommendation: "先确认这封外部邮件是不是真的该发出去。"
+        })}\n`,
+        "utf8"
+      );
+
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("TraceRoot 实时提醒");
+      expect(watchOutput).toContain("Agent 刚刚触发了一个高风险动作：对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("OpenClaw 正在准备发一封外部邮件。");
+      expect(logsCapture.read().stdout).toContain("对外发邮件：出现了 1 次");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("renders SARIF output for scan", async () => {
     const capture = createCapture();
     const exitCode = await runCli(
