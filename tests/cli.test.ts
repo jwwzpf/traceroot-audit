@@ -137,7 +137,7 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 已经先帮你准备好了这些修复");
       expect(output).toContain("你把这套 bundle 应用进去后");
       expect(output).toContain("下面这些还需要你拍板");
-      expect(output).toContain("现在就可以这样做");
+      expect(output).toContain("要让这套更安全的运行态真正生效");
       expect(output).toContain("你当前的运行态配置仍然比你刚批准的边界更宽");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
@@ -941,6 +941,45 @@ describe("CLI", () => {
         "tool:\n  command: tsx mailer.ts\n",
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "mcp-config.json"),
+        JSON.stringify(
+          {
+            servers: {
+              mailer: {
+                command: "tsx",
+                args: ["mailer.ts", "--dry-run"]
+              }
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "skills", "mailer-tool", "src"), { recursive: true });
+      await writeFile(
+        path.join(tempDir, "skills", "mailer-tool", "src", "send.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "skills", "mailer-tool", "package.json"),
+        JSON.stringify(
+          {
+            name: "mailer-tool",
+            scripts: {
+              start: "tsx src/send.ts"
+            },
+            bin: {
+              "mailer-tool": "src/send.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
 
       await runCli(
         ["node", "traceroot-audit", "harden", tempDir],
@@ -978,6 +1017,26 @@ describe("CLI", () => {
         path.join(tempDir, "tool-config.yaml"),
         "utf8"
       );
+      const mcpConfig = JSON.parse(
+        await readFile(path.join(tempDir, "mcp-config.json"), "utf8")
+      ) as {
+        servers: {
+          mailer: {
+            command: string;
+            args: string[];
+          };
+        };
+      };
+      const nestedPackageJson = JSON.parse(
+        await readFile(path.join(tempDir, "skills", "mailer-tool", "package.json"), "utf8")
+      ) as {
+        scripts: {
+          start: string;
+        };
+        bin: {
+          "mailer-tool": string;
+        };
+      };
       const wrapperDir = path.join(tempDir, ".traceroot", "tap");
       const wrapperEntries = await fg("[0-9][0-9]-*.mjs", {
         cwd: wrapperDir,
@@ -990,6 +1049,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("动作审计已经开始盯住");
       expect(capture.read().stdout).toContain("对外发邮件");
       expect(capture.read().stdout).toContain("traceroot-audit logs");
+      expect(capture.read().stdout).not.toContain("看细节就行");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
@@ -1001,11 +1061,17 @@ describe("CLI", () => {
       expect(tapPlan).toContain("send-email");
       expect(tapPlan).toContain("已自动接好");
       expect(tapPlan).toContain("tool-config.yaml → tool.command");
+      expect(tapPlan).toContain("skills/mailer-tool/package.json → scripts.start");
+      expect(tapPlan).toContain("skills/mailer-tool/package.json → bin.mailer-tool");
       expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
       expect(packageJson).toContain("\"send-email\"");
       expect(toolConfig).toContain("node .traceroot/tap/");
+      expect(mcpConfig.servers.mailer.command).toBe("node");
+      expect(mcpConfig.servers.mailer.args[0]).toContain(".traceroot/tap/");
+      expect(nestedPackageJson.scripts.start).toContain("node .traceroot/tap/");
+      expect(nestedPackageJson.bin["mailer-tool"]).toContain(".traceroot/tap/");
       await expect(
         readFile(
           path.join(tempDir, ".traceroot", "backups", "package.json.before-action-audit.json"),
@@ -1014,10 +1080,54 @@ describe("CLI", () => {
       ).resolves.toContain("\"send-email\": \"tsx mailer.ts\"");
       await expect(
         readFile(
+          path.join(
+            tempDir,
+            ".traceroot",
+            "backups",
+            "skills",
+            "mailer-tool",
+            "package.json.before-action-audit.json"
+          ),
+          "utf8"
+        )
+      ).resolves.toContain("\"start\": \"tsx src/send.ts\"");
+      await expect(
+        readFile(
+          path.join(
+            tempDir,
+            ".traceroot",
+            "backups",
+            "skills",
+            "mailer-tool",
+            "package.json.before-action-audit.json"
+          ),
+          "utf8"
+        )
+      ).resolves.toContain("\"mailer-tool\": \"src/send.ts\"");
+      await expect(
+        readFile(
           path.join(tempDir, ".traceroot", "backups", "tool-config.yaml.before-action-audit"),
           "utf8"
         )
       ).resolves.toContain("command: tsx mailer.ts");
+      await expect(
+        readFile(
+          path.join(tempDir, ".traceroot", "backups", "mcp-config.json.before-action-audit"),
+          "utf8"
+        )
+      ).resolves.toContain("\"args\": [");
+      await expect(
+        readFile(
+          path.join(tempDir, ".traceroot", "backups", "mcp-config.json.before-action-audit"),
+          "utf8"
+        )
+      ).resolves.toContain("\"mailer.ts\"");
+      await expect(
+        readFile(
+          path.join(tempDir, ".traceroot", "backups", "mcp-config.json.before-action-audit"),
+          "utf8"
+        )
+      ).resolves.toContain("\"--dry-run\"");
       expect(wrapperEntries.length).toBeGreaterThan(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });

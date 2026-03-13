@@ -69,7 +69,7 @@ function renderDoctorSummary(options: {
     lines.push(
       "",
       "✅ 好消息：你当前的配置已经和刚批准的边界对齐了。",
-      `💓 如果你想继续陪跑守护它，可以运行：traceroot-audit doctor "${displayUserPath(options.plan.rootDir)}" --watch --interval 60`
+      "💓 如果你想继续陪跑守护它，下一步直接打开 Doctor Watch 就可以了。"
     );
 
     return `${lines.join("\n")}\n`;
@@ -148,7 +148,7 @@ function renderDoctorSummary(options: {
 
     if (options.bundle.tapPendingActionsCount > 0 && options.bundle.tapPlanPath) {
       lines.push(
-        `- 还有 ${options.bundle.tapPendingActionsCount} 类高风险动作暂时没自动接上，TraceRoot 已经把它们记在 ${displayPath(options.bundle.tapPlanPath)} 里了。`
+        `- 还有 ${options.bundle.tapPendingActionsCount} 类高风险动作暂时还没接好，TraceRoot 会继续把它们保留为待覆盖动作。`
       );
     }
   }
@@ -181,15 +181,14 @@ function renderDoctorSummary(options: {
   if (options.bundle.composeOverridePath && options.bundle.composeSourcePath) {
     lines.push(
       "",
-      "⚡ 现在就可以这样做：",
-      `- cd "${options.plan.rootDir}"`,
-      `- docker compose -f ${path.basename(options.bundle.composeSourcePath)} -f ${path.basename(options.bundle.composeOverridePath)} up -d`
+      "⚡ 要让这套更安全的运行态真正生效：",
+      `- 按 ${displayPath(options.bundle.planPath)} 里的步骤，把新的 compose / env / manifest 同步到 live runtime。`
     );
   }
 
   lines.push(
     "",
-    "🚀 下一步最适合这样跑：",
+    "🚀 如果你想继续让 TraceRoot 陪跑这个 agent：",
     `- traceroot-audit doctor "${options.target}" --watch --interval 60`
   );
 

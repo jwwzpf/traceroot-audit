@@ -228,6 +228,23 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
   return lines;
 }
 
+function isAlertWorthyActionEvent(event: AuditEvent): boolean {
+  return (
+    event.category === "action-event" &&
+    (event.status === "attempted" ||
+      (event.status === "failed" && event.severity !== "safe"))
+  );
+}
+
+function happenedRecently(timestampValue: string, windowMs: number): boolean {
+  const value = new Date(timestampValue).getTime();
+  if (Number.isNaN(value)) {
+    return false;
+  }
+
+  return Date.now() - value <= windowMs;
+}
+
 async function writeAuditEvents(
   runtime: CliRuntime,
   events: AuditEvent[],
@@ -489,6 +506,10 @@ export async function runTargetWatch(options: {
       .filter((event) => event.category === "action-event")
       .map(actionEventKey)
   );
+  const recentStartupAlerts = initialAuditEvents.events
+    .filter(isAlertWorthyActionEvent)
+    .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
+    .slice(0, 3);
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
   let previousBoundaryStatus: BoundaryStatus | null = null;
 
@@ -577,6 +598,13 @@ export async function runTargetWatch(options: {
   }
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
+
+  if (recentStartupAlerts.length > 0) {
+    for (const event of recentStartupAlerts.reverse()) {
+      runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
+    }
+  }
+
   const startupEvents: AuditEvent[] = [
     {
       timestamp: auditTimestamp(),
@@ -670,13 +698,9 @@ export async function runTargetWatch(options: {
         target: resolvedTarget.absolutePath
       });
       const newActionAlerts = latestAuditEvents.events
-        .filter((event) => event.category === "action-event")
+        .filter(isAlertWorthyActionEvent)
         .filter((event) => !seenActionEvents.has(actionEventKey(event)))
-        .filter(
-          (event) =>
-            event.status === "attempted" ||
-            (event.status === "failed" && event.severity !== "safe")
-        );
+        ;
 
       for (const event of newActionAlerts) {
         runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
@@ -825,13 +849,9 @@ export async function runTargetWatch(options: {
       target: resolvedTarget.absolutePath
     });
     const newActionAlerts = latestAuditEvents.events
-      .filter((event) => event.category === "action-event")
+      .filter(isAlertWorthyActionEvent)
       .filter((event) => !seenActionEvents.has(actionEventKey(event)))
-      .filter(
-        (event) =>
-          event.status === "attempted" ||
-          (event.status === "failed" && event.severity !== "safe")
-      );
+      ;
 
     for (const event of newActionAlerts) {
       runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);

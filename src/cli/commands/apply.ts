@@ -71,7 +71,7 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
 
       if (bundle.composeOverridePath && bundle.composeSourcePath) {
         lines.push(
-          `- 用更安全的 compose 配置重新启动 runtime：docker compose -f ${bundle.composeSourcePath} -f ${bundle.composeOverridePath} up -d`
+          `- 要让更安全的网络边界真正生效，按 ${displayUserPath(bundle.planPath, { cwd: resolvedTarget.rootDir })} 里的步骤把新的 compose 配置同步到 live runtime。`
         );
       } else {
         lines.push("- 检查一下 runtime 的网络暴露范围，能只留在本机就尽量只留在本机。");
@@ -87,7 +87,7 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
 
         if (bundle.tapPendingActionsCount > 0) {
           lines.push(
-            `- 还有 ${bundle.tapPendingActionsCount} 类高风险动作暂时没有自动接上。需要时再打开 ${displayUserPath(bundle.tapPlanPath, { cwd: resolvedTarget.rootDir })} 看细节就行。`
+            `- 还有 ${bundle.tapPendingActionsCount} 类高风险动作暂时还没接好，TraceRoot 会继续把它们保留为待覆盖动作。`
           );
         }
       }

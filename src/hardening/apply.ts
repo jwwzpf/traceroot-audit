@@ -49,10 +49,14 @@ export interface TapEntrypoint {
   name: string;
   currentCommand: string;
   suggestedCommand: string;
+  currentArgs?: string[];
+  suggestedArgs?: string[];
   installStatus: "manual" | "installed" | "already-installed";
   filePath?: string;
   propertyPath?: string;
   pathSegments?: Array<string | number>;
+  argsPropertyPath?: string;
+  argsPathSegments?: Array<string | number>;
   format?: "json" | "yaml";
 }
 
@@ -267,7 +271,7 @@ function renderApplyPlan(options: {
 
     if (options.tapPendingActionsCount > 0) {
       lines.push(
-        `5. 还有 ${options.tapPendingActionsCount} 类高风险动作暂时没有自动接上。需要时再打开 \`${path.basename(options.tapPlanPath)}\` 看接入细节就行。`
+        `5. 还有 ${options.tapPendingActionsCount} 类高风险动作暂时还没接好。TraceRoot 会继续把它们保留为待覆盖动作。`
       );
     }
   }
@@ -287,15 +291,21 @@ interface PackageEntrypointCandidate {
   kind: "npm-script" | "bin";
   name: string;
   command: string;
+  filePath: string;
+  propertyPath: string;
+  pathSegments: Array<string | number>;
 }
 
 interface ConfigEntrypointCandidate {
   kind: "config-command";
   name: string;
   command: string;
+  args?: string[];
   filePath: string;
   propertyPath: string;
   pathSegments: Array<string | number>;
+  argsPropertyPath?: string;
+  argsPathSegments?: Array<string | number>;
   format: "json" | "yaml";
 }
 
@@ -384,6 +394,27 @@ function iconForSeverity(severity) {
   return "🟢";
 }
 
+function actionLabel(action) {
+  if (!action) return "未知动作";
+  if (action === "send-email") return "对外发邮件";
+  if (action === "publish-or-send-message") return "对外发帖或发消息";
+  if (action === "delete-or-modify-files") return "删改本地文件";
+  if (action === "purchase-or-payment") return "付款或下单";
+  if (action === "finance-access") return "访问金融或交易数据";
+  return String(action).replace(/^run-/, "运行 ").replace(/-/g, " ");
+}
+
+function displayUserPath(value) {
+  const resolved = path.resolve(value);
+  const cwd = process.cwd();
+  const home = path.resolve(os.homedir());
+  if (resolved === cwd) return ".";
+  if (resolved.startsWith(cwd + path.sep)) return "./" + path.relative(cwd, resolved).split(path.sep).join("/");
+  if (resolved === home) return "~";
+  if (resolved.startsWith(home + path.sep)) return "~/" + path.relative(home, resolved).split(path.sep).join("/");
+  return resolved.split(path.sep).join("/");
+}
+
 async function appendEvents(events) {
   const auditDir = path.join(os.homedir(), ".traceroot", "audit");
   const eventsPath = path.join(auditDir, "events.jsonl");
@@ -409,13 +440,13 @@ function runCommand(command, args, cwd) {
 export async function runTraceRootAction(config) {
   const commandArgs = process.argv.slice(2);
   const target = config.target ?? process.cwd();
-  const attemptedMessage = config.message ?? \`Agent 正在尝试执行一个动作：\${config.action}\`;
+  const attemptedMessage = config.message ?? \`Agent 正在尝试执行一个动作：\${actionLabel(config.action)}\`;
 
   console.log(
     [
-      \`\${iconForSeverity(config.severity)} TraceRoot 动作审计\`,
-      \`🧩 动作：\${config.action}\`,
-      \`🎯 Target：\${target}\`
+      \`\${iconForSeverity(config.severity)} TraceRoot 正在记下一次动作审计\`,
+      \`🧩 当前动作：\${actionLabel(config.action)}\`,
+      \`🎯 所在位置：\${displayUserPath(target)}\`
     ].join("\\n")
   );
 
@@ -453,8 +484,8 @@ export async function runTraceRootAction(config) {
           action: config.action,
           status: succeeded ? "succeeded" : "failed",
           message: succeeded
-            ? \`Agent 动作执行成功：\${config.action}\`
-            : \`Agent 动作执行失败：\${config.action}\`,
+            ? \`Agent 动作执行成功：\${actionLabel(config.action)}\`
+            : \`Agent 动作执行失败：\${actionLabel(config.action)}\`,
           recommendation: succeeded
             ? undefined
             : config.recommendation,
@@ -466,7 +497,7 @@ export async function runTraceRootAction(config) {
           }
         }
       ]);
-      console.log(\`\${succeeded ? "✅" : "❌"} TraceRoot 已经记下这次动作：\${config.action}\${succeeded ? "（成功）" : "（失败）"}\`);
+      console.log(\`\${succeeded ? "✅" : "❌"} TraceRoot 已经记下这次动作：\${actionLabel(config.action)}\${succeeded ? "（成功）" : "（失败）"}\`);
       process.exitCode = result.code;
       return;
     } catch (error) {
@@ -494,7 +525,7 @@ export async function runTraceRootAction(config) {
       surfaceKind: config.surfaceKind,
       action: config.action,
       status: "failed",
-      message: \`Agent 动作还没来得及执行就失败了：\${config.action}\`,
+      message: \`Agent 动作还没来得及执行就失败了：\${actionLabel(config.action)}\`,
       recommendation: config.recommendation,
       evidence: { error: errorMessage }
     }
@@ -511,6 +542,7 @@ function wrapperModuleBody(options: {
   file: ScannableFile;
   spec: TapActionSpec;
   surfaceKind: "runtime" | "skill" | "project";
+  entrypointCandidates: EntrypointCandidate[];
 }): string | null {
   const sourcePath = path.join(options.rootDir, options.file.relativePath);
   const normalizedSource = sourcePath.replace(/\\/g, "/");
@@ -562,6 +594,27 @@ function wrapperModuleBody(options: {
     return null;
   }
 
+  const exactInvocationCandidates = options.entrypointCandidates
+    .filter(
+      (candidate): candidate is ConfigEntrypointCandidate =>
+        candidate.kind === "config-command" &&
+        Array.isArray(candidate.args) &&
+        candidate.args.length > 0
+    )
+    .map((candidate) => ({
+      command: candidate.command,
+      args: candidate.args ?? []
+    }));
+
+  const mergedCandidates = [...exactInvocationCandidates, ...candidates].filter(
+    (candidate, index, all) =>
+      all.findIndex(
+        (item) =>
+          item.command === candidate.command &&
+          JSON.stringify(item.args) === JSON.stringify(candidate.args)
+      ) === index
+  );
+
   return `#!/usr/bin/env node
 import { runTraceRootAction } from ${runnerImport};
 
@@ -571,7 +624,7 @@ await runTraceRootAction({
   target: ${quotedTarget},
   surfaceKind: ${quotedSurfaceKind},
   recommendation: ${quotedRecommendation},
-  candidates: ${JSON.stringify(candidates, null, 2)}
+  candidates: ${JSON.stringify(mergedCandidates, null, 2)}
 });
 `;
 }
@@ -588,59 +641,147 @@ function surfaceKindForProfileSurface(surface: string): "runtime" | "skill" | "p
   return "project";
 }
 
-async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypointCandidate[]> {
-  const packageJsonPath = path.join(rootDir, "package.json");
+function getContainerAtPath(root: unknown, pathSegments: Array<string | number>): unknown {
+  let cursor: unknown = root;
 
-  try {
-    const content = await readFile(packageJsonPath, "utf8");
-    const parsed = JSON.parse(content) as {
-      scripts?: Record<string, unknown>;
-      bin?: string | Record<string, unknown>;
-    };
-    const candidates: PackageEntrypointCandidate[] = [];
-
-    if (parsed.scripts && typeof parsed.scripts === "object") {
-      for (const [name, value] of Object.entries(parsed.scripts)) {
-        if (typeof value !== "string") {
-          continue;
-        }
-
-        candidates.push({
-          kind: "npm-script",
-          name,
-          command: value
-        });
+  for (const segment of pathSegments) {
+    if (typeof segment === "number") {
+      if (!Array.isArray(cursor) || cursor[segment] === undefined) {
+        return undefined;
       }
+
+      cursor = cursor[segment];
+      continue;
     }
 
-    if (typeof parsed.bin === "string") {
-      candidates.push({
-        kind: "bin",
-        name: path.basename(rootDir),
-        command: parsed.bin
-      });
-    } else if (parsed.bin && typeof parsed.bin === "object") {
-      for (const [name, value] of Object.entries(parsed.bin)) {
-        if (typeof value !== "string") {
-          continue;
-        }
+    if (!cursor || typeof cursor !== "object" || !(segment in (cursor as Record<string, unknown>))) {
+      return undefined;
+    }
 
+    cursor = (cursor as Record<string, unknown>)[segment];
+  }
+
+  return cursor;
+}
+
+function setValueAtPath(
+  root: unknown,
+  pathSegments: Array<string | number>,
+  value: unknown
+): boolean {
+  if (pathSegments.length === 0) {
+    return false;
+  }
+
+  const container = getContainerAtPath(root, pathSegments.slice(0, -1));
+  const lastSegment = pathSegments[pathSegments.length - 1];
+
+  if (container === undefined || lastSegment === undefined) {
+    return false;
+  }
+
+  if (typeof lastSegment === "number") {
+    if (!Array.isArray(container)) {
+      return false;
+    }
+
+    container[lastSegment] = value;
+    return true;
+  }
+
+  if (!container || typeof container !== "object") {
+    return false;
+  }
+
+  (container as Record<string, unknown>)[lastSegment] = value;
+  return true;
+}
+
+async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypointCandidate[]> {
+  const packageJsonFiles = [...new Set(
+    await fg(["package.json", "**/package.json"], {
+      cwd: rootDir,
+      onlyFiles: true,
+      dot: true,
+      ignore: ["**/node_modules/**", "**/.traceroot/**"]
+    })
+  )];
+  const candidates: PackageEntrypointCandidate[] = [];
+
+  for (const relativeFilePath of packageJsonFiles) {
+    const packageJsonPath = path.join(rootDir, relativeFilePath);
+
+    try {
+      const content = await readFile(packageJsonPath, "utf8");
+      const parsed = JSON.parse(content) as {
+        name?: string;
+        scripts?: Record<string, unknown>;
+        bin?: string | Record<string, unknown>;
+      };
+
+      if (parsed.scripts && typeof parsed.scripts === "object") {
+        for (const [name, value] of Object.entries(parsed.scripts)) {
+          if (typeof value !== "string") {
+            continue;
+          }
+
+          candidates.push({
+            kind: "npm-script",
+            name,
+            command: value,
+            filePath: relativeFilePath,
+            propertyPath: `scripts.${name}`,
+            pathSegments: ["scripts", name]
+          });
+        }
+      }
+
+      if (typeof parsed.bin === "string") {
         candidates.push({
           kind: "bin",
-          name,
-          command: value
+          name:
+            parsed.name ||
+            path.basename(path.dirname(packageJsonPath)) ||
+            path.basename(rootDir),
+          command: parsed.bin,
+          filePath: relativeFilePath,
+          propertyPath: "bin",
+          pathSegments: ["bin"]
         });
-      }
-    }
+      } else if (parsed.bin && typeof parsed.bin === "object") {
+        for (const [name, value] of Object.entries(parsed.bin)) {
+          if (typeof value !== "string") {
+            continue;
+          }
 
-    return candidates;
-  } catch {
-    return [];
+          candidates.push({
+            kind: "bin",
+            name,
+            command: value,
+            filePath: relativeFilePath,
+            propertyPath: `bin.${name}`,
+            pathSegments: ["bin", name]
+          });
+        }
+      }
+    } catch {
+      continue;
+    }
   }
+
+  return candidates;
 }
 
 function looksLikeCommandField(key: string): boolean {
   return /(command|entrypoint|exec|run|script)/i.test(key);
+}
+
+function looksLikeArgsField(key: string): boolean {
+  return /^(args|arguments|argv|commandargs)$/i.test(key);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function looksLikeExecutableCommand(value: string): boolean {
@@ -696,6 +837,10 @@ function collectConfigEntrypoints(
 
   for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
     const nextSegments = [...segments, key];
+    const siblingArgsEntry = Object.entries(node as Record<string, unknown>).find(
+      ([siblingKey, siblingValue]) =>
+        looksLikeArgsField(siblingKey) && isStringArray(siblingValue)
+    );
 
     if (typeof value === "string" && looksLikeCommandField(key) && looksLikeExecutableCommand(value)) {
       const propertyPath = propertyPathForSegments(nextSegments);
@@ -703,9 +848,14 @@ function collectConfigEntrypoints(
         kind: "config-command",
         name: `${options.relativePath}:${propertyPath}`,
         command: value,
+        args: siblingArgsEntry && isStringArray(siblingArgsEntry[1]) ? [...siblingArgsEntry[1]] : undefined,
         filePath: options.relativePath,
         propertyPath,
         pathSegments: nextSegments,
+        argsPropertyPath: siblingArgsEntry
+          ? propertyPathForSegments([...segments, siblingArgsEntry[0]])
+          : undefined,
+        argsPathSegments: siblingArgsEntry ? [...segments, siblingArgsEntry[0]] : undefined,
         format: options.format
       });
       continue;
@@ -755,40 +905,48 @@ function detectConfigEntrypoints(files: ScannableFile[]): ConfigEntrypointCandid
   return candidates;
 }
 
-function matchesEntrypointCommand(command: string, relativePath: string): boolean {
+function matchesEntrypointCommand(
+  command: string,
+  relativePath: string,
+  args?: string[]
+): boolean {
   const normalizedCommand = command.replace(/\\/g, "/").toLowerCase();
   const normalizedRelativePath = relativePath.replace(/\\/g, "/").toLowerCase();
   const prefixedPath = `./${normalizedRelativePath}`;
   const fileName = path.basename(normalizedRelativePath);
+  const normalizedArgs = (args ?? []).map((arg) => arg.replace(/\\/g, "/").toLowerCase());
 
   return (
     normalizedCommand.includes(normalizedRelativePath) ||
     normalizedCommand.includes(prefixedPath) ||
-    normalizedCommand.includes(fileName)
+    normalizedCommand.includes(fileName) ||
+    normalizedArgs.some(
+      (arg) =>
+        arg.includes(normalizedRelativePath) ||
+        arg.includes(prefixedPath) ||
+        arg.includes(fileName)
+    )
   );
 }
 
 function buildSuggestedEntrypoints(options: {
   wrapperLaunchCommand: string;
+  wrapperRelativePath: string;
   sourceRelativePath: string;
   candidates: EntrypointCandidate[];
 }): TapEntrypoint[] {
   const sourceRelativePath = options.sourceRelativePath.replace(/\\/g, "/");
 
   return options.candidates
-    .filter((candidate) => matchesEntrypointCommand(candidate.command, sourceRelativePath))
+    .filter((candidate) =>
+      matchesEntrypointCommand(
+        candidate.command,
+        sourceRelativePath,
+        candidate.kind === "config-command" ? candidate.args : undefined
+      )
+    )
     .map((candidate) => {
       if (candidate.kind === "npm-script") {
-        return {
-          kind: candidate.kind,
-          name: candidate.name,
-          currentCommand: candidate.command,
-          suggestedCommand: options.wrapperLaunchCommand,
-          installStatus: "manual"
-        };
-      }
-
-      if (candidate.kind === "config-command") {
         return {
           kind: candidate.kind,
           name: candidate.name,
@@ -797,7 +955,24 @@ function buildSuggestedEntrypoints(options: {
           installStatus: "manual",
           filePath: candidate.filePath,
           propertyPath: candidate.propertyPath,
+          pathSegments: candidate.pathSegments
+        };
+      }
+
+      if (candidate.kind === "config-command") {
+        return {
+          kind: candidate.kind,
+          name: candidate.name,
+          currentCommand: candidate.command,
+          suggestedCommand: candidate.args ? "node" : options.wrapperLaunchCommand,
+          currentArgs: candidate.args,
+          suggestedArgs: candidate.args ? [options.wrapperRelativePath] : undefined,
+          installStatus: "manual",
+          filePath: candidate.filePath,
+          propertyPath: candidate.propertyPath,
           pathSegments: candidate.pathSegments,
+          argsPropertyPath: candidate.argsPropertyPath,
+          argsPathSegments: candidate.argsPathSegments,
           format: candidate.format
         };
       }
@@ -806,8 +981,14 @@ function buildSuggestedEntrypoints(options: {
         kind: candidate.kind,
         name: candidate.name,
         currentCommand: candidate.command,
-        suggestedCommand: options.wrapperLaunchCommand,
-        installStatus: "manual"
+        suggestedCommand:
+          candidate.kind === "bin"
+            ? options.wrapperRelativePath
+            : options.wrapperLaunchCommand,
+        installStatus: "manual",
+        filePath: candidate.filePath,
+        propertyPath: candidate.propertyPath,
+        pathSegments: candidate.pathSegments
       };
     });
 }
@@ -816,7 +997,6 @@ async function installTapEntrypoints(options: {
   rootDir: string;
   tapWrappers: TapWrapperFile[];
 }): Promise<TapInstallResult> {
-  const packageJsonPath = path.join(options.rootDir, "package.json");
   const backupPaths: string[] = [];
   const installedCommands: TapInstalledCommand[] = [];
 
@@ -830,7 +1010,7 @@ async function installTapEntrypoints(options: {
       const groupKey =
         entrypoint.kind === "config-command"
           ? `config:${entrypoint.filePath}:${entrypoint.propertyPath}`
-          : `${entrypoint.kind}:${entrypoint.name}`;
+          : `package:${entrypoint.filePath}:${entrypoint.propertyPath}`;
 
       const existing = groupedEntrypoints.get(groupKey) ?? [];
       existing.push({ wrapper, entrypoint });
@@ -838,39 +1018,45 @@ async function installTapEntrypoints(options: {
     }
   }
 
-  let rawPackageJson: string;
+  const packageEntriesByFile = new Map<string, TapEntrypoint[]>();
 
-  try {
-    rawPackageJson = await readFile(packageJsonPath, "utf8");
-  } catch {
-    rawPackageJson = "";
-  }
-
-  let parsedPackageJson: {
-    scripts?: Record<string, unknown>;
-    [key: string]: unknown;
-  } | null = null;
-
-  if (rawPackageJson) {
-    try {
-      parsedPackageJson = JSON.parse(rawPackageJson) as {
-        scripts?: Record<string, unknown>;
-        [key: string]: unknown;
-      };
-    } catch {
-      parsedPackageJson = null;
+  for (const [groupKey, candidates] of groupedEntrypoints.entries()) {
+    if (!groupKey.startsWith("package:") || candidates.length !== 1) {
+      continue;
     }
+
+    const [{ entrypoint }] = candidates;
+    if (!entrypoint.filePath || !entrypoint.pathSegments) {
+      continue;
+    }
+
+    const existing = packageEntriesByFile.get(entrypoint.filePath) ?? [];
+    existing.push(entrypoint);
+    packageEntriesByFile.set(entrypoint.filePath, existing);
   }
 
-  if (parsedPackageJson?.scripts && typeof parsedPackageJson.scripts === "object") {
-    for (const [groupKey, candidates] of groupedEntrypoints.entries()) {
-      if (!groupKey.startsWith("npm-script:") || candidates.length !== 1) {
-        continue;
-      }
+  for (const [relativeFilePath, entrypoints] of packageEntriesByFile.entries()) {
+    const absoluteFilePath = path.join(options.rootDir, relativeFilePath);
+    let rawContent: string;
 
-      const [{ entrypoint }] = candidates;
-      const scriptName = entrypoint.name;
-      const currentValue = parsedPackageJson.scripts[scriptName];
+    try {
+      rawContent = await readFile(absoluteFilePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    let parsed: Record<string, unknown>;
+
+    try {
+      parsed = JSON.parse(rawContent) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    let changed = false;
+
+    for (const entrypoint of entrypoints) {
+      const currentValue = getContainerAtPath(parsed, entrypoint.pathSegments ?? []);
 
       if (typeof currentValue !== "string") {
         continue;
@@ -891,8 +1077,12 @@ async function installTapEntrypoints(options: {
         continue;
       }
 
-      parsedPackageJson.scripts[scriptName] = entrypoint.suggestedCommand;
+      if (!setValueAtPath(parsed, entrypoint.pathSegments ?? [], entrypoint.suggestedCommand)) {
+        continue;
+      }
+
       entrypoint.installStatus = "installed";
+      changed = true;
       installedCommands.push({
         kind: entrypoint.kind,
         name: entrypoint.name,
@@ -901,15 +1091,20 @@ async function installTapEntrypoints(options: {
       });
     }
 
-    const installedScriptCommands = installedCommands.filter((command) => command.kind === "npm-script");
-    if (installedScriptCommands.length > 0) {
-      const backupDir = path.join(options.rootDir, ".traceroot", "backups");
-      const backupPath = path.join(backupDir, "package.json.before-action-audit.json");
-      await mkdir(backupDir, { recursive: true });
-      await writeFile(backupPath, rawPackageJson, "utf8");
-      await writeFile(`${packageJsonPath}`, `${JSON.stringify(parsedPackageJson, null, 2)}\n`, "utf8");
-      backupPaths.push(backupPath);
+    if (!changed) {
+      continue;
     }
+
+    const backupPath = path.join(
+      options.rootDir,
+      ".traceroot",
+      "backups",
+      `${relativeFilePath}.before-action-audit.json`
+    );
+    await mkdir(path.dirname(backupPath), { recursive: true });
+    await writeFile(backupPath, rawContent, "utf8");
+    await writeFile(absoluteFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    backupPaths.push(backupPath);
   }
 
   const configEntriesByFile = new Map<
@@ -989,18 +1184,51 @@ async function installTapEntrypoints(options: {
         }
 
         const currentValue = cursor[lastSegment];
-        if (currentValue === entrypoint.suggestedCommand) {
+        const currentArgs =
+          entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
+            ? getContainerAtPath(parsed, entrypoint.argsPathSegments)
+            : undefined;
+        const argsAlreadyMatch =
+          entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
+            ? Array.isArray(currentArgs) &&
+              JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
+            : true;
+
+        if (currentValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
           entrypoint.installStatus = "already-installed";
           installedCommands.push({
             kind: entrypoint.kind,
             name: entrypoint.name,
             beforeCommand: currentValue,
-            afterCommand: currentValue
+            afterCommand: Array.isArray(entrypoint.suggestedArgs)
+              ? `${currentValue} ${entrypoint.suggestedArgs.join(" ")}`
+              : currentValue
           });
           continue;
         }
 
         if (currentValue !== entrypoint.currentCommand) {
+          continue;
+        }
+
+        if (
+          entrypoint.argsPathSegments &&
+          Array.isArray(entrypoint.currentArgs) &&
+          Array.isArray(entrypoint.suggestedArgs)
+        ) {
+          if (
+            !Array.isArray(currentArgs) ||
+            JSON.stringify(currentArgs) !== JSON.stringify(entrypoint.currentArgs)
+          ) {
+            continue;
+          }
+        }
+
+        if (
+          entrypoint.argsPathSegments &&
+          Array.isArray(entrypoint.suggestedArgs) &&
+          !setValueAtPath(parsed, entrypoint.argsPathSegments, entrypoint.suggestedArgs)
+        ) {
           continue;
         }
 
@@ -1011,7 +1239,9 @@ async function installTapEntrypoints(options: {
           kind: entrypoint.kind,
           name: entrypoint.name,
           beforeCommand: entrypoint.currentCommand,
-          afterCommand: entrypoint.suggestedCommand
+          afterCommand: Array.isArray(entrypoint.suggestedArgs)
+            ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
+            : entrypoint.suggestedCommand
         });
         continue;
       }
@@ -1026,18 +1256,51 @@ async function installTapEntrypoints(options: {
         continue;
       }
 
-      if (currentValue === entrypoint.suggestedCommand) {
+      const currentArgs =
+        entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
+          ? getContainerAtPath(parsed, entrypoint.argsPathSegments)
+          : undefined;
+      const argsAlreadyMatch =
+        entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
+          ? Array.isArray(currentArgs) &&
+            JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
+          : true;
+
+      if (currentValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
         entrypoint.installStatus = "already-installed";
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
           beforeCommand: currentValue,
-          afterCommand: currentValue
+          afterCommand: Array.isArray(entrypoint.suggestedArgs)
+            ? `${currentValue} ${entrypoint.suggestedArgs.join(" ")}`
+            : currentValue
         });
         continue;
       }
 
       if (currentValue !== entrypoint.currentCommand) {
+        continue;
+      }
+
+      if (
+        entrypoint.argsPathSegments &&
+        Array.isArray(entrypoint.currentArgs) &&
+        Array.isArray(entrypoint.suggestedArgs)
+      ) {
+        if (
+          !Array.isArray(currentArgs) ||
+          JSON.stringify(currentArgs) !== JSON.stringify(entrypoint.currentArgs)
+        ) {
+          continue;
+        }
+      }
+
+      if (
+        entrypoint.argsPathSegments &&
+        Array.isArray(entrypoint.suggestedArgs) &&
+        !setValueAtPath(parsed, entrypoint.argsPathSegments, entrypoint.suggestedArgs)
+      ) {
         continue;
       }
 
@@ -1048,7 +1311,9 @@ async function installTapEntrypoints(options: {
         kind: entrypoint.kind,
         name: entrypoint.name,
         beforeCommand: entrypoint.currentCommand,
-        afterCommand: entrypoint.suggestedCommand
+        afterCommand: Array.isArray(entrypoint.suggestedArgs)
+          ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
+          : entrypoint.suggestedCommand
       });
     }
 
@@ -1087,6 +1352,8 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   tapInstalledCommands: TapInstalledCommand[];
   tapCoveredActionsCount: number;
   tapPendingActionsCount: number;
+  tapCoveredActions: string[];
+  tapPendingActions: string[];
 }> {
   const resolvedTarget = await resolveTarget(rootDir);
   const files = await discoverFiles(resolvedTarget);
@@ -1110,7 +1377,21 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       continue;
     }
 
-    const wrapperBody = wrapperModuleBody({ rootDir, file, spec, surfaceKind });
+    const matchingEntrypointCandidates = entrypointCandidates.filter((candidate) =>
+      matchesEntrypointCommand(
+        candidate.command,
+        file.relativePath,
+        candidate.kind === "config-command" ? candidate.args : undefined
+      )
+    );
+
+    const wrapperBody = wrapperModuleBody({
+      rootDir,
+      file,
+      spec,
+      surfaceKind,
+      entrypointCandidates: matchingEntrypointCandidates
+    });
     if (!wrapperBody) {
       continue;
     }
@@ -1132,6 +1413,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       recommendation: spec.recommendation,
       entrypoints: buildSuggestedEntrypoints({
         wrapperLaunchCommand: launchCommand,
+        wrapperRelativePath,
         sourceRelativePath: file.relativePath,
         candidates: entrypointCandidates
       })
@@ -1235,10 +1517,16 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       lines.push("### 接入状态", "");
 
       for (const entrypoint of wrapper.entrypoints) {
-        if (entrypoint.kind === "npm-script") {
+        if (entrypoint.kind === "npm-script" || entrypoint.kind === "bin") {
+          const locationLabel = entrypoint.filePath
+            ? `${entrypoint.filePath} → ${entrypoint.propertyPath}`
+            : entrypoint.kind === "npm-script"
+              ? `npm run ${entrypoint.name}`
+              : entrypoint.name;
+
           if (entrypoint.installStatus === "installed") {
             lines.push(
-              `- 已自动接好：\`npm run ${entrypoint.name}\``,
+              `- 已自动接好：\`${locationLabel}\``,
               "- 这个动作以后每次执行，TraceRoot 都会替你留下审计记录。",
               ""
             );
@@ -1247,7 +1535,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
           if (entrypoint.installStatus === "already-installed") {
             lines.push(
-              `- 已在保护中：\`npm run ${entrypoint.name}\``,
+              `- 已在保护中：\`${locationLabel}\``,
               "- 这个动作已经在 TraceRoot 的审计时间线里了。",
               ""
             );
@@ -1255,7 +1543,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
           }
 
           lines.push(
-            `- 还没自动接上：\`npm run ${entrypoint.name}\``,
+            `- 还没自动接上：\`${locationLabel}\``,
             `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
             ""
           );
