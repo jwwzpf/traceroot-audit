@@ -2012,7 +2012,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("~/.openclaw");
       expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
       expect(capture.read().stdout).toContain("建议先做");
-      expect(capture.read().stdout).toContain("traceroot-audit harden");
+      expect(capture.read().stdout).toContain("traceroot-audit doctor");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {
@@ -2705,7 +2705,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot Audit Guard");
       expect(output).toContain("现在最值得先做");
-      expect(output).toContain("traceroot-audit harden");
+      expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("No machine-level agent surface changes detected");
     } finally {
       process.chdir(previousCwd);

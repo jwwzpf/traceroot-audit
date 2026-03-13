@@ -56,7 +56,7 @@ export interface HostDiscoveryCandidate {
   tier: "best-first" | "possible";
   categoryLabel: string;
   attention: string;
-  recommendedAction: "scan" | "harden";
+  recommendedAction: "scan" | "harden" | "doctor";
   recommendedActionLabel: string;
   recommendedCommand: string;
 }
@@ -114,6 +114,18 @@ export function hostCandidateAttentionForHuman(
 export function hostCandidateRecommendedStepForHuman(
   candidate: Pick<HostDiscoveryCandidate, "recommendedAction" | "categoryLabel">
 ): string {
+  if (candidate.recommendedAction === "doctor") {
+    if (candidate.categoryLabel === "OpenClaw runtime") {
+      return "直接让 TraceRoot Doctor 带你检查并守住这个运行态";
+    }
+
+    if (candidate.categoryLabel === "MCP / tool server") {
+      return "直接让 TraceRoot Doctor 带你检查这个工具服务的边界";
+    }
+
+    return "直接让 TraceRoot Doctor 带你把这里先看清楚、再收紧";
+  }
+
   if (candidate.recommendedAction === "harden") {
     if (candidate.categoryLabel === "OpenClaw runtime") {
       return "先让 TraceRoot 帮你把这个运行态收紧一遍";
@@ -261,8 +273,8 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function hostHardenCommandPath(absolutePath: string): string {
-  return `traceroot-audit harden ${shellQuote(absolutePath)}`;
+function hostDoctorCommandPath(absolutePath: string): string {
+  return `traceroot-audit doctor ${shellQuote(absolutePath)}`;
 }
 
 function candidateStrength(relativePath: string): number {
@@ -421,27 +433,27 @@ function candidateMetadata(
   if (hasOpenClawMarker && hasDockerCompose) {
     categoryLabel = "OpenClaw runtime";
     attention = "worth checking first: runtime wiring and exposure signals were found";
-    recommendedAction = "harden";
-    recommendedActionLabel = "run the hardening wizard to shrink the runtime first";
-    recommendedCommand = hostHardenCommandPath(candidatePath);
+    recommendedAction = "doctor";
+    recommendedActionLabel = "open TraceRoot Doctor here first";
+    recommendedCommand = hostDoctorCommandPath(candidatePath);
   } else if (hasManifest || hasSkillMarker) {
     categoryLabel = "skill / tool package";
     attention = "worth checking first: explicit reusable agent actions were detected";
-    recommendedAction = "harden";
-    recommendedActionLabel = "harden this action surface before you trust it";
-    recommendedCommand = hostHardenCommandPath(candidatePath);
+    recommendedAction = "doctor";
+    recommendedActionLabel = "open TraceRoot Doctor here first";
+    recommendedCommand = hostDoctorCommandPath(candidatePath);
   } else if (hasMcpMarker) {
     categoryLabel = "MCP / tool server";
     attention = "worth checking first: MCP or tool-server wiring was detected";
-    recommendedAction = "harden";
-    recommendedActionLabel = "harden this MCP/tool surface before wiring it into an agent";
-    recommendedCommand = hostHardenCommandPath(candidatePath);
+    recommendedAction = "doctor";
+    recommendedActionLabel = "open TraceRoot Doctor here first";
+    recommendedCommand = hostDoctorCommandPath(candidatePath);
   } else if (hasDockerCompose || hasEnv) {
     categoryLabel = "runtime config";
     attention = "worth checking if this runtime is broader or more exposed than you intended";
-    recommendedAction = "scan";
-    recommendedActionLabel = "scan it first to quantify current blast radius";
-    recommendedCommand = hostScanCommandPath(candidatePath);
+    recommendedAction = "doctor";
+    recommendedActionLabel = "open TraceRoot Doctor here first";
+    recommendedCommand = hostDoctorCommandPath(candidatePath);
   }
 
   const tier = score >= 24 ? "best-first" : "possible";
