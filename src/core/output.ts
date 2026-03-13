@@ -1,6 +1,12 @@
 import pc from "picocolors";
 
-import type { DiscoveryResult, HostDiscoveryResult } from "./discovery";
+import {
+  hostCandidateAttentionForHuman,
+  hostCandidateCategoryForHuman,
+  hostCandidateRecommendedStepForHuman,
+  type DiscoveryResult,
+  type HostDiscoveryResult
+} from "./discovery";
 import type { HardeningPlan } from "../hardening/analysis";
 import {
   createFindingFingerprint,
@@ -94,6 +100,58 @@ function formatSurface(result: {
   surface: ScanResult["surface"] | DiscoveryResult["surface"] | HostDiscoveryResult["candidates"][number]["surface"];
 }): string {
   return `${surfaceLabel(result.surface.kind)} (${result.surface.confidence} confidence)`;
+}
+
+function confidenceForHuman(confidence: "high" | "medium" | "low"): string {
+  if (confidence === "high") {
+    return "把握较高";
+  }
+
+  if (confidence === "medium") {
+    return "有一定把握";
+  }
+
+  return "先当作线索";
+}
+
+function surfaceReasonForHuman(reason: string): string {
+  switch (reason) {
+    case "found TraceRoot manifest metadata":
+    case "contains TraceRoot manifest metadata":
+      return "这里已经有 TraceRoot manifest，说明它更像一个可复用的动作包。";
+    case 'target path looks like a "skill", "tool", or "plugin" package':
+      return "路径本身就很像一个 skill / tool 包。";
+    case "contains executable files that define reusable agent actions":
+      return "这里有可执行文件，而且更像在定义可复用的 agent 动作。";
+    case "found environment files that can shape a local runtime":
+      return "这里有环境变量文件，通常会直接影响本地运行态的能力边界。";
+    case "found docker-compose runtime exposure or wiring files":
+      return "这里有 docker-compose 一类的运行态接线或暴露配置。";
+    case "found config files that likely define runtime behavior":
+      return "这里有配置文件，看起来会直接影响运行态行为。";
+    case 'target path looks like a "runtime" or "config" surface':
+      return "路径本身就很像运行态或配置入口。";
+    case "contains helper scripts under a runtime/config path":
+      return "这里还有运行态相关的辅助脚本。";
+    case "contains executable files that can become agent actions":
+      return "这里有可执行文件，后面很可能会被 agent 当成动作来调用。";
+    case "contains multiple action-capable source files":
+      return "这里不止一个动作入口，更值得先留意。";
+    case "mixes executable code with runtime/config wiring":
+      return "这里把可执行代码和运行态配置混在了一起，更像真实入口。";
+    case "single file target looks like a runnable automation script":
+      return "这个单文件目标本身就很像可以直接跑起来的自动化脚本。";
+    case "contains runtime wiring or environment files":
+      return "这里有运行态接线或环境变量文件。";
+    case 'directory name suggests a "skill" or "tool" package':
+      return "目录名本身就很像一个 skill / tool 包。";
+    case "directory name suggests a runtime/config surface":
+      return "目录名本身就很像运行态或配置入口。";
+    case "found only a small amount of scanable material, so this is a best-effort guess":
+      return "目前线索不多，TraceRoot 先按最像入口的位置帮你猜了一次。";
+    default:
+      return reason;
+  }
 }
 
 export function renderHumanOutput(
@@ -350,7 +408,7 @@ export function renderDiscoveryHumanOutput(result: DiscoveryResult): string {
   lines.push("", "🧠 Why this target looks like that:");
 
   for (const reason of result.surface.reasons) {
-    lines.push(`- ${reason}`);
+    lines.push(`- ${surfaceReasonForHuman(reason)}`);
   }
 
   lines.push(
@@ -367,7 +425,7 @@ export function renderDiscoveryHumanOutput(result: DiscoveryResult): string {
   for (const suggestion of result.suggestedTargets) {
     lines.push(
       `- ${surfaceLabel(suggestion.kind)} → ${suggestion.displayPath}`,
-      `  Why: ${suggestion.reason}`
+      `  Why: ${surfaceReasonForHuman(suggestion.reason)}`
     );
   }
 
@@ -424,19 +482,19 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
     "TraceRoot Audit Host Discovery",
     "==============================",
     "",
-    "🖥️ Scope: common agent/runtime locations on this machine",
+    "🖥️ Scope: 这台机器上常见的 agent / runtime 位置",
     `🏠 Home: ${result.homeDir}`,
     result.includeCwd
-      ? `📂 Current directory included: ${result.cwd}`
-      : `🚫 Current directory excluded: ${result.cwd}`,
-    `🔎 Roots searched: ${result.searchedRoots.length}`,
-    `📌 Likely agent action surfaces found: ${result.candidates.length}`
+      ? `📂 当前目录也算进来了：${result.cwd}`
+      : `🚫 当前目录先不算进来：${result.cwd}`,
+    `🔎 已检查的位置：${result.searchedRoots.length}`,
+    `📌 当前找到的可疑入口：${result.candidates.length}`
   ];
 
   if (result.candidates.length === 0) {
     lines.push(
       "",
-      "No obvious local agent surfaces were found in the common locations we checked.",
+      "暂时还没在这些常见位置里看到明显的 agent / runtime 入口。",
       "",
       "Try next:",
       "- traceroot-audit discover --host --include-cwd",
@@ -453,13 +511,13 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
   if (bestFirstCandidates.length > 0) {
     lines.push(
       "🎯 Best first checks:",
-      "These look the most like OpenClaw, MCP, skill, or runtime surfaces that deserve an immediate scan.",
+      "这些地方最像 OpenClaw、MCP、skill 或 runtime 入口，建议先从这里看。",
       ""
     );
   } else {
     lines.push(
       "🧭 Possible surfaces:",
-      "We did not find strong OpenClaw-specific paths, so these are the most likely machine-level candidates.",
+      "这里还没看到特别强的 OpenClaw 线索，所以先把最像入口的位置列出来。",
       ""
     );
   }
@@ -469,12 +527,12 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
 
   for (const [index, candidate] of primaryList.entries()) {
     lines.push(
-      `${index + 1}. ${candidate.categoryLabel} (${candidate.surface.confidence} confidence)`,
+      `${index + 1}. ${hostCandidateCategoryForHuman(candidate)}（${confidenceForHuman(candidate.surface.confidence)}）`,
       `   📍 Path: ${candidate.displayPath}`,
-      `   📦 Scannable files: ${candidate.filesDiscovered}`,
-      `   🧠 Why: ${candidate.surface.reasons[0] ?? "best-effort host discovery guess"}`,
-      `   ✨ Why it matters: ${candidate.attention}`,
-      `   ➡️ Recommended next step: ${candidate.recommendedActionLabel}`,
+      `   📦 能先看见的文件：${candidate.filesDiscovered}`,
+      `   🧠 TraceRoot 为什么会注意到这里：${surfaceReasonForHuman(candidate.surface.reasons[0] ?? "found only a small amount of scanable material, so this is a best-effort guess")}`,
+      `   ✨ 为什么值得先看：${hostCandidateAttentionForHuman(candidate)}`,
+      `   ➡️ 建议先做：${hostCandidateRecommendedStepForHuman(candidate)}`,
       `   🛠 Command: ${candidate.recommendedCommand}`
     );
 
@@ -488,16 +546,16 @@ export function renderHostDiscoveryHumanOutput(result: HostDiscoveryResult): str
   if (bestFirstCandidates.length > 0 && possibleCandidates.length > 0) {
     lines.push(
       "🧪 Other possible surfaces:",
-      "These may still be worth scanning, but they look less specific than the best-first checks above.",
+      "这些地方也值得留意，但没有上面那批入口那么像真正的 agent / runtime 位置。",
       ""
     );
 
     for (const [index, candidate] of possibleCandidates.slice(0, 3).entries()) {
       lines.push(
-        `${index + 1}. ${candidate.categoryLabel} (${candidate.surface.confidence} confidence)`,
+        `${index + 1}. ${hostCandidateCategoryForHuman(candidate)}（${confidenceForHuman(candidate.surface.confidence)}）`,
         `   📍 Path: ${candidate.displayPath}`,
-        `   ✨ Why it matters: ${candidate.attention}`,
-        `   ➡️ Recommended next step: ${candidate.recommendedActionLabel}`
+        `   ✨ 为什么值得留意：${hostCandidateAttentionForHuman(candidate)}`,
+        `   ➡️ 建议先做：${hostCandidateRecommendedStepForHuman(candidate)}`
       );
 
       if (candidate.strongSignals.length > 0) {

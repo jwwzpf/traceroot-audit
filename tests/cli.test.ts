@@ -410,6 +410,54 @@ describe("CLI", () => {
     }
   });
 
+  it("auto-selects the only obvious host surface for doctor instead of asking the user to pick", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-auto-pick-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", "--host"],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 已经帮你锁定了最值得先看的位置");
+      expect(output).toContain("~/.openclaw");
+      expect(output).toContain("TraceRoot Audit Doctor");
+      expect(output).not.toContain("Which one do you want TraceRoot Doctor to work on");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can fast-resume doctor watch with the remembered target, boundary, and reminder route", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-home-"));
@@ -1957,13 +2005,13 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Host Discovery");
-      expect(capture.read().stdout).toContain("Likely agent action surfaces found: 2");
+      expect(capture.read().stdout).toContain("当前找到的可疑入口：2");
       expect(capture.read().stdout).toContain("Best first checks");
-      expect(capture.read().stdout).toContain("Current directory excluded");
-      expect(capture.read().stdout).toContain("OpenClaw runtime");
+      expect(capture.read().stdout).toContain("当前目录先不算进来");
+      expect(capture.read().stdout).toContain("OpenClaw 运行态");
       expect(capture.read().stdout).toContain("~/.openclaw");
       expect(capture.read().stdout).toContain("~/Code/openclaw/skills/send-email-skill");
-      expect(capture.read().stdout).toContain("Recommended next step");
+      expect(capture.read().stdout).toContain("建议先做");
       expect(capture.read().stdout).toContain("traceroot-audit harden");
     } finally {
       process.chdir(previousCwd);
@@ -2001,10 +2049,10 @@ describe("CLI", () => {
       );
 
       expect(exitCode).toBe(0);
-      expect(capture.read().stdout).toContain("Current directory included");
+      expect(capture.read().stdout).toContain("当前目录也算进来了");
       expect(capture.read().stdout).toContain("~/scratch/openclaw-runtime");
       expect(capture.read().stdout).toContain("Possible surfaces");
-      expect(capture.read().stdout).toContain("Recommended next step");
+      expect(capture.read().stdout).toContain("建议先做");
     } finally {
       process.chdir(previousCwd);
       if (previousHome === undefined) {
@@ -2656,7 +2704,7 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot Audit Guard");
-      expect(output).toContain("What you can do right now");
+      expect(output).toContain("现在最值得先做");
       expect(output).toContain("traceroot-audit harden");
       expect(output).toContain("No machine-level agent surface changes detected");
     } finally {

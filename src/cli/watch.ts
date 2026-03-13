@@ -15,7 +15,11 @@ import {
   discoverRuntimeEventFeeds,
   readNewRuntimeFeedEvents
 } from "../audit/feeds";
-import { discoverHost } from "../core/discovery";
+import {
+  discoverHost,
+  hostCandidateCategoryForHuman,
+  hostCandidateRecommendedStepForHuman
+} from "../core/discovery";
 import {
   createHostSnapshot,
   createScanSnapshot,
@@ -409,7 +413,7 @@ export async function runHostWatch(options: {
     "🖥️ Mode: host",
     `⏱️ Interval: every ${intervalSeconds}s`,
     `🗂 Audit log: ${auditPaths.eventsPath}`,
-    `📌 Surfaces currently visible: ${initialDiscovery.candidates.length}`,
+    `📌 当前看得到的入口：${initialDiscovery.candidates.length}`,
     initialBestFirst.length > 0
       ? `🎯 Best first right now: ${initialBestFirst
           .map((candidate) => candidate.displayPath)
@@ -425,11 +429,11 @@ export async function runHostWatch(options: {
   ];
 
   if (initialSuggested.length > 0) {
-    initialLines.push("🚀 What you can do right now:");
+    initialLines.push("🚀 现在最值得先做：");
 
     for (const candidate of initialSuggested) {
       initialLines.push(
-        `- ${candidate.displayPath} → ${candidate.recommendedActionLabel}`,
+        `- ${candidate.displayPath} → ${hostCandidateRecommendedStepForHuman(candidate)}`,
         `  ${candidate.recommendedCommand}`
       );
     }
@@ -507,7 +511,7 @@ export async function runHostWatch(options: {
 
     for (const candidate of diff.newBestFirst) {
       lines.push(
-        `- 🛑 New best-first surface: ${candidate.displayPath} (${candidate.categoryLabel})`,
+        `- 🛑 新冒出来的重点入口：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）`,
         `  ${candidate.recommendedCommand}`
       );
       events.push({
@@ -519,7 +523,7 @@ export async function runHostWatch(options: {
         surfaceKind: surfaceKindFromLabel(candidate.categoryLabel),
         action: "new-best-first-surface",
         status: "changed",
-        message: `A new best-first AI action surface appeared on this machine: ${candidate.displayPath} (${candidate.categoryLabel}).`,
+        message: `这台机器上新出现了一个值得优先留意的入口：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）。`,
         recommendation: candidate.recommendedCommand,
         evidence: {
           tier: candidate.tier,
@@ -530,7 +534,7 @@ export async function runHostWatch(options: {
 
     for (const candidate of diff.promotedToBestFirst) {
       lines.push(
-        `- ⬆️ Promoted to best-first: ${candidate.displayPath} (${candidate.categoryLabel})`,
+        `- ⬆️ 刚刚升级为优先检查：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）`,
         `  ${candidate.recommendedCommand}`
       );
       events.push({
@@ -542,7 +546,7 @@ export async function runHostWatch(options: {
         surfaceKind: surfaceKindFromLabel(candidate.categoryLabel),
         action: "promoted-best-first",
         status: "changed",
-        message: `A known surface just became a best-first check: ${candidate.displayPath} (${candidate.categoryLabel}).`,
+        message: `一个已经见过的入口，现在变成了优先检查对象：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）。`,
         recommendation: candidate.recommendedCommand,
         evidence: {
           tier: candidate.tier,
@@ -553,7 +557,7 @@ export async function runHostWatch(options: {
 
     for (const candidate of diff.newPossible) {
       lines.push(
-        `- ➕ New possible surface: ${candidate.displayPath} (${candidate.categoryLabel})`,
+        `- ➕ 新看到一个可能的入口：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）`,
         `  ${candidate.recommendedCommand}`
       );
       events.push({
@@ -565,7 +569,7 @@ export async function runHostWatch(options: {
         surfaceKind: surfaceKindFromLabel(candidate.categoryLabel),
         action: "new-possible-surface",
         status: "changed",
-        message: `A new possible AI action surface appeared: ${candidate.displayPath} (${candidate.categoryLabel}).`,
+        message: `新看到一个可能的 agent / runtime 入口：${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）。`,
         recommendation: candidate.recommendedCommand,
         evidence: {
           tier: candidate.tier,

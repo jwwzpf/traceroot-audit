@@ -1,4 +1,7 @@
-import { discoverHost } from "../core/discovery";
+import {
+  discoverHost,
+  hostCandidateAttentionForHuman
+} from "../core/discovery";
 import { surfaceLabel } from "../core/surfaces";
 import type { CliChoice, CliRuntime } from "../cli/index";
 import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
@@ -130,6 +133,32 @@ export async function resolveWizardTarget(
       ].join("\n") + "\n"
     );
     return null;
+  }
+
+  const bestFirstCandidates = hostDiscovery.candidates.filter(
+    (candidate) => candidate.tier === "best-first"
+  );
+
+  if (hostDiscovery.candidates.length === 1) {
+    const candidate = hostDiscovery.candidates[0]!;
+    runtime.io.stdout(
+      `🎯 TraceRoot 已经帮你锁定了最值得先看的位置：${candidate.displayPath}。\n`
+    );
+    runtime.io.stdout(
+      `🧭 原因：${hostCandidateAttentionForHuman(candidate)} 先从这里开始最省心。\n\n`
+    );
+    return candidate.absolutePath;
+  }
+
+  if (bestFirstCandidates.length === 1) {
+    const candidate = bestFirstCandidates[0]!;
+    runtime.io.stdout(
+      `🎯 TraceRoot 看起来已经帮你锁定了当前最像 agent/runtime 的入口：${candidate.displayPath}。\n`
+    );
+    runtime.io.stdout(
+      `🧭 原因：${hostCandidateAttentionForHuman(candidate)} 先从这里开始最合适。\n\n`
+    );
+    return candidate.absolutePath;
   }
 
   return runtime.prompter.chooseOne(

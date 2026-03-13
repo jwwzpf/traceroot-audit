@@ -70,6 +70,65 @@ export interface HostDiscoveryResult {
   candidates: HostDiscoveryCandidate[];
 }
 
+export function hostCandidateCategoryForHuman(candidate: Pick<HostDiscoveryCandidate, "categoryLabel">): string {
+  switch (candidate.categoryLabel) {
+    case "OpenClaw runtime":
+      return "OpenClaw 运行态";
+    case "skill / tool package":
+      return "Skill / Tool 动作包";
+    case "MCP / tool server":
+      return "MCP / 工具服务";
+    case "runtime config":
+      return "运行态配置";
+    default:
+      return "可能会驱动 AI 动作的项目";
+  }
+}
+
+export function hostCandidateAttentionForHuman(
+  candidate: Pick<HostDiscoveryCandidate, "categoryLabel" | "recommendedAction">
+): string {
+  if (candidate.categoryLabel === "OpenClaw runtime") {
+    return "这里已经很像真正的运行入口，优先看一眼最容易发现暴露面和越界能力。";
+  }
+
+  if (candidate.categoryLabel === "skill / tool package") {
+    return "这里定义了可复用的 agent 动作，最值得先确认它有没有超出你真正需要的权限。";
+  }
+
+  if (candidate.categoryLabel === "MCP / tool server") {
+    return "这里像是 agent 会接上的工具服务，先看清它会不会把能力边界放得太宽。";
+  }
+
+  if (candidate.categoryLabel === "runtime config") {
+    return "这里更像运行态配置，适合先确认有没有不必要的暴露和过宽能力。";
+  }
+
+  if (candidate.recommendedAction === "harden") {
+    return "这里可能会真正驱动 AI 动作，先把边界收紧会更安心。";
+  }
+
+  return "这里可能会驱动本机上的 AI 动作，先看清它现在到底暴露了多少能力。";
+}
+
+export function hostCandidateRecommendedStepForHuman(
+  candidate: Pick<HostDiscoveryCandidate, "recommendedAction" | "categoryLabel">
+): string {
+  if (candidate.recommendedAction === "harden") {
+    if (candidate.categoryLabel === "OpenClaw runtime") {
+      return "先让 TraceRoot 帮你把这个运行态收紧一遍";
+    }
+
+    if (candidate.categoryLabel === "MCP / tool server") {
+      return "先让 TraceRoot 帮你把这个工具服务的边界收紧";
+    }
+
+    return "先让 TraceRoot 帮你把这里的动作边界收紧";
+  }
+
+  return "先让 TraceRoot 看清这里当前暴露出了多少风险面";
+}
+
 interface HostSearchRootSpec {
   absolutePath: string;
   deep: number;
