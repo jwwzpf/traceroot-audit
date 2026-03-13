@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,72 @@ function createCapture() {
       }
     },
     read: () => ({ stdout, stderr })
+  };
+}
+
+async function createWebhookReceiver() {
+  const queue: Array<Record<string, unknown>> = [];
+  let resolver: ((value: Record<string, unknown>) => void) | null = null;
+
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      const payload =
+        body.trim().length > 0 ? (JSON.parse(body) as Record<string, unknown>) : {};
+      if (resolver) {
+        resolver(payload);
+        resolver = null;
+      } else {
+        queue.push(payload);
+      }
+      res.statusCode = 204;
+      res.end();
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Could not start webhook receiver");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}/notify`,
+    async waitForRequest(timeoutMs = 5000): Promise<Record<string, unknown>> {
+      if (queue.length > 0) {
+        return queue.shift()!;
+      }
+
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          resolver = null;
+          reject(new Error("Timed out waiting for webhook request"));
+        }, timeoutMs);
+
+        resolver = (payload) => {
+          clearTimeout(timer);
+          resolve(payload);
+        };
+      });
+    },
+    async close(): Promise<void> {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
   };
 }
 
@@ -511,6 +578,99 @@ describe("CLI", () => {
       expect(logsCapture.read().stdout).toContain("OpenClaw 正在准备发一封外部邮件。");
       expect(logsCapture.read().stdout).toContain("对外发邮件：出现了 1 次");
     } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("can send a webhook reminder when doctor watch sees a high-risk action", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-home-"));
+    const previousHome = process.env.HOME;
+    const webhook = await createWebhookReceiver();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1",
+          "--notify-webhook",
+          webhook.url
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const tapExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这封外部邮件是不是真的该发出去。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      const payload = await webhook.waitForRequest();
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(tapExitCode).toBe(0);
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("高风险动作一出现，TraceRoot 也会同步把提醒发到你接好的通知入口");
+      expect(payload.title).toBe("TraceRoot 刚盯到一个高风险动作");
+      expect(payload.summary).toBe("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(payload.severity).toBe("high-risk");
+      expect(payload.actionLabel).toBe("对外发邮件");
+      expect(payload.recommendation).toBe("先确认这封外部邮件是不是真的该发出去。");
+    } finally {
+      await webhook.close();
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {

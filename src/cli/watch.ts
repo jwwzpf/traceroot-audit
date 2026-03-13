@@ -2,6 +2,13 @@ import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import { actionLabel } from "../audit/presentation";
 import {
+  hasWebhookNotification,
+  resolveNotificationConfig,
+  sendWebhookNotification,
+  type NotificationConfig,
+  type ResolvedNotificationConfig
+} from "../audit/notifier";
+import {
   createRuntimeFeedCursor,
   discoverRuntimeEventFeeds,
   readNewRuntimeFeedEvents
@@ -236,8 +243,9 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
 function isAlertWorthyActionEvent(event: AuditEvent): boolean {
   return (
     event.category === "action-event" &&
+    event.severity !== "safe" &&
     (event.status === "attempted" ||
-      (event.status === "failed" && event.severity !== "safe"))
+      event.status === "failed")
   );
 }
 
@@ -268,6 +276,46 @@ async function writeAuditEvents(
       runtime.io.stderr(`⚠️ Could not write local audit events: ${message}\n`);
       state.warned = true;
     }
+  }
+}
+
+async function notifyActionEvent(
+  runtime: CliRuntime,
+  event: AuditEvent,
+  notificationConfig: ResolvedNotificationConfig,
+  state: { warned: boolean }
+): Promise<void> {
+  if (!hasWebhookNotification(notificationConfig)) {
+    return;
+  }
+
+  try {
+    await sendWebhookNotification(event, notificationConfig);
+  } catch (error) {
+    if (!state.warned) {
+      const message =
+        error instanceof Error ? error.message : "unknown notification delivery error";
+      runtime.io.stderr(
+        `⚠️ TraceRoot 没能把这次提醒同步发出去，不过本地审计记录还在继续。\n   原因：${message}\n`
+      );
+      state.warned = true;
+    }
+  }
+}
+
+async function emitLiveActionAlerts(options: {
+  runtime: CliRuntime;
+  events: AuditEvent[];
+  seenActionEvents: Set<string>;
+  notificationConfig: ResolvedNotificationConfig;
+  notificationState: { warned: boolean };
+}): Promise<void> {
+  const { runtime, events, seenActionEvents, notificationConfig, notificationState } = options;
+
+  for (const event of events) {
+    runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
+    await notifyActionEvent(runtime, event, notificationConfig, notificationState);
+    seenActionEvents.add(actionEventKey(event));
   }
 }
 
@@ -495,11 +543,14 @@ export async function runTargetWatch(options: {
   maxCycles?: number;
   header?: string;
   compactStart?: boolean;
+  notifications?: NotificationConfig;
 }): Promise<void> {
   const { runtime, target, intervalSeconds, maxCycles, header, compactStart } = options;
   const resolvedTarget = await resolveTarget(target);
   const source = watchSource(header);
   const auditWriteState = { warned: false };
+  const notificationState = { warned: false };
+  const notificationConfig = resolveNotificationConfig(options.notifications);
   const auditPaths = resolveAuditPaths();
   const initialScan = await scanTarget(target);
   let previousSnapshot = createScanSnapshot(initialScan);
@@ -604,6 +655,13 @@ export async function runTargetWatch(options: {
     initialLines.push("");
   }
 
+  if (hasWebhookNotification(notificationConfig)) {
+    initialLines.push(
+      "📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你接好的通知入口。",
+      ""
+    );
+  }
+
   if (runtimeFeeds.length > 0) {
     initialLines.push(
       "🔌 TraceRoot 还会继续听这些运行时事件入口：",
@@ -620,9 +678,13 @@ export async function runTargetWatch(options: {
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
 
   if (recentStartupAlerts.length > 0) {
-    for (const event of recentStartupAlerts.reverse()) {
-      runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
-    }
+    await emitLiveActionAlerts({
+      runtime,
+      events: recentStartupAlerts.reverse(),
+      seenActionEvents,
+      notificationConfig: {},
+      notificationState
+    });
   }
 
   const startupEvents: AuditEvent[] = [
@@ -735,11 +797,13 @@ export async function runTargetWatch(options: {
         .filter(isAlertWorthyActionEvent)
         .filter((event) => !seenActionEvents.has(actionEventKey(event)))
         ;
-
-      for (const event of newActionAlerts) {
-        runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
-        seenActionEvents.add(actionEventKey(event));
-      }
+      await emitLiveActionAlerts({
+        runtime,
+        events: newActionAlerts,
+        seenActionEvents,
+        notificationConfig,
+        notificationState
+      });
 
       for (const event of latestAuditEvents.events) {
         if (event.category === "action-event") {
@@ -886,11 +950,13 @@ export async function runTargetWatch(options: {
       .filter(isAlertWorthyActionEvent)
       .filter((event) => !seenActionEvents.has(actionEventKey(event)))
       ;
-
-    for (const event of newActionAlerts) {
-      runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
-      seenActionEvents.add(actionEventKey(event));
-    }
+    await emitLiveActionAlerts({
+      runtime,
+      events: newActionAlerts,
+      seenActionEvents,
+      notificationConfig,
+      notificationState
+    });
 
     for (const event of latestAuditEvents.events) {
       if (event.category === "action-event") {

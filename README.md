@@ -46,6 +46,7 @@ Run without global install:
 npx traceroot-audit doctor
 npx traceroot-audit doctor /path/to/openclaw
 npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
+npx traceroot-audit doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
 ```
 
 For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
@@ -147,6 +148,9 @@ Keep watching the same target without switching to another mental model:
 
 ```bash
 node dist/cli/index.js doctor /path/to/openclaw --watch --interval 60
+
+# If you want high-risk actions mirrored into your own alert endpoint:
+node dist/cli/index.js doctor /path/to/openclaw --watch --notify-webhook http://127.0.0.1:8787/notify
 ```
 
 Advanced workflow:
@@ -334,6 +338,8 @@ node dist/cli/index.js apply /path/to/openclaw
 ## Boundary guard
 
 Once you have approved a safer profile, `doctor --watch` is now the recommended way to keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later. The lower-level `guard` command still exists for advanced flows.
+
+If you already have your own alert endpoint, `doctor --watch` can also mirror high-risk action reminders to a webhook while still keeping the full local audit timeline on disk.
 
 Example:
 

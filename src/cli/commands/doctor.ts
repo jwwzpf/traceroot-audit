@@ -245,6 +245,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
       "--cycles <count>",
       "when used with --watch, number of watch cycles before exiting"
     )
+    .option(
+      "--notify-webhook <url>",
+      "when used with --watch, also send high-risk action reminders to your webhook"
+    )
     .action(
       async (
         target: string | undefined,
@@ -254,6 +258,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           watch?: boolean;
           interval?: string;
           cycles?: string;
+          notifyWebhook?: string;
         }
       ) => {
         const effectiveTarget = await resolveWizardTarget(runtime, {
@@ -354,7 +359,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           intervalSeconds,
           maxCycles,
           header: "TraceRoot Audit Doctor Watch",
-          compactStart: true
+          compactStart: true,
+          notifications: {
+            webhookUrl: options.notifyWebhook
+          }
         });
       }
     );

@@ -9,6 +9,7 @@ interface GuardOptions {
   includeCwd?: boolean;
   interval: string;
   cycles?: string;
+  notifyWebhook?: string;
 }
 
 export function registerGuardCommand(program: Command, runtime: CliRuntime): void {
@@ -32,6 +33,10 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
     )
     .addOption(
       new Option("--cycles <count>", "number of guard cycles before exiting")
+    )
+    .option(
+      "--notify-webhook <url>",
+      "also send high-risk action reminders to your webhook"
     )
     .action(async (target: string, options: GuardOptions) => {
       const intervalSeconds = Number.parseInt(options.interval, 10);
@@ -66,7 +71,10 @@ export function registerGuardCommand(program: Command, runtime: CliRuntime): voi
         runtime,
         target,
         intervalSeconds,
-        maxCycles
+        maxCycles,
+        notifications: {
+          webhookUrl: options.notifyWebhook
+        }
       });
     });
 }
