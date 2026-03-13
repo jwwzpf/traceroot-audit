@@ -81,6 +81,11 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         lines.push(
           `- 动作审计已经开始盯住这些高风险动作：${summarizeActionLabels(bundle.tapCoveredActions)}。`
         );
+        if (bundle.tapInstalledCommands.length > 0) {
+          lines.push(
+            `- TraceRoot 已经自动接好 ${bundle.tapInstalledCommands.length} 个高风险动作入口。`
+          );
+        }
         lines.push(
           `- 以后想回看 agent 刚才到底做了什么，可以直接运行：traceroot-audit logs "${displayUserPath(resolvedTarget.rootDir)}"`
         );

@@ -143,6 +143,7 @@ describe("CLI", () => {
       expect(output).toContain("traceroot.env.agent.example");
       expect(output).toContain("动作审计现在已经开始盯住");
       expect(output).toContain("对外发邮件");
+      expect(output).toContain("已经自动接好 1 个高风险动作入口");
       expect(output).toContain("traceroot-audit logs");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
@@ -1088,6 +1089,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("更安全的 compose 覆盖文件");
       expect(capture.read().stdout).toContain("动作审计已经开始盯住");
       expect(capture.read().stdout).toContain("对外发邮件");
+      expect(capture.read().stdout).toContain("已经自动接好");
       expect(capture.read().stdout).toContain("traceroot-audit logs");
       expect(capture.read().stdout).not.toContain("看细节就行");
       expect(envTemplate).toContain("SMTP_API_KEY=");
@@ -1098,15 +1100,17 @@ describe("CLI", () => {
       expect(applyPlan).toContain("traceroot.tap.plan.md");
       expect(applyPlan).toContain("动作审计已经开始盯住这些高风险动作");
       expect(tapPlan).toContain("TraceRoot 动作审计说明");
-      expect(tapPlan).toContain("send-email");
+      expect(tapPlan).toContain("## 对外发邮件");
       expect(tapPlan).toContain("已自动接好");
+      expect(tapPlan).toContain("风险级别：** 高风险");
+      expect(tapPlan).toContain("TraceRoot 已经自动接好的入口");
       expect(tapPlan).toContain("tool-config.yaml 里的工具入口");
       expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「start」 启动脚本");
       expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「mailer-tool」 命令入口");
       expect(tapPlan).toContain("mcp-config.json 里的 MCP 服务 「mailer」 入口");
       expect(tapPlan).toContain("mcp-array-config.json 里的 MCP 服务 「poster」 入口");
       expect(tapPlan).toContain("tool-array-config.yaml 里的工具 「emailer」 入口");
-      expect(tapPlan).toContain("node .traceroot/tap/");
+      expect(tapPlan).toContain("TraceRoot 已经自动接好的入口：** 5 个");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
       expect(packageJson).toContain("\"send-email\"");

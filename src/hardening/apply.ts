@@ -4,7 +4,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import YAML from "yaml";
 
-import { summarizeActionLabels } from "../audit/presentation";
+import { actionLabel, summarizeActionLabels } from "../audit/presentation";
 import { recommendedManifestFormat } from "./analysis";
 import type { SavedHardeningProfile } from "./profile";
 import type { SecretExposure } from "./analysis";
@@ -199,6 +199,20 @@ function renderEnvExample(secretExposure: SecretExposure[]): string | null {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function severityDisplayLabel(severity: AuditSeverity): string {
+  switch (severity) {
+    case "critical":
+      return "紧急";
+    case "high-risk":
+      return "高风险";
+    case "risky":
+      return "有风险";
+    case "safe":
+    default:
+      return "安全";
+  }
 }
 
 function renderApplyPlan(options: {
@@ -1695,19 +1709,27 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   }
 
   for (const wrapper of tapWrappers) {
+    const installedEntrypoints = wrapper.entrypoints.filter(
+      (entrypoint) =>
+        entrypoint.installStatus === "installed" ||
+        entrypoint.installStatus === "already-installed"
+    );
+    const pendingEntrypoints = wrapper.entrypoints.filter(
+      (entrypoint) => entrypoint.installStatus === "manual"
+    );
+
     lines.push(
-      `## ${wrapper.action}`,
+      `## ${actionLabel(wrapper.action)}`,
       "",
-      `- **风险级别：** ${wrapper.severity}`,
-      `- **原始脚本：** \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\``,
-      `- **TraceRoot 给你准备好的接入文件：** \`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\``,
-      `- **TraceRoot 会用它来留下审计记录：** \`${wrapper.launchCommand}\``,
-      `- **为什么值得先接它：** ${wrapper.recommendation}`,
+      `- **风险级别：** ${severityDisplayLabel(wrapper.severity)}`,
+      `- **为什么值得先盯住它：** ${wrapper.recommendation}`,
+      `- **TraceRoot 已经自动接好的入口：** ${installedEntrypoints.length} 个`,
+      `- **暂时还没自动接上的入口：** ${pendingEntrypoints.length} 个`,
       ""
     );
 
     if (wrapper.entrypoints.length > 0) {
-      lines.push("### 接入状态", "");
+      lines.push("### 现在已经在保护中的入口", "");
 
       for (const entrypoint of wrapper.entrypoints) {
         if (entrypoint.kind === "npm-script" || entrypoint.kind === "bin") {
@@ -1765,19 +1787,25 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
           );
           continue;
         }
+      }
 
-        lines.push(
-          `- 还没自动接上：\`${entrypoint.name}\``,
-          `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
-          ""
-        );
+      if (pendingEntrypoints.length > 0) {
+        lines.push("### TraceRoot 还没自动接上的入口", "");
+
+        for (const entrypoint of pendingEntrypoints) {
+          lines.push(
+            `- 还没自动接上：\`${entrypoint.displayLabel}\``,
+            "- TraceRoot 还没有找到一个足够稳定的自动接入点，所以这类动作暂时不会自动出现在审计时间线里。",
+            ""
+          );
+        }
       }
     } else {
       lines.push(
-        "### 接入状态",
+        "### 现在已经在保护中的入口",
         "",
         "- 这个动作还没有找到可自动接入的配置入口。",
-        `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\`。`,
+        `- TraceRoot 已经把底层接入文件准备在：\`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\`。`,
         ""
       );
     }

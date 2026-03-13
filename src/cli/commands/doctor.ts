@@ -159,6 +159,11 @@ function renderDoctorSummary(options: {
     lines.push(
       `🎬 动作审计现在已经开始盯住：${summarizeActionLabels(options.bundle.tapCoveredActions)}。`
     );
+    if (options.bundle.tapInstalledCommands.length > 0) {
+      lines.push(
+        `   TraceRoot 已经自动接好 ${options.bundle.tapInstalledCommands.length} 个高风险动作入口。`
+      );
+    }
     lines.push("   之后这些动作一旦触发，TraceRoot 会立刻留下本地审计记录。");
     lines.push(`   想回看 agent 做过什么，可以直接用：traceroot-audit logs "${displayUserPath(options.plan.rootDir)}"`);
 
