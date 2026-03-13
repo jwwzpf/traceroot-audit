@@ -989,6 +989,33 @@ describe("CLI", () => {
         ].join("\n"),
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "channels-config.yaml"),
+        [
+          "channels:",
+          "  - name: whatsapp",
+          "    command:",
+          "      - tsx",
+          "      - mailer.ts"
+        ].join("\n"),
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "workflow-config.json"),
+        JSON.stringify(
+          {
+            workflows: {
+              nightlyDigest: {
+                command: "tsx",
+                args: ["mailer.ts", "--digest"]
+              }
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       await mkdir(path.join(tempDir, "skills", "mailer-tool", "src"), { recursive: true });
       await writeFile(
         path.join(tempDir, "skills", "mailer-tool", "src", "send.ts"),
@@ -1072,6 +1099,20 @@ describe("CLI", () => {
         path.join(tempDir, "tool-array-config.yaml"),
         "utf8"
       );
+      const channelsConfig = await readFile(
+        path.join(tempDir, "channels-config.yaml"),
+        "utf8"
+      );
+      const workflowConfig = JSON.parse(
+        await readFile(path.join(tempDir, "workflow-config.json"), "utf8")
+      ) as {
+        workflows: {
+          nightlyDigest: {
+            command: string;
+            args: string[];
+          };
+        };
+      };
       const nestedPackageJson = JSON.parse(
         await readFile(path.join(tempDir, "skills", "mailer-tool", "package.json"), "utf8")
       ) as {
@@ -1115,7 +1156,9 @@ describe("CLI", () => {
       expect(tapPlan).toContain("mcp-config.json 里的 MCP 服务 「mailer」 入口");
       expect(tapPlan).toContain("mcp-array-config.json 里的 MCP 服务 「poster」 入口");
       expect(tapPlan).toContain("tool-array-config.yaml 里的工具 「emailer」 入口");
-      expect(tapPlan).toContain("TraceRoot 已经自动接好的入口：** 5 个");
+      expect(tapPlan).toContain("channels-config.yaml 里的聊天通道 「whatsapp」 入口");
+      expect(tapPlan).toContain("workflow-config.json 里的自动化任务 「nightlyDigest」 入口");
+      expect(tapPlan).toContain("TraceRoot 已经自动接好的入口：** 7 个");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
       expect(packageJson).toContain("\"send-email\"");
@@ -1126,6 +1169,10 @@ describe("CLI", () => {
       expect(mcpArrayConfig.mcpServers.poster.command[1]).toContain(".traceroot/tap/");
       expect(toolArrayConfig).toContain("- node");
       expect(toolArrayConfig).toContain(".traceroot/tap/");
+      expect(channelsConfig).toContain("- node");
+      expect(channelsConfig).toContain(".traceroot/tap/");
+      expect(workflowConfig.workflows.nightlyDigest.command).toBe("node");
+      expect(workflowConfig.workflows.nightlyDigest.args[0]).toContain(".traceroot/tap/");
       expect(nestedPackageJson.scripts.start).toContain("node .traceroot/tap/");
       expect(nestedPackageJson.bin["mailer-tool"]).toContain(".traceroot/tap/");
       await expect(

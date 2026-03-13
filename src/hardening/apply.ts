@@ -898,26 +898,62 @@ function displayLabelForConfigCandidate(options: {
     .map((segment) => segment.toLowerCase());
 
   const mcpServerName =
-    options.objectName ??
     lastNamedSegment(options.segments, "mcpServers") ??
-    lastNamedSegment(options.segments, "servers");
+    lastNamedSegment(options.segments, "servers") ??
+    ((/mcp/.test(lowerFilePath) || lowerSegments.includes("mcpservers")) ? options.objectName : undefined);
 
   if (mcpServerName && (/mcp/.test(lowerFilePath) || lowerSegments.includes("mcpservers"))) {
     return `${normalizedFilePath} 里的 MCP 服务 ${quotedName(mcpServerName)} 入口`;
   }
 
+  const channelName =
+    lastNamedSegment(options.segments, "channels") ??
+    lastNamedSegment(options.segments, "channel") ??
+    (lowerSegments.includes("channels") || lowerSegments.includes("channel") ? options.objectName : undefined);
+  if (channelName && !isStructuralFieldName(channelName)) {
+    return `${normalizedFilePath} 里的聊天通道 ${quotedName(channelName)} 入口`;
+  }
+
+  const workflowName =
+    lastNamedSegment(options.segments, "workflows") ??
+    lastNamedSegment(options.segments, "workflow") ??
+    lastNamedSegment(options.segments, "automations") ??
+    lastNamedSegment(options.segments, "automation") ??
+    lastNamedSegment(options.segments, "jobs") ??
+    lastNamedSegment(options.segments, "job") ??
+    lastNamedSegment(options.segments, "tasks") ??
+    lastNamedSegment(options.segments, "task") ??
+    (
+      lowerSegments.some((segment) =>
+        ["workflows", "workflow", "automations", "automation", "jobs", "job", "tasks", "task"].includes(segment)
+      )
+        ? options.objectName
+        : undefined
+    );
+  if (workflowName && !isStructuralFieldName(workflowName)) {
+    return `${normalizedFilePath} 里的自动化任务 ${quotedName(workflowName)} 入口`;
+  }
+
   const toolName =
-    options.objectName ??
     lastNamedSegment(options.segments, "tools") ??
-    lastNamedSegment(options.segments, "tool");
+    lastNamedSegment(options.segments, "tool") ??
+    (
+      lowerSegments.includes("tools") || lowerSegments.includes("tool")
+        ? options.objectName
+        : undefined
+    );
   if (toolName && !isStructuralFieldName(toolName)) {
     return `${normalizedFilePath} 里的工具 ${quotedName(toolName)} 入口`;
   }
 
   const skillName =
-    options.objectName ??
     lastNamedSegment(options.segments, "skills") ??
-    lastNamedSegment(options.segments, "skill");
+    lastNamedSegment(options.segments, "skill") ??
+    (
+      lowerSegments.includes("skills") || lowerSegments.includes("skill")
+        ? options.objectName
+        : undefined
+    );
   if (skillName && !isStructuralFieldName(skillName)) {
     return `${normalizedFilePath} 里的技能 ${quotedName(skillName)} 入口`;
   }
@@ -971,6 +1007,10 @@ function collectConfigEntrypoints(
           ? String((node as Record<string, unknown>).key)
           : typeof (node as Record<string, unknown>).slug === "string"
             ? String((node as Record<string, unknown>).slug)
+            : typeof (node as Record<string, unknown>).label === "string"
+              ? String((node as Record<string, unknown>).label)
+              : typeof (node as Record<string, unknown>).title === "string"
+                ? String((node as Record<string, unknown>).title)
             : options.objectName;
 
   for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
