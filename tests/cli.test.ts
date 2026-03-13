@@ -180,8 +180,16 @@ function createStaticPrompter(answers: {
 
       return answer;
     },
-    async chooseMany(_question: string, choices: CliChoice[]) {
+    async chooseMany(
+      _question: string,
+      choices: CliChoice[],
+      options: { defaultValues?: string[] } = {}
+    ) {
       const answer = chooseManyAnswers.shift();
+
+      if (!answer && options.defaultValues && options.defaultValues.length > 0) {
+        return options.defaultValues;
+      }
 
       if (!answer || answer.some((value) => !choices.some((choice) => choice.value === value))) {
         throw new Error(`Unexpected chooseMany answer: ${answer?.join(", ") ?? "undefined"}`);
@@ -295,6 +303,57 @@ describe("CLI", () => {
       expect(output).toContain("--today");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets the user accept TraceRoot's suggested workflows without extra thinking", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-suggested-intent-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nEMAIL_APP_PASSWORD=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "mail-runtime",
+            scripts: {
+              "send-email": "tsx mailer.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 看起来你这次更像想让 AI 做这些事");
+      expect(output).toContain("📧 邮件整理与回复");
+      expect(output).toContain("直接回车就可以先按这套继续");
+      expect(output).toContain("你刚批准的工作流：📧 邮件整理与回复");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

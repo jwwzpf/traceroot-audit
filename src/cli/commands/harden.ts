@@ -42,16 +42,16 @@ export function registerHardenCommand(program: Command, runtime: CliRuntime): vo
           includeCwd: options.includeCwd,
           emptyStateTitle: "TraceRoot Audit Hardening",
           emptyStateHint:
-            "No likely OpenClaw/runtime surfaces were found in the common locations we checked.\nRun `traceroot-audit discover .` inside a specific project if you already know where it lives.",
+            "TraceRoot 暂时还没在常见位置里看到明显的 OpenClaw / runtime 入口。\n如果你已经知道目录，直接在那个项目里运行 `traceroot-audit discover .` 就行。",
           chooseTargetQuestion:
-            "🧭 We found these likely AI action surfaces. Which one do you want to harden?"
+            "🧭 TraceRoot 找到了这些可能会真正驱动 AI 动作的入口。你想先收紧哪一个？"
         });
 
         if (!effectiveTarget) {
           return;
         }
 
-        const selections: HardeningSelections = await promptHardeningSelections(runtime);
+        const selections: HardeningSelections = await promptHardeningSelections(runtime, target);
         const plan = await buildHardeningPlan(effectiveTarget, selections);
 
         runtime.io.stdout(renderHardeningHumanOutput(plan));

@@ -37,7 +37,11 @@ export interface CliChoice {
 
 export interface CliPrompter {
   chooseOne(question: string, choices: CliChoice[]): Promise<string>;
-  chooseMany(question: string, choices: CliChoice[]): Promise<string[]>;
+  chooseMany(
+    question: string,
+    choices: CliChoice[],
+    options?: { defaultValues?: string[] }
+  ): Promise<string[]>;
   input(question: string, options?: { defaultValue?: string; allowEmpty?: boolean }): Promise<string>;
   confirm(question: string, defaultValue?: boolean): Promise<boolean>;
 }
@@ -72,30 +76,52 @@ function createDefaultPrompter(): CliPrompter {
           process.stdout.write(`  ${index + 1}. ${choice.label}${hint}\n`);
         });
 
-        const answer = (await prompt.question("Select one option by number: ")).trim();
+        const answer = (await prompt.question("请输入编号：")).trim();
         const index = Number.parseInt(answer, 10);
 
         if (Number.isInteger(index) && index >= 1 && index <= choices.length) {
           return choices[index - 1]?.value ?? choices[0]!.value;
         }
 
-        process.stdout.write("Please enter a valid number.\n\n");
+        process.stdout.write("请输入有效的编号。\n\n");
       }
     });
   }
 
-  async function chooseMany(question: string, choices: CliChoice[]): Promise<string[]> {
+  async function chooseMany(
+    question: string,
+    choices: CliChoice[],
+    options: { defaultValues?: string[] } = {}
+  ): Promise<string[]> {
     return withInterface(async (prompt) => {
+      const defaultValues = options.defaultValues?.filter((value) =>
+        choices.some((choice) => choice.value === value)
+      ) ?? [];
+      const defaultIndexes = defaultValues
+        .map((value) => choices.findIndex((choice) => choice.value === value))
+        .filter((index) => index >= 0)
+        .map((index) => index + 1);
+
       while (true) {
         process.stdout.write(`${question}\n`);
         choices.forEach((choice, index) => {
           const hint = choice.hint ? ` — ${choice.hint}` : "";
-          process.stdout.write(`  ${index + 1}. ${choice.label}${hint}\n`);
+          const recommended = defaultValues.includes(choice.value) ? " [推荐]" : "";
+          process.stdout.write(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
         });
 
         const answer = (
-          await prompt.question("Select one or more options (comma separated numbers): ")
+          await prompt.question(
+            defaultIndexes.length > 0
+              ? `请输入一个或多个编号（用逗号分隔，直接回车采用 TraceRoot 的推荐：${defaultIndexes.join(", ")}）：`
+              : "请输入一个或多个编号（用逗号分隔）："
+          )
         ).trim();
+
+        if (answer === "" && defaultValues.length > 0) {
+          return defaultValues;
+        }
+
         const indexes = answer
           .split(",")
           .map((value) => Number.parseInt(value.trim(), 10))
@@ -108,7 +134,7 @@ function createDefaultPrompter(): CliPrompter {
           return values;
         }
 
-        process.stdout.write("Please choose at least one valid option.\n\n");
+        process.stdout.write("请至少选一个有效的编号。\n\n");
       }
     });
   }
@@ -132,7 +158,7 @@ function createDefaultPrompter(): CliPrompter {
           return false;
         }
 
-        process.stdout.write("Please answer yes or no.\n");
+        process.stdout.write("请回答 yes 或 no。\n");
       }
     });
   }
@@ -159,7 +185,7 @@ function createDefaultPrompter(): CliPrompter {
           return "";
         }
 
-        process.stdout.write("Please enter a value.\n");
+        process.stdout.write("请先输入一个值。\n");
       }
     });
   }

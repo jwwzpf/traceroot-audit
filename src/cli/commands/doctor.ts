@@ -527,9 +527,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           includeCwd: options.includeCwd,
           emptyStateTitle: "TraceRoot Audit Doctor",
           emptyStateHint:
-            "We could not find an obvious OpenClaw/runtime/skill surface in the common locations we checked.\nIf you already know the directory, run `traceroot-audit doctor /path/to/project`.",
+            "TraceRoot 暂时还没在常见位置里看到明显的 OpenClaw / runtime / skill 入口。\n如果你已经知道目录，直接运行 `traceroot-audit doctor /path/to/project` 就可以从那里开始。",
           chooseTargetQuestion:
-            "🧭 We found these likely AI action surfaces. Which one do you want TraceRoot Doctor to work on?"
+            "🧭 TraceRoot 找到了这些可能真的会驱动 AI 动作的入口。你想先让 Doctor 处理哪一个？"
         });
 
         if (!effectiveTarget) {
@@ -587,7 +587,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         }
 
         if (!selections) {
-          selections = await promptHardeningSelections(runtime);
+          selections = await promptHardeningSelections(runtime, effectiveTarget);
         }
 
         let plan: Awaited<ReturnType<typeof buildHardeningPlan>> | null = null;
@@ -619,7 +619,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           plan = await buildHardeningPlan(effectiveTarget, selections);
 
           const shouldWrite = await runtime.prompter.confirm(
-            "📦 Generate the safer bundle now?",
+            "📦 现在就把这套更安全的补丁包准备好吗？",
             true
           );
 

@@ -6,13 +6,18 @@ import { surfaceLabel } from "../core/surfaces";
 import type { CliChoice, CliRuntime } from "../cli/index";
 import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
 import { detectLikelyNotifyChannels, displayNotifyChannel } from "./notify-discovery";
+import { discoverFiles, resolveTarget } from "../utils/files";
 import type {
   ExposureMode,
   FilesystemScope,
   HardeningSelections,
   OutboundApprovalMode
 } from "./analysis";
-import { hardeningIntentProfiles, type HardeningIntentId } from "./profiles";
+import {
+  getHardeningProfileById,
+  hardeningIntentProfiles,
+  type HardeningIntentId
+} from "./profiles";
 
 function intentChoices(): CliChoice[] {
   return hardeningIntentProfiles.map((profile) => ({
@@ -20,6 +25,100 @@ function intentChoices(): CliChoice[] {
     label: `${profile.icon} ${profile.title}`,
     hint: profile.subtitle
   }));
+}
+
+const intentSignalMatchers: Record<HardeningIntentId, RegExp[]> = {
+  "email-reply": [
+    /\bemail\b/i,
+    /\bgmail\b/i,
+    /\bsmtp\b/i,
+    /\binbox\b/i,
+    /\bresend\b/i,
+    /\bsendgrid\b/i,
+    /\bmail(?:er|gun)?\b/i
+  ],
+  "social-posting": [
+    /\btwitter\b/i,
+    /\bx\.com\b/i,
+    /\btweet\b/i,
+    /\bsocial\b/i,
+    /\bpost(?:ing)?\b/i,
+    /\bpublish\b/i,
+    /\btiktok\b/i,
+    /\binstagram\b/i,
+    /\byoutube\b/i
+  ],
+  "shopping-automation": [
+    /\bshop(?:ping)?\b/i,
+    /\border\b/i,
+    /\bcart\b/i,
+    /\bcheckout\b/i,
+    /\bpurchase\b/i,
+    /\bdelivery\b/i,
+    /\bstripe\b/i,
+    /\bpaypal\b/i
+  ],
+  "pr-review": [
+    /\bpr\b/i,
+    /\bpull[- ]request\b/i,
+    /\breview\b/i,
+    /\bgithub\b/i,
+    /\bgitlab\b/i,
+    /\bdiff\b/i,
+    /\bcommit\b/i
+  ],
+  "chat-support": [
+    /\bchat\b/i,
+    /\bsupport\b/i,
+    /\bmessage\b/i,
+    /\bslack\b/i,
+    /\btelegram\b/i,
+    /\bwhatsapp\b/i,
+    /\bdiscord\b/i,
+    /\btwilio\b/i
+  ],
+  "market-monitoring": [
+    /\bmarket\b/i,
+    /\bchart\b/i,
+    /\btradingview\b/i,
+    /\bstock\b/i,
+    /\bbroker\b/i,
+    /\bprice\b/i,
+    /\bbinance\b/i,
+    /\bcoinbase\b/i,
+    /\bportfolio\b/i
+  ]
+};
+
+async function suggestIntentIdsForTarget(targetInput: string): Promise<HardeningIntentId[]> {
+  const resolvedTarget = await resolveTarget(targetInput);
+  const files = await discoverFiles(resolvedTarget);
+  const scores = new Map<HardeningIntentId, number>();
+
+  for (const profile of hardeningIntentProfiles) {
+    scores.set(profile.id, 0);
+  }
+
+  for (const file of files) {
+    const relativePath = file.relativePath.toLowerCase();
+    const contentSample = file.content.slice(0, 4000);
+    const combinedText = `${relativePath}\n${contentSample}`;
+
+    for (const [intentId, patterns] of Object.entries(intentSignalMatchers) as Array<
+      [HardeningIntentId, RegExp[]]
+    >) {
+      const matches = patterns.filter((pattern) => pattern.test(combinedText)).length;
+      if (matches > 0) {
+        scores.set(intentId, (scores.get(intentId) ?? 0) + matches);
+      }
+    }
+  }
+
+  return [...scores.entries()]
+    .filter(([, score]) => score > 0)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 2)
+    .map(([intentId]) => intentId);
 }
 
 function approvalChoices(): CliChoice[] {
@@ -172,11 +271,31 @@ export async function resolveWizardTarget(
 }
 
 export async function promptHardeningSelections(
-  runtime: CliRuntime
+  runtime: CliRuntime,
+  targetInput?: string
 ): Promise<HardeningSelections> {
+  const suggestedIntentIds = targetInput
+    ? await suggestIntentIdsForTarget(targetInput)
+    : [];
+
+  if (suggestedIntentIds.length > 0) {
+    runtime.io.stdout(
+      `✨ TraceRoot 看起来你这次更像想让 AI 做这些事：${suggestedIntentIds
+        .map((intentId) => {
+          const profile = getHardeningProfileById(intentId);
+          return `${profile.icon} ${profile.title}`;
+        })
+        .join("、")}。\n`
+    );
+    runtime.io.stdout(
+      "💡 如果这组推荐正好符合你现在的目标，直接回车就可以先按这套继续。\n\n"
+    );
+  }
+
   const intentIds = (await runtime.prompter.chooseMany(
-    "✨ What do you want this AI to do? Choose one or more workflows:",
-    intentChoices()
+    "✨ 这次你想让这个 AI 主要帮你做什么？可以选一个或多个工作流：",
+    intentChoices(),
+    { defaultValues: suggestedIntentIds }
   )) as HardeningIntentId[];
   const outboundApproval = (await runtime.prompter.chooseOne(
     "🛑 How should outbound side-effecting actions behave?",
