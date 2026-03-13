@@ -461,7 +461,7 @@ describe("CLI", () => {
         ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
         capture.io,
         createStaticPrompter({
-          confirm: [true, true]
+          confirm: [true]
         })
       );
 
@@ -469,8 +469,12 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 记得你上次陪跑的是");
-      expect(output).toContain("TraceRoot 已经替你记住了上次这套陪跑方式");
+      expect(output).toContain("上次那套方式 TraceRoot 也还记着");
       expect(output).toContain("WhatsApp（+4917612345678）");
+      expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
+      expect(output).toContain("这次不会重新生成整套 bundle");
+      expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
+      expect(output).not.toContain("权限收缩预览");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
     } finally {
       await messenger.close();
@@ -533,7 +537,7 @@ describe("CLI", () => {
         ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
         capture.io,
         createStaticPrompter({
-          confirm: [true, true]
+          confirm: [true]
         })
       );
 
@@ -541,8 +545,12 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 记得你上次陪跑的是");
-      expect(output).toContain("TraceRoot 已经替你记住了上次这套陪跑方式");
+      expect(output).toContain("上次那套方式 TraceRoot 也还记着");
       expect(output).toContain("只保留本地审计时间线，不额外打扰你");
+      expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
+      expect(output).toContain("这次不会重新生成整套 bundle");
+      expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
+      expect(output).not.toContain("权限收缩预览");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
     } finally {
       if (previousHome === undefined) {

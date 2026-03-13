@@ -239,6 +239,74 @@ function renderDoctorSummary(options: {
   return `${lines.join("\n")}\n`;
 }
 
+function renderDoctorResumeSummary(options: {
+  target: string;
+  profile: SavedHardeningProfile;
+  reminder: string;
+  boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
+}): string {
+  const lines = [
+    "TraceRoot Audit Doctor",
+    "======================",
+    "",
+    "⚡ TraceRoot 已经直接续上了你上次的陪跑设置。",
+    `🎯 继续陪跑：${displayUserPath(options.target)}`,
+    `🧩 已批准工作流：${describeSavedWorkflows(options.profile)}`,
+    `🔔 提醒方式：${options.reminder}`,
+    ""
+  ];
+
+  if (options.boundaryStatus.aligned) {
+    lines.push(
+      "✅ 当前配置还在你批准的边界内。",
+      "💓 TraceRoot 这次不会重新展开整套 Doctor，会直接继续盯着边界和高风险动作。"
+    );
+  } else {
+    lines.push(
+      `🚧 当前配置还比你批准的边界更宽（${options.boundaryStatus.violations.length} 个点）。`
+    );
+
+    const topViolations = options.boundaryStatus.violations.slice(0, 3);
+    if (topViolations.length > 0) {
+      lines.push("👀 现在最值得你留意的是：");
+
+      for (const violation of topViolations) {
+        const icon =
+          violation.severity === "critical"
+            ? "🛑"
+            : violation.severity === "high"
+              ? "⚠️"
+              : "ℹ️";
+        lines.push(`- ${icon} ${violation.title}: ${violation.message}`);
+      }
+    }
+
+    const recommendations = [
+      ...new Set(
+        options.boundaryStatus.violations.map((violation) => violation.recommendation)
+      )
+    ];
+    if (recommendations.length > 0) {
+      lines.push("", "🔧 最值得先修的地方：");
+      for (const recommendation of recommendations.slice(0, 3)) {
+        lines.push(`- ${recommendation}`);
+      }
+    }
+
+    lines.push(
+      "",
+      "💓 TraceRoot 这次不会重新生成整套 bundle，会先直接继续陪跑，并盯着这些边界变化。"
+    );
+  }
+
+  lines.push(
+    "",
+    `📚 想看今天发生了什么，可以直接用：traceroot-audit logs "${displayUserPath(options.target)}" --today`
+  );
+
+  return `${lines.join("\n")}\n`;
+}
+
 function selectionsFromSavedProfile(
   profile: SavedHardeningProfile
 ): HardeningSelections | null {
@@ -372,22 +440,75 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           notifyAccount?: string;
         }
       ) => {
+        const alreadyConfiguredNotification =
+          Boolean(options.notifyWebhook) ||
+          Boolean(options.notifyChannel) ||
+          Boolean(options.notifyTarget) ||
+          Boolean(options.notifyAccount);
         let preferredTarget = target;
         let reusedRecentTarget = false;
+        let offeredRecentTargetFastResume = false;
+        let preConfirmedFastResume = false;
         if (!preferredTarget && !options.host) {
           const recentTarget = await loadRecentDoctorTarget();
           if (recentTarget) {
-            runtime.io.stdout(
-              `🧠 TraceRoot 记得你上次陪跑的是：${recentTargetLabel(recentTarget)}。\n`
-            );
-            const reuseRecentTarget = await runtime.prompter.confirm(
-              "这次要直接继续它吗？",
-              true
-            );
+            if (options.watch && !alreadyConfiguredNotification) {
+              try {
+                const resolvedRecentTarget = await resolveTarget(recentTarget);
+                const recentProfile = await loadHardeningProfile(
+                  resolvedRecentTarget.rootDir
+                );
+                const recentSelections =
+                  recentProfile.profile &&
+                  selectionsFromSavedProfile(recentProfile.profile);
+                const recentPreferences = await loadWatchPreferences(
+                  resolvedRecentTarget.rootDir
+                );
 
-            if (reuseRecentTarget) {
-              preferredTarget = recentTarget;
-              reusedRecentTarget = true;
+                if (recentSelections && hasSavedReminderPreference(recentPreferences)) {
+                  runtime.io.stdout(
+                    `🧠 TraceRoot 记得你上次陪跑的是：${recentTargetLabel(recentTarget)}。\n`
+                  );
+                  runtime.io.stdout(
+                    `⚡ 上次那套方式 TraceRoot 也还记着：${describeSavedWorkflows(
+                      recentProfile.profile!
+                    )} + ${describeSavedReminder({
+                      mode: recentPreferences!.mode,
+                      webhookUrl: recentPreferences!.notifications.webhookUrl,
+                      openclawChannel: recentPreferences!.notifications.openclawChannel,
+                      openclawTarget: recentPreferences!.notifications.openclawTarget
+                    })}。\n`
+                  );
+                  offeredRecentTargetFastResume = true;
+                  const resumeRecentTarget = await runtime.prompter.confirm(
+                    "这次要直接按上次那套方式继续陪跑吗？",
+                    true
+                  );
+
+                  if (resumeRecentTarget) {
+                    preferredTarget = recentTarget;
+                    reusedRecentTarget = true;
+                    preConfirmedFastResume = true;
+                  }
+                }
+              } catch {
+                // fall back to the regular recent-target prompt below
+              }
+            }
+
+            if (!preferredTarget && !offeredRecentTargetFastResume) {
+              runtime.io.stdout(
+                `🧠 TraceRoot 记得你上次陪跑的是：${recentTargetLabel(recentTarget)}。\n`
+              );
+              const reuseRecentTarget = await runtime.prompter.confirm(
+                "这次要直接继续它吗？",
+                true
+              );
+
+              if (reuseRecentTarget) {
+                preferredTarget = recentTarget;
+                reusedRecentTarget = true;
+              }
             }
           }
         }
@@ -411,11 +532,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         const resolvedTarget = await resolveTarget(effectiveTarget);
         const existingProfile = await loadHardeningProfile(resolvedTarget.rootDir);
-        const alreadyConfiguredNotification =
-          Boolean(options.notifyWebhook) ||
-          Boolean(options.notifyChannel) ||
-          Boolean(options.notifyTarget) ||
-          Boolean(options.notifyAccount);
         const savedPreferences = !alreadyConfiguredNotification
           ? await loadWatchPreferences(resolvedTarget.rootDir)
           : null;
@@ -426,9 +542,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           reusedRecentTarget &&
           Boolean(selections) &&
           hasSavedReminderPreference(savedPreferences);
-        let fastResume = false;
+        let fastResume = preConfirmedFastResume;
 
-        if (canFastResume) {
+        if (canFastResume && !preConfirmedFastResume) {
           runtime.io.stdout(
             `⚡ TraceRoot 已经替你记住了上次这套陪跑方式：${describeSavedWorkflows(
               existingProfile.profile!
@@ -465,55 +581,80 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           selections = await promptHardeningSelections(runtime);
         }
 
-        const plan = await buildHardeningPlan(effectiveTarget, selections);
+        let plan: Awaited<ReturnType<typeof buildHardeningPlan>> | null = null;
+        let savedProfile: Awaited<ReturnType<typeof loadHardeningProfile>> | null =
+          existingProfile;
+        let boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
 
-        const shouldWrite = fastResume
-          ? true
-          : await runtime.prompter.confirm(
-              "📦 Generate the safer bundle now?",
-              true
-            );
-
-        if (!shouldWrite) {
-          runtime.io.stdout("Stopped before generating the safer bundle.\n");
-          return;
-        }
-
-        await writeHardeningFiles(plan, {
-          manifestFormat: recommendedManifestFormat(plan.manifestPath)
-        });
-
-        const savedProfile = await loadHardeningProfile(plan.rootDir);
-        if (!savedProfile.profile) {
-          runtime.io.stderr(
-            `Saved boundary could not be loaded after hardening: ${savedProfile.error ?? "unknown error"}\n`
+        if (fastResume) {
+          const currentState = await buildCurrentHardeningState(
+            effectiveTarget,
+            selections.intentIds
           );
-          runtime.exitCode = 1;
-          return;
+          boundaryStatus = evaluateBoundaryStatus(savedProfile.profile!, currentState);
+
+          runtime.io.stdout(
+            renderDoctorResumeSummary({
+              target: effectiveTarget,
+              profile: savedProfile.profile!,
+              reminder: describeSavedReminder({
+                mode: savedPreferences!.mode,
+                webhookUrl: savedPreferences!.notifications.webhookUrl,
+                openclawChannel: savedPreferences!.notifications.openclawChannel,
+                openclawTarget: savedPreferences!.notifications.openclawTarget
+              }),
+              boundaryStatus
+            })
+          );
+        } else {
+          plan = await buildHardeningPlan(effectiveTarget, selections);
+
+          const shouldWrite = await runtime.prompter.confirm(
+            "📦 Generate the safer bundle now?",
+            true
+          );
+
+          if (!shouldWrite) {
+            runtime.io.stdout("Stopped before generating the safer bundle.\n");
+            return;
+          }
+
+          await writeHardeningFiles(plan, {
+            manifestFormat: recommendedManifestFormat(plan.manifestPath)
+          });
+
+          savedProfile = await loadHardeningProfile(plan.rootDir);
+          if (!savedProfile.profile) {
+            runtime.io.stderr(
+              `Saved boundary could not be loaded after hardening: ${savedProfile.error ?? "unknown error"}\n`
+            );
+            runtime.exitCode = 1;
+            return;
+          }
+
+          const bundle = await writeApplyBundle({
+            rootDir: plan.rootDir,
+            profile: savedProfile.profile,
+            manifestPathHint: plan.manifestPath
+          });
+          const currentState = await buildCurrentHardeningState(
+            effectiveTarget,
+            selections.intentIds
+          );
+          boundaryStatus = evaluateBoundaryStatus(savedProfile.profile, currentState);
+
+          runtime.io.stdout(
+            renderDoctorSummary({
+              target: effectiveTarget,
+              plan,
+              selectedWorkflows: plan.selectedProfiles.map(
+                (profile) => `${profile.icon} ${profile.title}`
+              ),
+              bundle,
+              boundaryStatus
+            })
+          );
         }
-
-        const bundle = await writeApplyBundle({
-          rootDir: plan.rootDir,
-          profile: savedProfile.profile,
-          manifestPathHint: plan.manifestPath
-        });
-        const currentState = await buildCurrentHardeningState(
-          effectiveTarget,
-          selections.intentIds
-        );
-        const boundaryStatus = evaluateBoundaryStatus(savedProfile.profile, currentState);
-
-        runtime.io.stdout(
-          renderDoctorSummary({
-            target: effectiveTarget,
-            plan,
-            selectedWorkflows: plan.selectedProfiles.map(
-              (profile) => `${profile.icon} ${profile.title}`
-            ),
-            bundle,
-            boundaryStatus
-          })
-        );
 
         if (!options.watch) {
           return;
@@ -623,7 +764,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               ? "channel"
               : "local-only";
 
-        await saveWatchPreferences(plan.rootDir, {
+        await saveWatchPreferences(resolvedTarget.rootDir, {
           version: 1,
           updatedAt: new Date().toISOString(),
           mode: savedReminderMode,
