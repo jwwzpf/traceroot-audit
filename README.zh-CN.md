@@ -60,6 +60,8 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit logs
 ```
 
+现在只要 OpenClaw / MCP / 本地 runtime 在目标目录里吐出结构化事件流，TraceRoot 也会尽量直接听懂这些动作，而不要求你先做很多手动接线。
+
 第一条动作级事件接入也已经能用了，适合包裹本地 skill / script：
 
 ```bash

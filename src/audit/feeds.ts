@@ -1,6 +1,8 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 
+import fg from "fast-glob";
+
 import type { AuditEvent, AuditSeverity } from "./types";
 import { actionLabel } from "./presentation";
 import { displayUserPath } from "../utils/paths";
@@ -19,14 +21,32 @@ const candidateRelativePaths = [
   "runtime-events.jsonl",
   "openclaw-events.jsonl",
   "mcp-events.jsonl",
+  "agent-events.jsonl",
+  "action-events.jsonl",
   path.join("logs", "runtime-events.jsonl"),
   path.join("logs", "openclaw-events.jsonl"),
   path.join("logs", "mcp-events.jsonl"),
-  path.join(".openclaw", "events.jsonl")
+  path.join("logs", "agent-events.jsonl"),
+  path.join("logs", "action-events.jsonl"),
+  path.join(".openclaw", "events.jsonl"),
+  path.join(".mcp", "events.jsonl")
 ];
 
-function normalizeSeverity(value?: unknown): AuditSeverity {
+const candidateGlobPatterns = [
+  "logs/**/*events*.jsonl",
+  "logs/**/*actions*.jsonl",
+  ".openclaw/**/*events*.jsonl",
+  ".openclaw/**/*actions*.jsonl",
+  ".mcp/**/*events*.jsonl",
+  ".mcp/**/*actions*.jsonl"
+];
+
+function normalizeSeverity(value?: unknown): AuditSeverity | undefined {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+
+  if (!normalized) {
+    return undefined;
+  }
 
   if (["critical", "crit", "severe"].includes(normalized)) {
     return "critical";
@@ -40,7 +60,7 @@ function normalizeSeverity(value?: unknown): AuditSeverity {
     return "risky";
   }
 
-  return "safe";
+  return undefined;
 }
 
 function severityFromAction(action?: string): AuditSeverity {
@@ -77,6 +97,40 @@ function normalizeStatus(value?: unknown): AuditEvent["status"] {
   }
 
   return "attempted";
+}
+
+function getNestedValue(
+  source: Record<string, unknown>,
+  pathSegments: string[]
+): unknown {
+  let current: unknown = source;
+
+  for (const segment of pathSegments) {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current;
+}
+
+function pickString(
+  source: Record<string, unknown>,
+  candidates: Array<string | string[]>
+): string | undefined {
+  for (const candidate of candidates) {
+    const value = Array.isArray(candidate)
+      ? getNestedValue(source, candidate)
+      : source[candidate];
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
 }
 
 function inferRecommendation(action?: string, severity?: AuditSeverity): string | undefined {
@@ -121,53 +175,125 @@ function inferMessage(action: string | undefined, status: AuditEvent["status"], 
 }
 
 function parseRuntimeFeedEvent(line: string, targetRoot: string): AuditEvent | null {
-  let parsed: Record<string, unknown>;
+  let parsed: Record<string, unknown> | unknown[];
 
   try {
-    parsed = JSON.parse(line) as Record<string, unknown>;
+    parsed = JSON.parse(line) as Record<string, unknown> | unknown[];
   } catch {
     return null;
   }
 
-  const action =
-    typeof parsed.action === "string"
-      ? parsed.action
-      : typeof parsed.event === "string"
-        ? parsed.event
-        : typeof parsed.name === "string"
-          ? parsed.name
-          : undefined;
+  if (Array.isArray(parsed)) {
+    return null;
+  }
+
+  const payload =
+    (getNestedValue(parsed, ["event"]) as Record<string, unknown> | undefined) ??
+    (getNestedValue(parsed, ["data"]) as Record<string, unknown> | undefined) ??
+    (getNestedValue(parsed, ["payload"]) as Record<string, unknown> | undefined);
+
+  const action = pickString(parsed, [
+    "action",
+    "event",
+    "name",
+    "type",
+    ["event", "action"],
+    ["event", "name"],
+    ["event", "type"],
+    ["data", "action"],
+    ["data", "name"],
+    ["data", "type"],
+    ["payload", "action"],
+    ["payload", "name"],
+    ["payload", "type"]
+  ]);
 
   if (!action) {
     return null;
   }
 
-  const severity = normalizeSeverity(parsed.severity ?? parsed.risk ?? parsed.level) || severityFromAction(action);
-  const status = normalizeStatus(parsed.status ?? parsed.phase ?? parsed.outcome);
-  const runtimeName =
-    typeof parsed.runtime === "string"
-      ? parsed.runtime
-      : typeof parsed.agent === "string"
-        ? parsed.agent
-        : typeof parsed.provider === "string"
-          ? parsed.provider
-          : undefined;
-  const target =
-    typeof parsed.target === "string"
-      ? path.resolve(targetRoot, parsed.target)
-      : typeof parsed.path === "string"
-        ? path.resolve(targetRoot, parsed.path)
-        : targetRoot;
-  const message =
-    typeof parsed.message === "string" && parsed.message.trim().length > 0
-      ? parsed.message
-      : inferMessage(action, status, runtimeName);
+  const severity =
+    normalizeSeverity(
+      pickString(parsed, [
+        "severity",
+        "risk",
+        "level",
+        ["event", "severity"],
+        ["event", "risk"],
+        ["data", "severity"],
+        ["data", "risk"],
+        ["payload", "severity"],
+        ["payload", "risk"]
+      ])
+    ) || severityFromAction(action);
+  const status = normalizeStatus(
+    pickString(parsed, [
+      "status",
+      "phase",
+      "outcome",
+      "result",
+      ["event", "status"],
+      ["event", "phase"],
+      ["data", "status"],
+      ["data", "phase"],
+      ["payload", "status"],
+      ["payload", "phase"]
+    ])
+  );
+  const runtimeName = pickString(parsed, [
+    "runtime",
+    "agent",
+    "provider",
+    "source",
+    "service",
+    "tool",
+    ["event", "runtime"],
+    ["event", "agent"],
+    ["data", "runtime"],
+    ["data", "agent"],
+    ["payload", "runtime"],
+    ["payload", "agent"]
+  ]);
+  const targetValue = pickString(parsed, [
+    "target",
+    "path",
+    "file",
+    "resource",
+    ["event", "target"],
+    ["event", "path"],
+    ["data", "target"],
+    ["data", "path"],
+    ["payload", "target"],
+    ["payload", "path"]
+  ]);
+  const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
+  const message = pickString(parsed, [
+    "message",
+    "summary",
+    "text",
+    ["event", "message"],
+    ["data", "message"],
+    ["data", "summary"],
+    ["payload", "message"],
+    ["payload", "summary"]
+  ]) ?? inferMessage(action, status, runtimeName);
+  const recommendation =
+    pickString(parsed, [
+      "recommendation",
+      "suggestion",
+      ["event", "recommendation"],
+      ["data", "recommendation"],
+      ["payload", "recommendation"]
+    ]) ?? inferRecommendation(action, severity);
 
   return {
-    timestamp:
-      typeof parsed.timestamp === "string" && parsed.timestamp.length > 0
-        ? parsed.timestamp
-        : new Date().toISOString(),
+    timestamp: pickString(parsed, [
+      "timestamp",
+      "time",
+      ["event", "timestamp"],
+      ["data", "timestamp"],
+      ["payload", "timestamp"]
+    ]) ?? new Date().toISOString(),
     severity,
     category: "action-event",
     source: "runtime-feed",
@@ -180,19 +306,21 @@ function parseRuntimeFeedEvent(line: string, targetRoot: string): AuditEvent | n
     action,
     status,
     message,
-    recommendation:
-      typeof parsed.recommendation === "string" && parsed.recommendation.trim().length > 0
-        ? parsed.recommendation
-        : inferRecommendation(action, severity),
+    recommendation,
     evidence: {
-      source: typeof parsed.source === "string" ? parsed.source : "runtime-event-feed",
-      raw: parsed
+      source: pickString(parsed, [
+        "source",
+        ["event", "source"],
+        ["data", "source"],
+        ["payload", "source"]
+      ]) ?? "runtime-event-feed",
+      raw: payload ?? parsed
     }
   };
 }
 
 export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<RuntimeEventFeed[]> {
-  const feeds: RuntimeEventFeed[] = [];
+  const feedMap = new Map<string, RuntimeEventFeed>();
 
   for (const relativePath of candidateRelativePaths) {
     const absolutePath = path.join(targetRoot, relativePath);
@@ -200,14 +328,14 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
     try {
       const content = await readFile(absolutePath, "utf8");
       if (content.trim().length === 0) {
-        feeds.push({
+        feedMap.set(absolutePath, {
           absolutePath,
           displayPath: displayUserPath(absolutePath)
         });
         continue;
       }
 
-      feeds.push({
+      feedMap.set(absolutePath, {
         absolutePath,
         displayPath: displayUserPath(absolutePath)
       });
@@ -216,7 +344,26 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
     }
   }
 
-  return feeds;
+  const globMatches = await fg(candidateGlobPatterns, {
+    cwd: targetRoot,
+    absolute: true,
+    onlyFiles: true,
+    unique: true,
+    dot: true,
+    deep: 4,
+    ignore: ["**/node_modules/**", "**/.git/**"]
+  });
+
+  for (const absolutePath of globMatches) {
+    feedMap.set(absolutePath, {
+      absolutePath,
+      displayPath: displayUserPath(absolutePath)
+    });
+  }
+
+  return [...feedMap.values()].sort((left, right) =>
+    left.displayPath.localeCompare(right.displayPath)
+  );
 }
 
 export async function createRuntimeFeedCursor(feeds: RuntimeEventFeed[]): Promise<RuntimeFeedCursor> {

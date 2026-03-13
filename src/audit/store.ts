@@ -62,6 +62,14 @@ function parseAuditEvent(line: string): AuditEvent | null {
   }
 }
 
+function eventMatchesTarget(event: AuditEvent, target: string): boolean {
+  if (!event.target) {
+    return false;
+  }
+
+  return event.target === target || event.target.startsWith(`${target}${path.sep}`);
+}
+
 export async function readAuditEvents(
   options: ReadAuditEventsOptions = {}
 ): Promise<{
@@ -89,7 +97,7 @@ export async function readAuditEvents(
     .filter((event): event is AuditEvent => event !== null);
 
   if (options.target) {
-    events = events.filter((event) => event.target === options.target);
+    events = events.filter((event) => eventMatchesTarget(event, options.target!));
   }
 
   if (options.severity) {

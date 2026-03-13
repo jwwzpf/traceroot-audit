@@ -594,6 +594,91 @@ describe("CLI", () => {
     }
   });
 
+  it("understands nested OpenClaw-style runtime events and shows human action labels", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "BANK_TOKEN=test\nPRIVATE_DATA_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["market-monitoring"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await mkdir(path.join(tempDir, ".openclaw", "logs"), { recursive: true });
+      await writeFile(
+        path.join(tempDir, ".openclaw", "logs", "session-actions.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          source: "openclaw-runtime",
+          event: {
+            type: "bank-access",
+            status: "started",
+            runtime: "OpenClaw",
+            target: "accounts/checking",
+            message: "OpenClaw 正在读取一个银行账户概览。",
+            recommendation: "先确认这次金融数据访问是不是你刚刚要求它去做的。"
+          }
+        })}\n`,
+        "utf8"
+      );
+
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("TraceRoot 实时提醒");
+      expect(watchOutput).toContain("访问银行或支付账户");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("OpenClaw 正在读取一个银行账户概览。");
+      expect(logsCapture.read().stdout).toContain("访问银行或支付账户：出现了 1 次");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can send a webhook reminder when doctor watch sees a high-risk action", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-target-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-home-"));

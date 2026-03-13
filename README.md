@@ -60,6 +60,8 @@ npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
 npx traceroot-audit logs
 ```
 
+If OpenClaw / MCP / another local runtime writes structured event streams into the target directory, TraceRoot now tries to understand those actions directly too, instead of forcing you to hand-wire every entrypoint first.
+
 And the first action-level event adapter is now available for local skills and scripts:
 
 ```bash
