@@ -265,6 +265,7 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 现在会继续陪跑这个 agent");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
       expect(output).toContain("Doctor Watch 现在会继续盯着");
+      expect(output).toContain("TraceRoot 会安静地继续陪跑，不会反复刷屏");
       expect(output).toContain("审计日志:");
       expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
@@ -1181,6 +1182,29 @@ describe("CLI", () => {
     expect(output).toContain("TraceRoot Audit Guard");
     expect(output).toContain("初始风险分");
     expect(output).toContain("这轮没有发现新的风险或边界变化");
+  });
+
+  it("keeps doctor watch quiet across repeated calm cycles", async () => {
+    const capture = createCapture();
+    const exitCode = await runCli(
+      [
+        "node",
+        "traceroot-audit",
+        "guard",
+        "./examples/safe-skill",
+        "--cycles",
+        "3",
+        "--interval",
+        "1"
+      ],
+      capture.io
+    );
+
+    const output = capture.read().stdout;
+    const calmMatches = output.match(/这轮没有发现新的风险或边界变化/g) ?? [];
+
+    expect(exitCode).toBe(0);
+    expect(calmMatches.length).toBe(1);
   });
 
   it("loads an approved boundary during guard and shows when the setup is still broader", async () => {

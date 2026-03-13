@@ -222,6 +222,35 @@ function alertIconForSeverity(severity: AuditSeverity): string {
   return "🟢";
 }
 
+function heartbeatIntervalMs(options: {
+  header?: string;
+  intervalSeconds: number;
+}): number {
+  if (options.header?.includes("Doctor")) {
+    return Math.max(options.intervalSeconds * 1000 * 10, 300_000);
+  }
+
+  return Math.max(options.intervalSeconds * 1000 * 5, 60_000);
+}
+
+function shouldEmitHeartbeat(options: {
+  now: number;
+  cycle: number;
+  totalCycles: number;
+  lastHeartbeatAt: number;
+  heartbeatEveryMs: number;
+}): boolean {
+  if (options.cycle === 1) {
+    return true;
+  }
+
+  if (Number.isFinite(options.totalCycles) && options.cycle === options.totalCycles) {
+    return true;
+  }
+
+  return options.now - options.lastHeartbeatAt >= options.heartbeatEveryMs;
+}
+
 function renderLiveActionAlert(event: AuditEvent): string[] {
   const icon = alertIconForSeverity(event.severity);
   const lines = [
@@ -582,6 +611,11 @@ export async function runTargetWatch(options: {
   const alertState = {
     lastSentAtByFingerprint: new Map<string, number>()
   };
+  const heartbeatEveryMs = heartbeatIntervalMs({
+    header,
+    intervalSeconds
+  });
+  let lastHeartbeatAt = 0;
   const auditPaths = resolveAuditPaths();
   const initialScan = await scanTarget(target);
   let previousSnapshot = createScanSnapshot(initialScan);
@@ -644,6 +678,7 @@ export async function runTargetWatch(options: {
       "- 新风险突然出现",
       "- 当前配置又比你批准的边界更宽",
       "- 高风险动作会尽快提醒你，但相同动作短时间内不会反复打扰",
+      "- 如果暂时没什么值得你注意的动作，TraceRoot 会安静地继续陪跑，不会反复刷屏",
       ""
     );
   } else {
@@ -687,6 +722,7 @@ export async function runTargetWatch(options: {
     }
 
     initialLines.push("- 高风险动作会尽快提醒你，但相同动作短时间内不会反复打扰");
+    initialLines.push("- 如果暂时没什么值得你注意的动作，TraceRoot 会安静地继续陪跑，不会反复刷屏");
 
     initialLines.push("");
   }
@@ -883,12 +919,23 @@ export async function runTargetWatch(options: {
         continue;
       }
 
-      const heartbeat =
-        currentBoundaryStatus?.aligned === false
-          ? `💓 ${timestamp()} 这轮没有新的风险变化，不过当前配置仍然比你批准的边界更宽（${currentBoundaryStatus.violations.length} 个点）。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`
-          : `💓 ${timestamp()} 这轮没有发现新的风险或边界变化。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`;
+      if (
+        shouldEmitHeartbeat({
+          now,
+          cycle,
+          totalCycles,
+          lastHeartbeatAt,
+          heartbeatEveryMs
+        })
+      ) {
+        const heartbeat =
+          currentBoundaryStatus?.aligned === false
+            ? `💓 ${timestamp()} 这轮没有新的风险变化，不过当前配置仍然比你批准的边界更宽（${currentBoundaryStatus.violations.length} 个点）。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`
+            : `💓 ${timestamp()} 这轮没有发现新的风险或边界变化。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`;
 
-      runtime.io.stdout(heartbeat);
+        runtime.io.stdout(heartbeat);
+        lastHeartbeatAt = now;
+      }
       previousSnapshot = currentSnapshot;
       if (currentBoundaryStatus) {
         previousBoundaryStatus = currentBoundaryStatus;
