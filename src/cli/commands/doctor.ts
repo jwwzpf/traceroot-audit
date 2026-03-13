@@ -7,7 +7,11 @@ import { writeApplyBundle } from "../../hardening/apply";
 import { evaluateBoundaryStatus } from "../../hardening/boundary";
 import { loadHardeningProfile } from "../../hardening/profile";
 import { writeHardeningFiles } from "../../hardening/writer";
-import { promptHardeningSelections, resolveWizardTarget } from "../../hardening/wizard";
+import {
+  promptHardeningSelections,
+  promptNotificationSelection,
+  resolveWizardTarget
+} from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
 import { summarizeActionLabels } from "../../audit/presentation";
 import { runTargetWatch } from "../watch";
@@ -368,6 +372,40 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           "\n💓 TraceRoot 现在会继续陪跑这个 agent，并盯着边界和高风险动作。\n\n"
         );
 
+        let notificationSettings = {
+          webhookUrl: options.notifyWebhook,
+          openclawChannel: options.notifyChannel,
+          openclawTarget: options.notifyTarget,
+          openclawAccount: options.notifyAccount
+        };
+
+        const alreadyConfiguredNotification =
+          Boolean(options.notifyWebhook) ||
+          Boolean(options.notifyChannel) ||
+          Boolean(options.notifyTarget) ||
+          Boolean(options.notifyAccount);
+
+        if (!alreadyConfiguredNotification) {
+          const selection = await promptNotificationSelection(runtime);
+
+          if (selection.mode === "webhook") {
+            notificationSettings = {
+              ...notificationSettings,
+              webhookUrl: await runtime.prompter.input(
+                "🪝 TraceRoot 应该把提醒发到哪个 webhook？",
+                { allowEmpty: false }
+              )
+            };
+          } else if (selection.mode === "channel") {
+            notificationSettings = {
+              ...notificationSettings,
+              openclawChannel: selection.channel,
+              openclawTarget: selection.target,
+              openclawAccount: selection.account
+            };
+          }
+        }
+
         await runTargetWatch({
           runtime,
           target: effectiveTarget,
@@ -375,12 +413,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           maxCycles,
           header: "TraceRoot Audit Doctor Watch",
           compactStart: true,
-          notifications: {
-            webhookUrl: options.notifyWebhook,
-            openclawChannel: options.notifyChannel,
-            openclawTarget: options.notifyTarget,
-            openclawAccount: options.notifyAccount
-          }
+          notifications: notificationSettings
         });
       }
     );

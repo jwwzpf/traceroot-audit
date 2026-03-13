@@ -1,6 +1,7 @@
 import { discoverHost } from "../core/discovery";
 import { surfaceLabel } from "../core/surfaces";
 import type { CliChoice, CliRuntime } from "../cli/index";
+import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
 import type {
   ExposureMode,
   FilesystemScope,
@@ -68,6 +69,51 @@ function exposureChoices(): CliChoice[] {
       value: "lan-access",
       label: "🌐 允许局域网访问",
       hint: "只在你明确需要跨设备访问时使用"
+    }
+  ];
+}
+
+type NotificationChoice =
+  | { mode: "local-only" }
+  | { mode: "webhook" }
+  | { mode: "channel"; channel: string; target: string; account?: string };
+
+function notificationChoices(): CliChoice[] {
+  return [
+    {
+      value: "local-only",
+      label: "🧾 先只保留本地审计",
+      hint: "高风险动作会继续记在本地时间线里，但不额外打扰你"
+    },
+    {
+      value: "telegram",
+      label: "💬 发到 Telegram",
+      hint: "适合你已经在 OpenClaw 里接好 Telegram 的情况"
+    },
+    {
+      value: "whatsapp",
+      label: "📱 发到 WhatsApp",
+      hint: "适合你已经在 OpenClaw 里接好 WhatsApp 的情况"
+    },
+    {
+      value: "slack",
+      label: "🧵 发到 Slack",
+      hint: "适合团队一起盯高风险动作"
+    },
+    {
+      value: "discord",
+      label: "🎮 发到 Discord",
+      hint: "适合社区或机器人频道"
+    },
+    {
+      value: "other-channel",
+      label: "🔔 发到其他已接好的聊天入口",
+      hint: "比如 Signal、Mattermost、Google Chat、iMessage、Teams"
+    },
+    {
+      value: "webhook",
+      label: "🪝 发到自己的提醒入口",
+      hint: "如果你已经有 webhook 或自动化接收端"
     }
   ];
 }
@@ -140,5 +186,56 @@ export async function promptHardeningSelections(
     outboundApproval,
     filesystemScope,
     exposureMode
+  };
+}
+
+export async function promptNotificationSelection(
+  runtime: CliRuntime
+): Promise<NotificationChoice> {
+  const choice = await runtime.prompter.chooseOne(
+    "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",
+    notificationChoices()
+  );
+
+  if (choice === "local-only") {
+    return { mode: "local-only" };
+  }
+
+  if (choice === "webhook") {
+    return { mode: "webhook" };
+  }
+
+  let channel = choice;
+  if (choice === "other-channel") {
+    channel = await runtime.prompter.chooseOne(
+      "💡 你想用哪个已接好的聊天入口？",
+      SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.filter(
+        (value) => !["telegram", "whatsapp", "slack", "discord"].includes(value)
+      ).map((value) => ({
+        value,
+        label: value,
+        hint: "前提是 OpenClaw 已经接好了这个入口"
+      }))
+    );
+  }
+
+  const target = await runtime.prompter.input(
+    `📨 TraceRoot 应该把提醒发到哪里？（${channel}）`,
+    { allowEmpty: false }
+  );
+
+  const wantsAccount = await runtime.prompter.confirm(
+    "👤 这个聊天入口需要指定 OpenClaw 账户名吗？",
+    false
+  );
+  const account = wantsAccount
+    ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
+    : undefined;
+
+  return {
+    mode: "channel",
+    channel,
+    target,
+    account
   };
 }

@@ -38,6 +38,7 @@ export interface CliChoice {
 export interface CliPrompter {
   chooseOne(question: string, choices: CliChoice[]): Promise<string>;
   chooseMany(question: string, choices: CliChoice[]): Promise<string[]>;
+  input(question: string, options?: { defaultValue?: string; allowEmpty?: boolean }): Promise<string>;
   confirm(question: string, defaultValue?: boolean): Promise<boolean>;
 }
 
@@ -136,9 +137,37 @@ function createDefaultPrompter(): CliPrompter {
     });
   }
 
+  async function input(
+    question: string,
+    options: { defaultValue?: string; allowEmpty?: boolean } = {}
+  ): Promise<string> {
+    return withInterface(async (prompt) => {
+      const suffix = options.defaultValue ? ` [default: ${options.defaultValue}]: ` : ": ";
+
+      while (true) {
+        const answer = (await prompt.question(`${question}${suffix}`)).trim();
+
+        if (answer.length > 0) {
+          return answer;
+        }
+
+        if (options.defaultValue !== undefined) {
+          return options.defaultValue;
+        }
+
+        if (options.allowEmpty) {
+          return "";
+        }
+
+        process.stdout.write("Please enter a value.\n");
+      }
+    });
+  }
+
   return {
     chooseOne,
     chooseMany,
+    input,
     confirm
   };
 }

@@ -158,15 +158,21 @@ process.stdout.write("ok");
 function createStaticPrompter(answers: {
   chooseOne?: string[];
   chooseMany?: string[][];
+  input?: string[];
   confirm?: boolean[];
 }): CliPrompter {
   const chooseOneAnswers = [...(answers.chooseOne ?? [])];
   const chooseManyAnswers = [...(answers.chooseMany ?? [])];
+  const inputAnswers = [...(answers.input ?? [])];
   const confirmAnswers = [...(answers.confirm ?? [])];
 
   return {
     async chooseOne(_question: string, choices: CliChoice[]) {
       const answer = chooseOneAnswers.shift();
+
+      if (!answer && choices.some((choice) => choice.value === "local-only")) {
+        return "local-only";
+      }
 
       if (!answer || !choices.some((choice) => choice.value === answer)) {
         throw new Error(`Unexpected chooseOne answer: ${answer ?? "undefined"}`);
@@ -179,6 +185,16 @@ function createStaticPrompter(answers: {
 
       if (!answer || answer.some((value) => !choices.some((choice) => choice.value === value))) {
         throw new Error(`Unexpected chooseMany answer: ${answer?.join(", ") ?? "undefined"}`);
+      }
+
+      return answer;
+    },
+    async input(question: string) {
+      void question;
+      const answer = inputAnswers.shift();
+
+      if (typeof answer !== "string") {
+        throw new Error("Unexpected input answer");
       }
 
       return answer;
@@ -332,6 +348,60 @@ describe("CLI", () => {
         delete process.env.HOME;
       } else {
         process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("can let doctor collect the chat reminder choice interactively", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-channel-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-channel-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir, "--watch", "--cycles", "1", "--interval", "1"],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only", "whatsapp"],
+          input: ["+4917611122233"],
+          confirm: [true, false]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("whatsapp → +4917611122233");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
       }
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
