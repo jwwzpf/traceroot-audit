@@ -17,6 +17,11 @@ import {
   loadWatchPreferences,
   saveWatchPreferences
 } from "../../hardening/watch-preferences";
+import {
+  loadRecentDoctorTarget,
+  recentTargetLabel,
+  saveRecentDoctorTarget
+} from "../../hardening/recent-target";
 import { writeHardeningFiles } from "../../hardening/writer";
 import {
   promptHardeningSelections,
@@ -312,8 +317,26 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           notifyAccount?: string;
         }
       ) => {
+        let preferredTarget = target;
+        if (!preferredTarget && !options.host) {
+          const recentTarget = await loadRecentDoctorTarget();
+          if (recentTarget) {
+            runtime.io.stdout(
+              `🧠 TraceRoot 记得你上次陪跑的是：${recentTargetLabel(recentTarget)}。\n`
+            );
+            const reuseRecentTarget = await runtime.prompter.confirm(
+              "这次要直接继续它吗？",
+              true
+            );
+
+            if (reuseRecentTarget) {
+              preferredTarget = recentTarget;
+            }
+          }
+        }
+
         const effectiveTarget = await resolveWizardTarget(runtime, {
-          target,
+          target: preferredTarget,
           host: options.host,
           includeCwd: options.includeCwd,
           emptyStateTitle: "TraceRoot Audit Doctor",
@@ -326,6 +349,8 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         if (!effectiveTarget) {
           return;
         }
+
+        await saveRecentDoctorTarget(effectiveTarget);
 
         const resolvedTarget = await resolveTarget(effectiveTarget);
         const existingProfile = await loadHardeningProfile(resolvedTarget.rootDir);

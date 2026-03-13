@@ -350,6 +350,66 @@ describe("CLI", () => {
     }
   });
 
+  it("can continue from the last doctor target when you do not pass a path", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-recent-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-recent-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor"],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true, true, true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 记得你上次陪跑的是");
+      expect(output).toContain("TraceRoot Audit Doctor");
+      expect(output).toContain("邮件整理与回复");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can keep watching from doctor without switching to another command", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-home-"));
