@@ -33,6 +33,7 @@ export interface TapWrapperFile {
   action: string;
   severity: AuditSeverity;
   wrapperPath: string;
+  launchCommand: string;
   sourcePath: string;
   recommendation: string;
   entrypoints: TapEntrypoint[];
@@ -346,7 +347,147 @@ function classifyTapAction(file: ScannableFile): TapActionSpec | null {
   return null;
 }
 
-function wrapperShellBody(options: {
+function runnerModuleBody(): string {
+  return `#!/usr/bin/env node
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+function now() {
+  return new Date().toISOString();
+}
+
+function iconForSeverity(severity) {
+  if (severity === "critical") return "🚨";
+  if (severity === "high-risk") return "🛑";
+  if (severity === "risky") return "⚠️";
+  return "🟢";
+}
+
+async function appendEvents(events) {
+  const auditDir = path.join(os.homedir(), ".traceroot", "audit");
+  const eventsPath = path.join(auditDir, "events.jsonl");
+  await fs.mkdir(auditDir, { recursive: true });
+  const content = events.map((event) => JSON.stringify(event)).join("\\n") + "\\n";
+  await fs.appendFile(eventsPath, content, "utf8");
+}
+
+function runCommand(command, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      env: process.env,
+      cwd
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      resolve({ code: code ?? 1, signal });
+    });
+  });
+}
+
+export async function runTraceRootAction(config) {
+  const commandArgs = process.argv.slice(2);
+  const target = config.target ?? process.cwd();
+  const attemptedMessage = config.message ?? \`Agent 正在尝试执行一个动作：\${config.action}\`;
+
+  console.log(
+    [
+      \`\${iconForSeverity(config.severity)} TraceRoot 动作审计\`,
+      \`🧩 动作：\${config.action}\`,
+      \`🎯 Target：\${target}\`
+    ].join("\\n")
+  );
+
+  await appendEvents([
+    {
+      timestamp: now(),
+      severity: config.severity,
+      category: "action-event",
+      source: "tap-wrapper",
+      target,
+      surfaceKind: config.surfaceKind,
+      action: config.action,
+      status: "attempted",
+      message: attemptedMessage,
+      recommendation: config.recommendation,
+      evidence: { args: commandArgs }
+    }
+  ]);
+
+  let lastError = null;
+
+  for (const candidate of config.candidates) {
+    const args = [...candidate.args, ...commandArgs];
+    try {
+      const result = await runCommand(candidate.command, args, target);
+      const succeeded = result.code === 0;
+      await appendEvents([
+        {
+          timestamp: now(),
+          severity: succeeded ? "safe" : config.severity,
+          category: "action-event",
+          source: "tap-wrapper",
+          target,
+          surfaceKind: config.surfaceKind,
+          action: config.action,
+          status: succeeded ? "succeeded" : "failed",
+          message: succeeded
+            ? \`Agent 动作执行成功：\${config.action}\`
+            : \`Agent 动作执行失败：\${config.action}\`,
+          recommendation: succeeded
+            ? undefined
+            : config.recommendation,
+          evidence: {
+            command: candidate.command,
+            args,
+            exitCode: result.code,
+            signal: result.signal
+          }
+        }
+      ]);
+      console.log(\`\${succeeded ? "✅" : "❌"} TraceRoot 已经记下这次动作：\${config.action}\${succeeded ? "（成功）" : "（失败）"}\`);
+      process.exitCode = result.code;
+      return;
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        lastError = error;
+        continue;
+      }
+      lastError = error;
+      break;
+    }
+  }
+
+  const errorMessage =
+    lastError && typeof lastError === "object" && "message" in lastError
+      ? String(lastError.message)
+      : "没有找到可用的解释器或运行命令。";
+
+  await appendEvents([
+    {
+      timestamp: now(),
+      severity: config.severity,
+      category: "action-event",
+      source: "tap-wrapper",
+      target,
+      surfaceKind: config.surfaceKind,
+      action: config.action,
+      status: "failed",
+      message: \`Agent 动作还没来得及执行就失败了：\${config.action}\`,
+      recommendation: config.recommendation,
+      evidence: { error: errorMessage }
+    }
+  ]);
+
+  console.error(\`❌ TraceRoot 没能替这个动作完成审计接入：\${errorMessage}\`);
+  process.exitCode = 1;
+}
+`;
+}
+
+function wrapperModuleBody(options: {
   rootDir: string;
   file: ScannableFile;
   spec: TapActionSpec;
@@ -354,74 +495,66 @@ function wrapperShellBody(options: {
 }): string | null {
   const sourcePath = path.join(options.rootDir, options.file.relativePath);
   const normalizedSource = sourcePath.replace(/\\/g, "/");
-  const quotedRoot = JSON.stringify(options.rootDir);
   const quotedTarget = JSON.stringify(options.rootDir);
   const quotedAction = JSON.stringify(options.spec.action);
   const quotedSeverity = JSON.stringify(options.spec.severity);
   const quotedRecommendation = JSON.stringify(options.spec.recommendation);
   const quotedSurfaceKind = JSON.stringify(options.surfaceKind);
   const extension = path.extname(options.file.relativePath).toLowerCase();
-
-  const tapPrefix =
-    `exec traceroot-audit tap --action ${quotedAction} --severity ${quotedSeverity} --target ${quotedTarget} ` +
-    `--surface-kind ${quotedSurfaceKind} --recommendation ${quotedRecommendation} -- `;
+  const runnerImport = JSON.stringify("./_runner.mjs");
+  let candidates: Array<{ command: string; args: string[] }> | null = null;
 
   if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
-    return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      `cd ${quotedRoot}`,
-      `${tapPrefix}node ${JSON.stringify(normalizedSource)} "$@"`
-    ].join("\n");
+    candidates = [{ command: "node", args: [normalizedSource] }];
   }
 
   if (extension === ".sh" || extension === ".bash") {
-    return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      `cd ${quotedRoot}`,
-      `${tapPrefix}bash ${JSON.stringify(normalizedSource)} "$@"`
-    ].join("\n");
+    candidates = [
+      { command: "bash", args: [normalizedSource] },
+      { command: "sh", args: [normalizedSource] }
+    ];
   }
 
   if (extension === ".zsh") {
-    return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      `cd ${quotedRoot}`,
-      `${tapPrefix}zsh ${JSON.stringify(normalizedSource)} "$@"`
-    ].join("\n");
+    candidates = [
+      { command: "zsh", args: [normalizedSource] },
+      { command: "bash", args: [normalizedSource] }
+    ];
   }
 
   if (extension === ".py") {
-    return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      `cd ${quotedRoot}`,
-      `${tapPrefix}python3 ${JSON.stringify(normalizedSource)} "$@"`
-    ].join("\n");
+    candidates = [
+      { command: "python3", args: [normalizedSource] },
+      { command: "python", args: [normalizedSource] },
+      { command: "py", args: ["-3", normalizedSource] }
+    ];
   }
 
   if (extension === ".ts") {
-    return [
-      "#!/usr/bin/env bash",
-      "set -euo pipefail",
-      `cd ${quotedRoot}`,
-      'if [ -x "./node_modules/.bin/tsx" ]; then',
-      `  ${tapPrefix}./node_modules/.bin/tsx ${JSON.stringify(normalizedSource)} "$@"`,
-      "fi",
-      'if command -v tsx >/dev/null 2>&1; then',
-      `  ${tapPrefix}tsx ${JSON.stringify(normalizedSource)} "$@"`,
-      "fi",
-      'if command -v ts-node >/dev/null 2>&1; then',
-      `  ${tapPrefix}ts-node ${JSON.stringify(normalizedSource)} "$@"`,
-      "fi",
-      `echo "TraceRoot wrapper could not find tsx or ts-node for ${normalizedSource}" >&2`,
-      "exit 127"
-    ].join("\n");
+    candidates = [
+      { command: "./node_modules/.bin/tsx", args: [normalizedSource] },
+      { command: "./node_modules/.bin/tsx.cmd", args: [normalizedSource] },
+      { command: "tsx", args: [normalizedSource] },
+      { command: "ts-node", args: [normalizedSource] }
+    ];
   }
 
-  return null;
+  if (!candidates) {
+    return null;
+  }
+
+  return `#!/usr/bin/env node
+import { runTraceRootAction } from ${runnerImport};
+
+await runTraceRootAction({
+  action: ${quotedAction},
+  severity: ${quotedSeverity},
+  target: ${quotedTarget},
+  surfaceKind: ${quotedSurfaceKind},
+  recommendation: ${quotedRecommendation},
+  candidates: ${JSON.stringify(candidates, null, 2)}
+});
+`;
 }
 
 function surfaceKindForProfileSurface(surface: string): "runtime" | "skill" | "project" {
@@ -502,11 +635,10 @@ function matchesEntrypointCommand(command: string, relativePath: string): boolea
 
 function buildSuggestedEntrypoints(options: {
   rootDir: string;
-  wrapperPath: string;
+  wrapperLaunchCommand: string;
   sourceRelativePath: string;
   candidates: PackageEntrypointCandidate[];
 }): TapEntrypoint[] {
-  const wrapperRelativePath = path.relative(options.rootDir, options.wrapperPath).replace(/\\/g, "/");
   const sourceRelativePath = options.sourceRelativePath.replace(/\\/g, "/");
 
   return options.candidates
@@ -517,7 +649,7 @@ function buildSuggestedEntrypoints(options: {
           kind: candidate.kind,
           name: candidate.name,
           currentCommand: candidate.command,
-          suggestedCommand: wrapperRelativePath,
+          suggestedCommand: options.wrapperLaunchCommand,
           installStatus: "manual"
         };
       }
@@ -526,7 +658,7 @@ function buildSuggestedEntrypoints(options: {
         kind: candidate.kind,
         name: candidate.name,
         currentCommand: candidate.command,
-        suggestedCommand: wrapperRelativePath,
+        suggestedCommand: options.wrapperLaunchCommand,
         installStatus: "manual"
       };
     });
@@ -659,8 +791,12 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   const files = await discoverFiles(resolvedTarget);
   const tapWrappers: TapWrapperFile[] = [];
   const wrapperDir = path.join(rootDir, ".traceroot", "tap");
+  const runnerPath = path.join(wrapperDir, "_runner.mjs");
   const surfaceKind = surfaceKindForProfileSurface(profileSurface);
   const packageEntrypoints = await detectPackageEntrypoints(rootDir);
+
+  await mkdir(wrapperDir, { recursive: true });
+  await writeFile(runnerPath, `${runnerModuleBody()}\n`, "utf8");
 
   for (const file of files) {
     const spec = classifyTapAction(file);
@@ -668,27 +804,29 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       continue;
     }
 
-    const shellBody = wrapperShellBody({ rootDir, file, spec, surfaceKind });
-    if (!shellBody) {
+    const wrapperBody = wrapperModuleBody({ rootDir, file, spec, surfaceKind });
+    if (!wrapperBody) {
       continue;
     }
 
-    const wrapperName = `${String(tapWrappers.length + 1).padStart(2, "0")}-${spec.action}-${path.basename(file.relativePath).replace(/\.[^.]+$/, "")}.sh`;
+    const wrapperName = `${String(tapWrappers.length + 1).padStart(2, "0")}-${spec.action}-${path.basename(file.relativePath).replace(/\.[^.]+$/, "")}.mjs`;
     const wrapperPath = path.join(wrapperDir, wrapperName);
+    const wrapperRelativePath = path.relative(rootDir, wrapperPath).replace(/\\/g, "/");
+    const launchCommand = `node ${wrapperRelativePath}`;
 
-    await mkdir(wrapperDir, { recursive: true });
-    await writeFile(wrapperPath, `${shellBody}\n`, "utf8");
+    await writeFile(wrapperPath, `${wrapperBody}\n`, "utf8");
     await chmod(wrapperPath, 0o755);
 
     tapWrappers.push({
       action: spec.action,
       severity: spec.severity,
       wrapperPath,
+      launchCommand,
       sourcePath: path.join(rootDir, file.relativePath),
       recommendation: spec.recommendation,
       entrypoints: buildSuggestedEntrypoints({
         rootDir,
-        wrapperPath,
+        wrapperLaunchCommand: launchCommand,
         sourceRelativePath: file.relativePath,
         candidates: packageEntrypoints
       })
@@ -740,6 +878,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       `- **风险级别：** ${wrapper.severity}`,
       `- **原始脚本：** \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\``,
       `- **TraceRoot 给你准备好的接入文件：** \`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\``,
+      `- **如果你要手动接入，直接用这个命令：** \`${wrapper.launchCommand}\``,
       `- **为什么值得先接它：** ${wrapper.recommendation}`,
       ""
     );
@@ -791,7 +930,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       lines.push(
         "### 你现在就可以这样改",
         "",
-        `- 如果你的 runtime 或 skill 配置里直接写的是 \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\`，就把它换成上面的 TraceRoot 接入文件。`,
+        `- 如果你的 runtime 或 skill 配置里现在直接写的是 \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\`，就把它换成：\`${wrapper.launchCommand}\`。`,
         "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
         ""
       );

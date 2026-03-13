@@ -882,7 +882,7 @@ describe("CLI", () => {
         "utf8"
       );
       const wrapperDir = path.join(tempDir, ".traceroot", "tap");
-      const wrapperEntries = await fg("*.sh", {
+      const wrapperEntries = await fg("[0-9][0-9]-*.mjs", {
         cwd: wrapperDir,
         onlyFiles: true
       });
@@ -903,8 +903,9 @@ describe("CLI", () => {
       expect(tapPlan).toContain("npm run send-email");
       expect(tapPlan).toContain("TraceRoot 已经帮你接好了");
       expect(tapPlan).toContain("你不用手动改任何东西了");
+      expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
-      expect(packageJson).toContain(".traceroot/tap/");
+      expect(packageJson).toContain("node .traceroot/tap/");
       expect(packageJson).toContain("\"send-email\"");
       await expect(
         readFile(
