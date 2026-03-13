@@ -25,8 +25,10 @@ export interface ApplyBundleResult {
   tapWrapperDir: string | null;
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
-  tapInstallBackupPath: string | null;
+  tapInstallBackupPaths: string[];
   tapInstalledCommands: TapInstalledCommand[];
+  tapCoveredActionsCount: number;
+  tapPendingActionsCount: number;
 }
 
 export interface TapWrapperFile {
@@ -40,15 +42,19 @@ export interface TapWrapperFile {
 }
 
 export interface TapEntrypoint {
-  kind: "npm-script" | "bin";
+  kind: "npm-script" | "bin" | "config-command";
   name: string;
   currentCommand: string;
   suggestedCommand: string;
   installStatus: "manual" | "installed" | "already-installed";
+  filePath?: string;
+  propertyPath?: string;
+  pathSegments?: Array<string | number>;
+  format?: "json" | "yaml";
 }
 
 export interface TapInstalledCommand {
-  kind: "npm-script" | "bin";
+  kind: "npm-script" | "bin" | "config-command";
   name: string;
   beforeCommand: string;
   afterCommand: string;
@@ -195,6 +201,8 @@ function renderApplyPlan(options: {
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
   tapInstalledCommands: TapInstalledCommand[];
+  tapCoveredActionsCount: number;
+  tapPendingActionsCount: number;
 }): string {
   const lines = [
     "# TraceRoot 应用说明",
@@ -222,15 +230,9 @@ function renderApplyPlan(options: {
   }
 
   if (options.tapPlanPath && options.tapWrappers.length > 0) {
-    if (options.tapInstalledCommands.length > 0) {
-      lines.push(
-        `- 动作审计说明：\`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\`（常见启动命令已经帮你接好）`
-      );
-    } else {
-      lines.push(
-        `- 动作审计说明：\`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\``
-      );
-    }
+    lines.push(
+      `- 动作审计说明：\`${path.relative(path.dirname(options.manifestPath), options.tapPlanPath).replace(/\\/g, "/")}\``
+    );
   }
 
   lines.push("", "## 接下来最值得先做的事", "");
@@ -254,13 +256,13 @@ function renderApplyPlan(options: {
   }
 
   if (options.tapPlanPath && options.tapWrappers.length > 0) {
-    if (options.tapInstalledCommands.length > 0) {
+    lines.push(
+      `4. 动作审计已经开始覆盖 ${options.tapCoveredActionsCount} 个高风险动作。之后它们一旦触发，你就能在本地审计时间线里看到。`
+    );
+
+    if (options.tapPendingActionsCount > 0) {
       lines.push(
-        `4. 动作审计这一步常见命令已经帮你接好了。你继续照常运行原来的命令，TraceRoot 就会开始记审计记录。`
-      );
-    } else {
-      lines.push(
-        `4. 打开 \`${path.basename(options.tapPlanPath)}\`，TraceRoot 已经帮你挑出最值得先接入审计的高风险动作。`
+        `5. 还有 ${options.tapPendingActionsCount} 个高风险动作暂时没有自动接上。需要时再打开 \`${path.basename(options.tapPlanPath)}\` 看接入细节就行。`
       );
     }
   }
@@ -282,8 +284,20 @@ interface PackageEntrypointCandidate {
   command: string;
 }
 
+interface ConfigEntrypointCandidate {
+  kind: "config-command";
+  name: string;
+  command: string;
+  filePath: string;
+  propertyPath: string;
+  pathSegments: Array<string | number>;
+  format: "json" | "yaml";
+}
+
+type EntrypointCandidate = PackageEntrypointCandidate | ConfigEntrypointCandidate;
+
 interface TapInstallResult {
-  backupPath: string | null;
+  backupPaths: string[];
   installedCommands: TapInstalledCommand[];
 }
 
@@ -620,6 +634,122 @@ async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypo
   }
 }
 
+function looksLikeCommandField(key: string): boolean {
+  return /(command|entrypoint|exec|run|script)/i.test(key);
+}
+
+function looksLikeExecutableCommand(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  return /(^|[\s./])(node|tsx|ts-node|python|python3|py|bash|sh|zsh|npm|pnpm|yarn|bun|docker|uv)\b/.test(normalized) ||
+    /\.(js|mjs|cjs|ts|py|sh|bash|zsh)\b/.test(normalized) ||
+    normalized.startsWith("./") ||
+    normalized.includes("/");
+}
+
+function propertyPathForSegments(segments: Array<string | number>): string {
+  return segments.reduce<string>((accumulator, segment) => {
+    if (typeof segment === "number") {
+      return `${accumulator}[${segment}]`;
+    }
+
+    return accumulator.length === 0 ? segment : `${accumulator}.${segment}`;
+  }, "");
+}
+
+function collectConfigEntrypoints(
+  node: unknown,
+  options: {
+    relativePath: string;
+    format: "json" | "yaml";
+    segments?: Array<string | number>;
+  }
+): ConfigEntrypointCandidate[] {
+  const segments = options.segments ?? [];
+  const candidates: ConfigEntrypointCandidate[] = [];
+
+  if (Array.isArray(node)) {
+    for (const [index, value] of node.entries()) {
+      candidates.push(
+        ...collectConfigEntrypoints(value, {
+          ...options,
+          segments: [...segments, index]
+        })
+      );
+    }
+
+    return candidates;
+  }
+
+  if (!node || typeof node !== "object") {
+    return candidates;
+  }
+
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    const nextSegments = [...segments, key];
+
+    if (typeof value === "string" && looksLikeCommandField(key) && looksLikeExecutableCommand(value)) {
+      const propertyPath = propertyPathForSegments(nextSegments);
+      candidates.push({
+        kind: "config-command",
+        name: `${options.relativePath}:${propertyPath}`,
+        command: value,
+        filePath: options.relativePath,
+        propertyPath,
+        pathSegments: nextSegments,
+        format: options.format
+      });
+      continue;
+    }
+
+    candidates.push(
+      ...collectConfigEntrypoints(value, {
+        ...options,
+        segments: nextSegments
+      })
+    );
+  }
+
+  return candidates;
+}
+
+function detectConfigEntrypoints(files: ScannableFile[]): ConfigEntrypointCandidate[] {
+  const candidates: ConfigEntrypointCandidate[] = [];
+
+  for (const file of files) {
+    if (![".json", ".yaml", ".yml"].includes(file.extension)) {
+      continue;
+    }
+
+    if (path.basename(file.relativePath) === "package.json") {
+      continue;
+    }
+
+    try {
+      const parsed =
+        file.extension === ".json"
+          ? JSON.parse(file.content)
+          : YAML.parse(file.content);
+
+      const format = file.extension === ".json" ? "json" : "yaml";
+      candidates.push(
+        ...collectConfigEntrypoints(parsed, {
+          relativePath: file.relativePath,
+          format
+        })
+      );
+    } catch {
+      continue;
+    }
+  }
+
+  return candidates;
+}
+
 function matchesEntrypointCommand(command: string, relativePath: string): boolean {
   const normalizedCommand = command.replace(/\\/g, "/").toLowerCase();
   const normalizedRelativePath = relativePath.replace(/\\/g, "/").toLowerCase();
@@ -634,10 +764,9 @@ function matchesEntrypointCommand(command: string, relativePath: string): boolea
 }
 
 function buildSuggestedEntrypoints(options: {
-  rootDir: string;
   wrapperLaunchCommand: string;
   sourceRelativePath: string;
-  candidates: PackageEntrypointCandidate[];
+  candidates: EntrypointCandidate[];
 }): TapEntrypoint[] {
   const sourceRelativePath = options.sourceRelativePath.replace(/\\/g, "/");
 
@@ -651,6 +780,20 @@ function buildSuggestedEntrypoints(options: {
           currentCommand: candidate.command,
           suggestedCommand: options.wrapperLaunchCommand,
           installStatus: "manual"
+        };
+      }
+
+      if (candidate.kind === "config-command") {
+        return {
+          kind: candidate.kind,
+          name: candidate.name,
+          currentCommand: candidate.command,
+          suggestedCommand: options.wrapperLaunchCommand,
+          installStatus: "manual",
+          filePath: candidate.filePath,
+          propertyPath: candidate.propertyPath,
+          pathSegments: candidate.pathSegments,
+          format: candidate.format
         };
       }
 
@@ -669,41 +812,8 @@ async function installTapEntrypoints(options: {
   tapWrappers: TapWrapperFile[];
 }): Promise<TapInstallResult> {
   const packageJsonPath = path.join(options.rootDir, "package.json");
-
-  let rawPackageJson: string;
-
-  try {
-    rawPackageJson = await readFile(packageJsonPath, "utf8");
-  } catch {
-    return {
-      backupPath: null,
-      installedCommands: []
-    };
-  }
-
-  let parsedPackageJson: {
-    scripts?: Record<string, unknown>;
-    [key: string]: unknown;
-  };
-
-  try {
-    parsedPackageJson = JSON.parse(rawPackageJson) as {
-      scripts?: Record<string, unknown>;
-      [key: string]: unknown;
-    };
-  } catch {
-    return {
-      backupPath: null,
-      installedCommands: []
-    };
-  }
-
-  if (!parsedPackageJson.scripts || typeof parsedPackageJson.scripts !== "object") {
-    return {
-      backupPath: null,
-      installedCommands: []
-    };
-  }
+  const backupPaths: string[] = [];
+  const installedCommands: TapInstalledCommand[] = [];
 
   const groupedEntrypoints = new Map<
     string,
@@ -712,70 +822,254 @@ async function installTapEntrypoints(options: {
 
   for (const wrapper of options.tapWrappers) {
     for (const entrypoint of wrapper.entrypoints) {
-      if (entrypoint.kind !== "npm-script") {
-        continue;
-      }
+      const groupKey =
+        entrypoint.kind === "config-command"
+          ? `config:${entrypoint.filePath}:${entrypoint.propertyPath}`
+          : `${entrypoint.kind}:${entrypoint.name}`;
 
-      const existing = groupedEntrypoints.get(entrypoint.name) ?? [];
+      const existing = groupedEntrypoints.get(groupKey) ?? [];
       existing.push({ wrapper, entrypoint });
-      groupedEntrypoints.set(entrypoint.name, existing);
+      groupedEntrypoints.set(groupKey, existing);
     }
   }
 
-  const installedCommands: TapInstalledCommand[] = [];
+  let rawPackageJson: string;
 
-  for (const [scriptName, candidates] of groupedEntrypoints.entries()) {
-    if (candidates.length !== 1) {
+  try {
+    rawPackageJson = await readFile(packageJsonPath, "utf8");
+  } catch {
+    rawPackageJson = "";
+  }
+
+  let parsedPackageJson: {
+    scripts?: Record<string, unknown>;
+    [key: string]: unknown;
+  } | null = null;
+
+  if (rawPackageJson) {
+    try {
+      parsedPackageJson = JSON.parse(rawPackageJson) as {
+        scripts?: Record<string, unknown>;
+        [key: string]: unknown;
+      };
+    } catch {
+      parsedPackageJson = null;
+    }
+  }
+
+  if (parsedPackageJson?.scripts && typeof parsedPackageJson.scripts === "object") {
+    for (const [groupKey, candidates] of groupedEntrypoints.entries()) {
+      if (!groupKey.startsWith("npm-script:") || candidates.length !== 1) {
+        continue;
+      }
+
+      const [{ entrypoint }] = candidates;
+      const scriptName = entrypoint.name;
+      const currentValue = parsedPackageJson.scripts[scriptName];
+
+      if (typeof currentValue !== "string") {
+        continue;
+      }
+
+      if (currentValue === entrypoint.suggestedCommand) {
+        entrypoint.installStatus = "already-installed";
+        installedCommands.push({
+          kind: entrypoint.kind,
+          name: entrypoint.name,
+          beforeCommand: currentValue,
+          afterCommand: currentValue
+        });
+        continue;
+      }
+
+      if (currentValue !== entrypoint.currentCommand) {
+        continue;
+      }
+
+      parsedPackageJson.scripts[scriptName] = entrypoint.suggestedCommand;
+      entrypoint.installStatus = "installed";
+      installedCommands.push({
+        kind: entrypoint.kind,
+        name: entrypoint.name,
+        beforeCommand: entrypoint.currentCommand,
+        afterCommand: entrypoint.suggestedCommand
+      });
+    }
+
+    const installedScriptCommands = installedCommands.filter((command) => command.kind === "npm-script");
+    if (installedScriptCommands.length > 0) {
+      const backupDir = path.join(options.rootDir, ".traceroot", "backups");
+      const backupPath = path.join(backupDir, "package.json.before-action-audit.json");
+      await mkdir(backupDir, { recursive: true });
+      await writeFile(backupPath, rawPackageJson, "utf8");
+      await writeFile(`${packageJsonPath}`, `${JSON.stringify(parsedPackageJson, null, 2)}\n`, "utf8");
+      backupPaths.push(backupPath);
+    }
+  }
+
+  const configEntriesByFile = new Map<
+    string,
+    TapEntrypoint[]
+  >();
+
+  for (const [groupKey, candidates] of groupedEntrypoints.entries()) {
+    if (!groupKey.startsWith("config:") || candidates.length !== 1) {
       continue;
     }
 
     const [{ entrypoint }] = candidates;
-    const currentValue = parsedPackageJson.scripts[scriptName];
-
-    if (typeof currentValue !== "string") {
+    if (!entrypoint.filePath || !entrypoint.pathSegments || !entrypoint.format) {
       continue;
     }
 
-    if (currentValue === entrypoint.suggestedCommand) {
-      entrypoint.installStatus = "already-installed";
+    const existing = configEntriesByFile.get(entrypoint.filePath) ?? [];
+    existing.push(entrypoint);
+    configEntriesByFile.set(entrypoint.filePath, existing);
+  }
+
+  for (const [relativeFilePath, entrypoints] of configEntriesByFile.entries()) {
+    const absoluteFilePath = path.join(options.rootDir, relativeFilePath);
+    let rawContent: string;
+
+    try {
+      rawContent = await readFile(absoluteFilePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed =
+        entrypoints[0]?.format === "json"
+          ? JSON.parse(rawContent)
+          : YAML.parse(rawContent);
+    } catch {
+      continue;
+    }
+
+    let changed = false;
+
+    for (const entrypoint of entrypoints) {
+      const pathSegments = entrypoint.pathSegments ?? [];
+      let cursor: unknown = parsed;
+
+      for (let index = 0; index < pathSegments.length - 1; index += 1) {
+        const segment = pathSegments[index]!;
+        if (typeof segment === "number") {
+          if (!Array.isArray(cursor) || cursor[segment] === undefined) {
+            cursor = undefined;
+            break;
+          }
+          cursor = cursor[segment];
+          continue;
+        }
+
+        if (!cursor || typeof cursor !== "object" || !(segment in (cursor as Record<string, unknown>))) {
+          cursor = undefined;
+          break;
+        }
+
+        cursor = (cursor as Record<string, unknown>)[segment];
+      }
+
+      const lastSegment = pathSegments[pathSegments.length - 1];
+      if (lastSegment === undefined || cursor === undefined) {
+        continue;
+      }
+
+      if (typeof lastSegment === "number") {
+        if (!Array.isArray(cursor) || typeof cursor[lastSegment] !== "string") {
+          continue;
+        }
+
+        const currentValue = cursor[lastSegment];
+        if (currentValue === entrypoint.suggestedCommand) {
+          entrypoint.installStatus = "already-installed";
+          installedCommands.push({
+            kind: entrypoint.kind,
+            name: entrypoint.name,
+            beforeCommand: currentValue,
+            afterCommand: currentValue
+          });
+          continue;
+        }
+
+        if (currentValue !== entrypoint.currentCommand) {
+          continue;
+        }
+
+        cursor[lastSegment] = entrypoint.suggestedCommand;
+        entrypoint.installStatus = "installed";
+        changed = true;
+        installedCommands.push({
+          kind: entrypoint.kind,
+          name: entrypoint.name,
+          beforeCommand: entrypoint.currentCommand,
+          afterCommand: entrypoint.suggestedCommand
+        });
+        continue;
+      }
+
+      if (!cursor || typeof cursor !== "object") {
+        continue;
+      }
+
+      const container = cursor as Record<string, unknown>;
+      const currentValue = container[lastSegment];
+      if (typeof currentValue !== "string") {
+        continue;
+      }
+
+      if (currentValue === entrypoint.suggestedCommand) {
+        entrypoint.installStatus = "already-installed";
+        installedCommands.push({
+          kind: entrypoint.kind,
+          name: entrypoint.name,
+          beforeCommand: currentValue,
+          afterCommand: currentValue
+        });
+        continue;
+      }
+
+      if (currentValue !== entrypoint.currentCommand) {
+        continue;
+      }
+
+      container[lastSegment] = entrypoint.suggestedCommand;
+      entrypoint.installStatus = "installed";
+      changed = true;
       installedCommands.push({
         kind: entrypoint.kind,
         name: entrypoint.name,
-        beforeCommand: currentValue,
-        afterCommand: currentValue
+        beforeCommand: entrypoint.currentCommand,
+        afterCommand: entrypoint.suggestedCommand
       });
+    }
+
+    if (!changed) {
       continue;
     }
 
-    if (currentValue !== entrypoint.currentCommand) {
-      continue;
-    }
+    const backupPath = path.join(
+      options.rootDir,
+      ".traceroot",
+      "backups",
+      `${relativeFilePath}.before-action-audit`
+    );
+    await mkdir(path.dirname(backupPath), { recursive: true });
+    await writeFile(backupPath, rawContent, "utf8");
+    backupPaths.push(backupPath);
 
-    parsedPackageJson.scripts[scriptName] = entrypoint.suggestedCommand;
-    entrypoint.installStatus = "installed";
-    installedCommands.push({
-      kind: entrypoint.kind,
-      name: entrypoint.name,
-      beforeCommand: entrypoint.currentCommand,
-      afterCommand: entrypoint.suggestedCommand
-    });
+    const output =
+      entrypoints[0]?.format === "json"
+        ? `${JSON.stringify(parsed, null, 2)}\n`
+        : `${YAML.stringify(parsed)}\n`;
+    await writeFile(absoluteFilePath, output, "utf8");
   }
-
-  if (installedCommands.length === 0) {
-    return {
-      backupPath: null,
-      installedCommands: []
-    };
-  }
-
-  const backupDir = path.join(options.rootDir, ".traceroot", "backups");
-  const backupPath = path.join(backupDir, "package.json.before-action-audit.json");
-  await mkdir(backupDir, { recursive: true });
-  await writeFile(backupPath, rawPackageJson, "utf8");
-  await writeFile(`${packageJsonPath}`, `${JSON.stringify(parsedPackageJson, null, 2)}\n`, "utf8");
 
   return {
-    backupPath,
+    backupPaths,
     installedCommands
   };
 }
@@ -784,8 +1078,10 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   tapWrapperDir: string | null;
   tapPlanPath: string | null;
   tapWrappers: TapWrapperFile[];
-  tapInstallBackupPath: string | null;
+  tapInstallBackupPaths: string[];
   tapInstalledCommands: TapInstalledCommand[];
+  tapCoveredActionsCount: number;
+  tapPendingActionsCount: number;
 }> {
   const resolvedTarget = await resolveTarget(rootDir);
   const files = await discoverFiles(resolvedTarget);
@@ -794,6 +1090,11 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
   const runnerPath = path.join(wrapperDir, "_runner.mjs");
   const surfaceKind = surfaceKindForProfileSurface(profileSurface);
   const packageEntrypoints = await detectPackageEntrypoints(rootDir);
+  const configEntrypoints = detectConfigEntrypoints(files);
+  const entrypointCandidates: EntrypointCandidate[] = [
+    ...packageEntrypoints,
+    ...configEntrypoints
+  ];
 
   await mkdir(wrapperDir, { recursive: true });
   await writeFile(runnerPath, `${runnerModuleBody()}\n`, "utf8");
@@ -825,10 +1126,9 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       sourcePath: path.join(rootDir, file.relativePath),
       recommendation: spec.recommendation,
       entrypoints: buildSuggestedEntrypoints({
-        rootDir,
         wrapperLaunchCommand: launchCommand,
         sourceRelativePath: file.relativePath,
-        candidates: packageEntrypoints
+        candidates: entrypointCandidates
       })
     });
   }
@@ -838,8 +1138,10 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       tapWrapperDir: null,
       tapPlanPath: null,
       tapWrappers: [],
-      tapInstallBackupPath: null,
-      tapInstalledCommands: []
+      tapInstallBackupPaths: [],
+      tapInstalledCommands: [],
+      tapCoveredActionsCount: 0,
+      tapPendingActionsCount: 0
     };
   }
 
@@ -848,14 +1150,24 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     tapWrappers
   });
 
+  const coveredActionsCount = tapWrappers.filter((wrapper) =>
+    wrapper.entrypoints.some(
+      (entrypoint) =>
+        entrypoint.installStatus === "installed" ||
+        entrypoint.installStatus === "already-installed"
+    )
+  ).length;
+  const pendingActionsCount = Math.max(0, tapWrappers.length - coveredActionsCount);
   const tapPlanPath = path.join(rootDir, "traceroot.tap.plan.md");
   const lines = [
     "# TraceRoot 动作审计说明",
     "",
-    "TraceRoot 已经帮你找到了几个最值得先接入审计的动作。",
-    tapInstallResult.installedCommands.length > 0
-      ? `TraceRoot 已经自动帮你接好了 ${tapInstallResult.installedCommands.length} 个常见启动命令。以后你还是照常运行原来的命令就行。`
-      : "你不用自己研究怎么接。做法很简单：把你平时启动这个动作的命令，换成下面 TraceRoot 给你准备好的接入文件。",
+    coveredActionsCount > 0
+      ? `TraceRoot 已经开始为 ${coveredActionsCount} 个高风险动作留下审计轨迹。`
+      : "TraceRoot 已经帮你找到了几个最值得先接入审计的高风险动作。",
+    pendingActionsCount > 0
+      ? `还有 ${pendingActionsCount} 个动作暂时没有自动接上。它们的接入说明也都记在下面，等你需要时再看。`
+      : "这批高风险动作已经全部接进审计时间线了。",
     "",
     "换完以后，TraceRoot 就能：",
     "- 记住这个动作什么时候开始、有没有成功",
@@ -864,9 +1176,12 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     ""
   ];
 
-  if (tapInstallResult.backupPath) {
+  if (tapInstallResult.backupPaths.length > 0) {
     lines.push(
-      `原来的 package.json 我们也已经帮你备份好了：\`${path.relative(rootDir, tapInstallResult.backupPath).replace(/\\/g, "/")}\``,
+      "TraceRoot 自动改过的原始配置也已经备份好了：",
+      ...tapInstallResult.backupPaths.map(
+        (backupPath) => `- \`${path.relative(rootDir, backupPath).replace(/\\/g, "/")}\``
+      ),
       ""
     );
   }
@@ -884,15 +1199,14 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     );
 
     if (wrapper.entrypoints.length > 0) {
-      lines.push("### 你现在就可以这样改", "");
+      lines.push("### 接入状态", "");
 
       for (const entrypoint of wrapper.entrypoints) {
         if (entrypoint.kind === "npm-script") {
           if (entrypoint.installStatus === "installed") {
             lines.push(
-              `- 你以后还是照常运行：\`npm run ${entrypoint.name}\``,
-              `- TraceRoot 已经帮你接好了：它现在会先经过 \`${entrypoint.suggestedCommand}\` 再执行原来的动作`,
-              "- 你不用手动改任何东西了。",
+              `- 已自动接好：\`npm run ${entrypoint.name}\``,
+              "- 这个动作以后每次执行，TraceRoot 都会替你留下审计记录。",
               ""
             );
             continue;
@@ -900,38 +1214,60 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
           if (entrypoint.installStatus === "already-installed") {
             lines.push(
-              `- 这个命令已经接好了：\`npm run ${entrypoint.name}\``,
-              `- 它现在已经是 TraceRoot 的接入路径：\`${entrypoint.suggestedCommand}\``,
-              "- 你继续像以前一样运行它就可以了。",
+              `- 已在保护中：\`npm run ${entrypoint.name}\``,
+              "- 这个动作已经在 TraceRoot 的审计时间线里了。",
               ""
             );
             continue;
           }
 
           lines.push(
-            `- 你现在平时运行的是：\`npm run ${entrypoint.name}\``,
-            `- 它背后实际执行的是：\`${entrypoint.currentCommand}\``,
-            `- 如果你愿意手动接上，也可以把 \`scripts.${entrypoint.name}\` 换成 \`${entrypoint.suggestedCommand}\``,
-            "- 接上以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
+            `- 还没自动接上：\`npm run ${entrypoint.name}\``,
+            `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
+            ""
+          );
+          continue;
+        }
+
+        if (entrypoint.kind === "config-command") {
+          if (entrypoint.installStatus === "installed") {
+            lines.push(
+              `- 已自动接好：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+              "- 这个配置入口已经被纳入 TraceRoot 的动作审计时间线。",
+              ""
+            );
+            continue;
+          }
+
+          if (entrypoint.installStatus === "already-installed") {
+            lines.push(
+              `- 已在保护中：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+              "- TraceRoot 已经在记录这个配置入口触发的动作。",
+              ""
+            );
+            continue;
+          }
+
+          lines.push(
+            `- 还没自动接上：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+            `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
             ""
           );
           continue;
         }
 
         lines.push(
-          `- 你现在平时用的是这个命令入口：\`${entrypoint.name}\``,
-          `- 它现在指向：\`${entrypoint.currentCommand}\``,
-          `- 建议你改成：让它指向 \`${entrypoint.suggestedCommand}\``,
-          "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
+          `- 还没自动接上：\`${entrypoint.name}\``,
+          `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
           ""
         );
       }
     } else {
       lines.push(
-        "### 你现在就可以这样改",
+        "### 接入状态",
         "",
-        `- 如果你的 runtime 或 skill 配置里现在直接写的是 \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\`，就把它换成：\`${wrapper.launchCommand}\`。`,
-        "- 改完以后，这个动作每次运行时，TraceRoot 都能替你留下审计记录。",
+        "- 这个动作还没有找到可自动接入的配置入口。",
+        `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\`。`,
         ""
       );
     }
@@ -943,8 +1279,10 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     tapWrapperDir: wrapperDir,
     tapPlanPath,
     tapWrappers,
-    tapInstallBackupPath: tapInstallResult.backupPath,
-    tapInstalledCommands: tapInstallResult.installedCommands
+    tapInstallBackupPaths: tapInstallResult.backupPaths,
+    tapInstalledCommands: tapInstallResult.installedCommands,
+    tapCoveredActionsCount: coveredActionsCount,
+    tapPendingActionsCount: pendingActionsCount
   };
 }
 
@@ -999,7 +1337,9 @@ export async function writeApplyBundle(options: {
       composeSourcePath,
       tapPlanPath: tapBundle.tapPlanPath,
       tapWrappers: tapBundle.tapWrappers,
-      tapInstalledCommands: tapBundle.tapInstalledCommands
+      tapInstalledCommands: tapBundle.tapInstalledCommands,
+      tapCoveredActionsCount: tapBundle.tapCoveredActionsCount,
+      tapPendingActionsCount: tapBundle.tapPendingActionsCount
     }),
     "utf8"
   );
@@ -1020,7 +1360,9 @@ export async function writeApplyBundle(options: {
     tapWrapperDir: tapBundle.tapWrapperDir,
     tapPlanPath: tapBundle.tapPlanPath,
     tapWrappers: tapBundle.tapWrappers,
-    tapInstallBackupPath: tapBundle.tapInstallBackupPath,
-    tapInstalledCommands: tapBundle.tapInstalledCommands
+    tapInstallBackupPaths: tapBundle.tapInstallBackupPaths,
+    tapInstalledCommands: tapBundle.tapInstalledCommands,
+    tapCoveredActionsCount: tapBundle.tapCoveredActionsCount,
+    tapPendingActionsCount: tapBundle.tapPendingActionsCount
   };
 }

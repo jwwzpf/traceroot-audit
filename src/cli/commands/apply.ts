@@ -59,11 +59,6 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         lines.push(`- 🌐 更安全的 compose 覆盖文件：${bundle.composeOverridePath}`);
       }
 
-      if (bundle.tapPlanPath && bundle.tapWrapperDir) {
-        lines.push(`- 🎬 动作审计说明：${bundle.tapPlanPath}`);
-        lines.push(`- 🧷 TraceRoot 准备好的审计接入文件：${bundle.tapWrapperDir}`);
-      }
-
       lines.push("", "🚀 你现在最值得先做的事：");
 
       if (bundle.movedSecrets.length > 0) {
@@ -81,26 +76,16 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
       }
 
       if (bundle.tapPlanPath && bundle.tapWrappers.length > 0) {
-        if (bundle.tapInstalledCommands.length > 0) {
-          lines.push(
-            `- 动作审计这一步，TraceRoot 已经先帮你接好了 ${bundle.tapInstalledCommands.length} 个常见启动命令。以后你还是照常运行 ${bundle.tapInstalledCommands
-              .filter((command) => command.kind === "npm-script")
-              .map((command) => `npm run ${command.name}`)
-              .join("、")} 就行。`
-          );
+        lines.push(
+          `- 动作审计已经开始覆盖 ${bundle.tapCoveredActionsCount} 个高风险动作。之后这些动作一旦触发，TraceRoot 就会留下可追溯的审计记录。`
+        );
+        lines.push(
+          `- 想回看 agent 刚才到底做了什么，可以直接运行：traceroot-audit logs "${target}"`
+        );
 
-          if (bundle.tapInstallBackupPath) {
-            lines.push(
-              `- 我们也帮你把原来的 package.json 备份好了：${bundle.tapInstallBackupPath}`
-            );
-          }
-
+        if (bundle.tapPendingActionsCount > 0) {
           lines.push(
-            `- 如果你想看看 TraceRoot 是怎么帮你接上的，可以打开 ${bundle.tapPlanPath}。`
-          );
-        } else {
-          lines.push(
-            `- 如果你平时会运行发邮件、发帖、下单这类高风险动作，请打开 ${bundle.tapPlanPath}。TraceRoot 已经帮你准备好了 ${bundle.tapWrappers.length} 个接入文件；能自动接的常见启动命令，我们之后也会继续替你自动接上。`
+            `- 还有 ${bundle.tapPendingActionsCount} 个高风险动作暂时没有自动接上。需要时再打开 ${bundle.tapPlanPath} 看细节就行。`
           );
         }
       }

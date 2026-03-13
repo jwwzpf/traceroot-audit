@@ -114,7 +114,6 @@ describe("CLI", () => {
         ),
         "utf8"
       );
-
       const capture = createCapture();
       const exitCode = await runCli(
         ["node", "traceroot-audit", "doctor", tempDir],
@@ -142,7 +141,8 @@ describe("CLI", () => {
       expect(output).toContain("你当前的 live 配置仍然比你刚批准的边界更宽");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
-      expect(output).toContain("traceroot.tap.plan.md");
+      expect(output).toContain("动作审计已经开始覆盖");
+      expect(output).toContain("traceroot-audit logs");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
     } finally {
@@ -848,6 +848,11 @@ describe("CLI", () => {
         ),
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "tool-config.yaml"),
+        "tool:\n  command: tsx mailer.ts\n",
+        "utf8"
+      );
 
       await runCli(
         ["node", "traceroot-audit", "harden", tempDir],
@@ -881,6 +886,10 @@ describe("CLI", () => {
         path.join(tempDir, "traceroot.tap.plan.md"),
         "utf8"
       );
+      const toolConfig = await readFile(
+        path.join(tempDir, "tool-config.yaml"),
+        "utf8"
+      );
       const wrapperDir = path.join(tempDir, ".traceroot", "tap");
       const wrapperEntries = await fg("[0-9][0-9]-*.mjs", {
         cwd: wrapperDir,
@@ -890,29 +899,36 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
       expect(capture.read().stdout).toContain("更安全的 compose 覆盖文件");
-      expect(capture.read().stdout).toContain("动作审计说明");
-      expect(capture.read().stdout).toContain("以后你还是照常运行 npm run send-email 就行");
+      expect(capture.read().stdout).toContain("动作审计已经开始覆盖");
+      expect(capture.read().stdout).toContain('traceroot-audit logs "');
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
       expect(applyPlan).toContain("TraceRoot 应用说明");
       expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
       expect(applyPlan).toContain("traceroot.tap.plan.md");
+      expect(applyPlan).toContain("动作审计已经开始覆盖");
       expect(tapPlan).toContain("TraceRoot 动作审计说明");
       expect(tapPlan).toContain("send-email");
-      expect(tapPlan).toContain("npm run send-email");
-      expect(tapPlan).toContain("TraceRoot 已经帮你接好了");
-      expect(tapPlan).toContain("你不用手动改任何东西了");
+      expect(tapPlan).toContain("已自动接好");
+      expect(tapPlan).toContain("tool-config.yaml → tool.command");
       expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
       expect(packageJson).toContain("\"send-email\"");
+      expect(toolConfig).toContain("node .traceroot/tap/");
       await expect(
         readFile(
           path.join(tempDir, ".traceroot", "backups", "package.json.before-action-audit.json"),
           "utf8"
         )
       ).resolves.toContain("\"send-email\": \"tsx mailer.ts\"");
+      await expect(
+        readFile(
+          path.join(tempDir, ".traceroot", "backups", "tool-config.yaml.before-action-audit"),
+          "utf8"
+        )
+      ).resolves.toContain("command: tsx mailer.ts");
       expect(wrapperEntries.length).toBeGreaterThan(0);
     } finally {
       await rm(tempDir, { recursive: true, force: true });

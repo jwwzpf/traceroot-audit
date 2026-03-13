@@ -63,11 +63,6 @@ function renderDoctorSummary(options: {
     lines.push(`- 🌐 更安全的 compose 覆盖文件：${displayPath(options.bundle.composeOverridePath)}`);
   }
 
-  if (options.bundle.tapPlanPath && options.bundle.tapWrapperDir) {
-    lines.push(`- 🎬 动作审计说明：${displayPath(options.bundle.tapPlanPath)}`);
-    lines.push(`- 🧷 TraceRoot 准备好的审计接入文件: ${displayPath(options.bundle.tapWrapperDir)}`);
-  }
-
   if (options.boundaryStatus.aligned) {
     lines.push(
       "",
@@ -143,29 +138,16 @@ function renderDoctorSummary(options: {
   if (options.bundle.tapWrappers.length > 0) {
     lines.push("");
 
-    if (options.bundle.tapInstalledCommands.length > 0) {
-      const installedScripts = options.bundle.tapInstalledCommands
-        .filter((command) => command.kind === "npm-script")
-        .map((command) => `npm run ${command.name}`);
+    lines.push(
+      `🎬 动作审计已经开始覆盖 ${options.bundle.tapCoveredActionsCount} 个高风险动作。`
+    );
+    lines.push("   之后这些动作一旦触发，TraceRoot 会立刻留下本地审计记录。");
+    lines.push(`   你之后可以直接用：traceroot-audit logs "${options.target}"`);
 
+    if (options.bundle.tapPendingActionsCount > 0 && options.bundle.tapPlanPath) {
       lines.push(
-        `🎬 动作审计这一步，TraceRoot 已经先帮你接好了 ${options.bundle.tapInstalledCommands.length} 个常见启动命令。`
+        `- 还有 ${options.bundle.tapPendingActionsCount} 个高风险动作暂时没自动接上，TraceRoot 已经把它们记在 ${displayPath(options.bundle.tapPlanPath)} 里了。`
       );
-
-      if (installedScripts.length > 0) {
-        lines.push(`- 以后你还是照常运行：${installedScripts.join("、")}`);
-      }
-
-      if (options.bundle.tapInstallBackupPath) {
-        lines.push(
-          `- 原来的 package.json 备份在：${displayPath(options.bundle.tapInstallBackupPath)}`
-        );
-      }
-    } else {
-      lines.push(
-        `🎬 TraceRoot 也已经帮你找到了 ${options.bundle.tapWrappers.length} 个最值得先接入审计的高风险动作。`
-      );
-      lines.push(`- 你可以在 ${displayPath(options.bundle.tapPlanPath)} 里看到它们。`);
     }
   }
 
