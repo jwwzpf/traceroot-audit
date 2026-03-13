@@ -52,6 +52,7 @@ npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp -
 ```
 
 For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
+If you have already approved a boundary for the same target before, TraceRoot now remembers that decision and asks whether you want to keep using it instead of making you answer the full workflow wizard again.
 If you do not pass notification flags up front, `doctor --watch` first tries to recognize which chat channels this runtime already has connected and, when possible, who they already point to. That lets TraceRoot ask for a quick confirmation instead of making you fill everything in from scratch. Once you choose a route, TraceRoot remembers it for the next watch run on the same target.
 
 We are also defining the next product step beyond static scanning: a local runtime audit layer that watches live agent behavior, writes local audit logs, and raises attention when high-risk actions begin. The current v1 spec lives in [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md).

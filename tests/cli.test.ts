@@ -300,6 +300,56 @@ describe("CLI", () => {
     }
   });
 
+  it("reuses an approved boundary instead of asking the full doctor wizard again", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-reuse-"));
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+
+      await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true, true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 记得你上次批准过这些工作流");
+      expect(output).toContain("邮件整理与回复");
+      expect(output).toContain("TraceRoot Audit Doctor");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can keep watching from doctor without switching to another command", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-home-"));
@@ -330,7 +380,7 @@ describe("CLI", () => {
         createStaticPrompter({
           chooseMany: [["email-reply"]],
           chooseOne: ["always-confirm", "no-write", "localhost-only"],
-          confirm: [true]
+          confirm: [true, true]
         })
       );
 
@@ -473,9 +523,7 @@ describe("CLI", () => {
         ["node", "traceroot-audit", "doctor", tempDir, "--watch", "--cycles", "1", "--interval", "1"],
         capture.io,
         createStaticPrompter({
-          chooseMany: [["email-reply"]],
-          chooseOne: ["always-confirm", "no-write", "localhost-only"],
-          confirm: [true]
+          confirm: [true, true]
         })
       );
 

@@ -2,10 +2,17 @@ import path from "node:path";
 
 import { Command } from "commander";
 
-import { buildCurrentHardeningState, buildHardeningPlan } from "../../hardening/analysis";
+import {
+  buildCurrentHardeningState,
+  buildHardeningPlan
+} from "../../hardening/analysis";
+import type { HardeningSelections } from "../../hardening/analysis";
 import { writeApplyBundle } from "../../hardening/apply";
 import { evaluateBoundaryStatus } from "../../hardening/boundary";
-import { loadHardeningProfile } from "../../hardening/profile";
+import {
+  loadHardeningProfile,
+  type SavedHardeningProfile
+} from "../../hardening/profile";
 import {
   loadWatchPreferences,
   saveWatchPreferences
@@ -21,6 +28,7 @@ import { summarizeActionLabels } from "../../audit/presentation";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
 import { runTargetWatch } from "../watch";
 import { displayUserPath } from "../../utils/paths";
+import { resolveTarget } from "../../utils/files";
 
 import type { CliRuntime } from "../index";
 
@@ -226,6 +234,25 @@ function renderDoctorSummary(options: {
   return `${lines.join("\n")}\n`;
 }
 
+function selectionsFromSavedProfile(
+  profile: SavedHardeningProfile
+): HardeningSelections | null {
+  if (!profile.selectedPolicies) {
+    return null;
+  }
+
+  return {
+    intentIds: profile.selectedIntents.map((intent) => intent.id),
+    outboundApproval: profile.selectedPolicies.outboundApproval,
+    filesystemScope: profile.selectedPolicies.filesystemScope,
+    exposureMode: profile.selectedPolicies.exposureMode
+  };
+}
+
+function describeSavedWorkflows(profile: SavedHardeningProfile): string {
+  return profile.selectedIntents.map((intent) => intent.title).join("、");
+}
+
 export function registerDoctorCommand(program: Command, runtime: CliRuntime): void {
   program
     .command("doctor")
@@ -300,7 +327,31 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           return;
         }
 
-        const selections = await promptHardeningSelections(runtime);
+        const resolvedTarget = await resolveTarget(effectiveTarget);
+        const existingProfile = await loadHardeningProfile(resolvedTarget.rootDir);
+        let selections =
+          existingProfile.profile && selectionsFromSavedProfile(existingProfile.profile);
+
+        if (selections) {
+          runtime.io.stdout(
+            `🧠 TraceRoot 记得你上次批准过这些工作流：${describeSavedWorkflows(
+              existingProfile.profile!
+            )}。\n`
+          );
+          const reuseSelections = await runtime.prompter.confirm(
+            "这次要继续沿用这套边界吗？",
+            true
+          );
+
+          if (!reuseSelections) {
+            selections = null;
+          }
+        }
+
+        if (!selections) {
+          selections = await promptHardeningSelections(runtime);
+        }
+
         const plan = await buildHardeningPlan(effectiveTarget, selections);
 
         const shouldWrite = await runtime.prompter.confirm(
