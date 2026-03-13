@@ -4,6 +4,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import YAML from "yaml";
 
+import { summarizeActionLabels } from "../audit/presentation";
 import { recommendedManifestFormat } from "./analysis";
 import type { SavedHardeningProfile } from "./profile";
 import type { SecretExposure } from "./analysis";
@@ -29,6 +30,8 @@ export interface ApplyBundleResult {
   tapInstalledCommands: TapInstalledCommand[];
   tapCoveredActionsCount: number;
   tapPendingActionsCount: number;
+  tapCoveredActions: string[];
+  tapPendingActions: string[];
 }
 
 export interface TapWrapperFile {
@@ -203,6 +206,8 @@ function renderApplyPlan(options: {
   tapInstalledCommands: TapInstalledCommand[];
   tapCoveredActionsCount: number;
   tapPendingActionsCount: number;
+  tapCoveredActions: string[];
+  tapPendingActions: string[];
 }): string {
   const lines = [
     "# TraceRoot 应用说明",
@@ -257,12 +262,12 @@ function renderApplyPlan(options: {
 
   if (options.tapPlanPath && options.tapWrappers.length > 0) {
     lines.push(
-      `4. 动作审计已经开始覆盖 ${options.tapCoveredActionsCount} 个高风险动作。之后它们一旦触发，你就能在本地审计时间线里看到。`
+      `4. 动作审计已经开始盯住这些高风险动作：${summarizeActionLabels(options.tapCoveredActions)}。之后它们一旦触发，你就能在本地审计时间线里看到。`
     );
 
     if (options.tapPendingActionsCount > 0) {
       lines.push(
-        `5. 还有 ${options.tapPendingActionsCount} 个高风险动作暂时没有自动接上。需要时再打开 \`${path.basename(options.tapPlanPath)}\` 看接入细节就行。`
+        `5. 还有 ${options.tapPendingActionsCount} 类高风险动作暂时没有自动接上。需要时再打开 \`${path.basename(options.tapPlanPath)}\` 看接入细节就行。`
       );
     }
   }
@@ -1141,7 +1146,9 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       tapInstallBackupPaths: [],
       tapInstalledCommands: [],
       tapCoveredActionsCount: 0,
-      tapPendingActionsCount: 0
+      tapPendingActionsCount: 0,
+      tapCoveredActions: [],
+      tapPendingActions: []
     };
   }
 
@@ -1158,6 +1165,32 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     )
   ).length;
   const pendingActionsCount = Math.max(0, tapWrappers.length - coveredActionsCount);
+  const tapCoveredActions = [
+    ...new Set(
+      tapWrappers
+        .filter((wrapper) =>
+          wrapper.entrypoints.some(
+            (entrypoint) =>
+              entrypoint.installStatus === "installed" ||
+              entrypoint.installStatus === "already-installed"
+          )
+        )
+        .map((wrapper) => wrapper.action)
+    )
+  ];
+  const tapPendingActions = [
+    ...new Set(
+      tapWrappers
+        .filter((wrapper) =>
+          !wrapper.entrypoints.some(
+            (entrypoint) =>
+              entrypoint.installStatus === "installed" ||
+              entrypoint.installStatus === "already-installed"
+          )
+        )
+        .map((wrapper) => wrapper.action)
+    )
+  ];
   const tapPlanPath = path.join(rootDir, "traceroot.tap.plan.md");
   const lines = [
     "# TraceRoot 动作审计说明",
@@ -1282,7 +1315,9 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
     tapInstallBackupPaths: tapInstallResult.backupPaths,
     tapInstalledCommands: tapInstallResult.installedCommands,
     tapCoveredActionsCount: coveredActionsCount,
-    tapPendingActionsCount: pendingActionsCount
+    tapPendingActionsCount: pendingActionsCount,
+    tapCoveredActions,
+    tapPendingActions
   };
 }
 
@@ -1339,7 +1374,9 @@ export async function writeApplyBundle(options: {
       tapWrappers: tapBundle.tapWrappers,
       tapInstalledCommands: tapBundle.tapInstalledCommands,
       tapCoveredActionsCount: tapBundle.tapCoveredActionsCount,
-      tapPendingActionsCount: tapBundle.tapPendingActionsCount
+      tapPendingActionsCount: tapBundle.tapPendingActionsCount,
+      tapCoveredActions: tapBundle.tapCoveredActions,
+      tapPendingActions: tapBundle.tapPendingActions
     }),
     "utf8"
   );
@@ -1363,6 +1400,8 @@ export async function writeApplyBundle(options: {
     tapInstallBackupPaths: tapBundle.tapInstallBackupPaths,
     tapInstalledCommands: tapBundle.tapInstalledCommands,
     tapCoveredActionsCount: tapBundle.tapCoveredActionsCount,
-    tapPendingActionsCount: tapBundle.tapPendingActionsCount
+    tapPendingActionsCount: tapBundle.tapPendingActionsCount,
+    tapCoveredActions: tapBundle.tapCoveredActions,
+    tapPendingActions: tapBundle.tapPendingActions
   };
 }

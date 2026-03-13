@@ -5,6 +5,8 @@ import { Command, Option } from "commander";
 
 import { readAuditEvents } from "../../audit/store";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
+import { actionLabel } from "../../audit/presentation";
+import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
 
@@ -51,22 +53,62 @@ function formatTimestamp(value: string): string {
 function categoryLabel(event: AuditEvent): string {
   switch (event.category) {
     case "watch-started":
-      return "Watch started";
+      return "开始陪跑";
     case "watch-heartbeat":
-      return "Watch heartbeat";
+      return "陪跑心跳";
     case "risk-change":
-      return "Risk changed";
+      return "风险变化";
     case "finding-change":
-      return "Findings changed";
+      return "发现变化";
     case "boundary-drift":
-      return "Boundary drift";
+      return "边界漂移";
     case "surface-change":
-      return "Surface changed";
+      return "入口变化";
     case "action-event":
-      return "Agent action";
+      return "Agent 动作";
     default:
       return event.category;
   }
+}
+
+function summarizeEvents(events: AuditEvent[]): {
+  critical: number;
+  highRisk: number;
+  risky: number;
+  safe: number;
+  actionEvents: number;
+  latestAttention: AuditEvent | null;
+} {
+  let critical = 0;
+  let highRisk = 0;
+  let risky = 0;
+  let safe = 0;
+  let actionEvents = 0;
+  let latestAttention: AuditEvent | null = null;
+
+  for (const event of events) {
+    if (event.severity === "critical") critical += 1;
+    else if (event.severity === "high-risk") highRisk += 1;
+    else if (event.severity === "risky") risky += 1;
+    else safe += 1;
+
+    if (event.category === "action-event") {
+      actionEvents += 1;
+    }
+
+    if (!latestAttention && event.severity !== "safe") {
+      latestAttention = event;
+    }
+  }
+
+  return {
+    critical,
+    highRisk,
+    risky,
+    safe,
+    actionEvents,
+    latestAttention
+  };
 }
 
 function eventKey(event: AuditEvent): string {
@@ -88,15 +130,15 @@ function renderEvent(event: AuditEvent): string[] {
   ];
 
   if (event.target) {
-    lines.push(`   📍 Target: ${event.target}`);
+    lines.push(`   📍 位置: ${displayUserPath(event.target)}`);
   }
 
   if (event.action) {
-    lines.push(`   🧩 Action: ${event.action}`);
+    lines.push(`   🧩 动作: ${actionLabel(event.action)}`);
   }
 
   if (event.recommendation) {
-    lines.push(`   🔧 Next: ${event.recommendation}`);
+    lines.push(`   🔧 建议: ${event.recommendation}`);
   }
 
   return lines;
@@ -129,32 +171,51 @@ async function printLogs(
   const eventsAscending = [...result.events].reverse();
 
   if (options.header !== false) {
+    const summary = summarizeEvents(eventsAscending);
     const lines = [
       "TraceRoot Audit Logs",
       "====================",
       "",
-      `🗂 Source: ${result.paths.eventsPath}`
+      `🗂 审计日志位置: ${displayUserPath(result.paths.eventsPath)}`
     ];
 
     if (options.target) {
-      lines.push(`🎯 Target filter: ${options.target}`);
+      lines.push(`🎯 正在查看: ${displayUserPath(options.target)}`);
     }
 
     if (options.severity) {
-      lines.push(`🚦 Severity filter: ${options.severity}`);
+      lines.push(`🚦 风险过滤: ${options.severity}`);
     }
 
     if (options.today) {
-      lines.push("📅 Time filter: today");
+      lines.push("📅 时间范围: 今天");
     }
 
-    lines.push(`📚 Showing ${eventsAscending.length} event${eventsAscending.length === 1 ? "" : "s"}`, "");
+    lines.push(
+      `📚 本次显示 ${eventsAscending.length} 条审计记录`,
+      `🧮 风险概览: 🚨 ${summary.critical} / 🛑 ${summary.highRisk} / ⚠️ ${summary.risky} / 🟢 ${summary.safe}`,
+      `🎬 动作记录: ${summary.actionEvents} 条`,
+      ""
+    );
+
+    if (summary.latestAttention) {
+      lines.push("👀 当前最值得注意的事情：");
+      lines.push(`- ${summary.latestAttention.message}`);
+      if (summary.latestAttention.action) {
+        lines.push(`- 动作：${actionLabel(summary.latestAttention.action)}`);
+      }
+      if (summary.latestAttention.recommendation) {
+        lines.push(`- 建议：${summary.latestAttention.recommendation}`);
+      }
+      lines.push("");
+    }
+
     runtime.io.stdout(`${lines.join("\n")}\n`);
   }
 
   if (eventsAscending.length === 0) {
     runtime.io.stdout(
-      "🟢 No audit events matched this filter yet.\nRun `traceroot-audit doctor --watch` to start leaving a local audit trail.\n"
+      "🟢 这条时间线里还没有符合条件的审计记录。\n先运行 `traceroot-audit doctor --watch`，TraceRoot 才会开始陪跑并留下本地审计轨迹。\n"
     );
     return [];
   }
@@ -219,7 +280,7 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
       }
 
       runtime.io.stdout(
-        `\n💓 Tail mode is on. TraceRoot will print new audit events every ${intervalSeconds}s. Press Ctrl+C to stop.\n\n`
+        `\n💓 实时查看已开启。TraceRoot 每 ${intervalSeconds}s 会刷新一次新的审计事件，按 Ctrl+C 可以停止。\n\n`
       );
 
       const seen = new Set(initialEvents.map(eventKey));

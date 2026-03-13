@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 export function toPosixPath(value: string): string {
@@ -7,4 +8,28 @@ export function toPosixPath(value: string): string {
 export function relativeToRoot(rootDir: string, absolutePath: string): string {
   const relativePath = path.relative(rootDir, absolutePath);
   return toPosixPath(relativePath || path.basename(absolutePath));
+}
+
+export function displayUserPath(value: string, options?: { cwd?: string }): string {
+  const resolved = path.resolve(value);
+  const cwd = options?.cwd ? path.resolve(options.cwd) : process.cwd();
+  const home = path.resolve(os.homedir());
+
+  if (resolved === cwd) {
+    return ".";
+  }
+
+  if (resolved.startsWith(`${cwd}${path.sep}`)) {
+    return `./${toPosixPath(path.relative(cwd, resolved))}`;
+  }
+
+  if (resolved === home) {
+    return "~";
+  }
+
+  if (resolved.startsWith(`${home}${path.sep}`)) {
+    return `~/${toPosixPath(path.relative(home, resolved))}`;
+  }
+
+  return toPosixPath(resolved);
 }

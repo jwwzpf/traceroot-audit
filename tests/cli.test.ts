@@ -138,10 +138,11 @@ describe("CLI", () => {
       expect(output).toContain("你把这套 bundle 应用进去后");
       expect(output).toContain("下面这些还需要你拍板");
       expect(output).toContain("现在就可以这样做");
-      expect(output).toContain("你当前的 live 配置仍然比你刚批准的边界更宽");
+      expect(output).toContain("你当前的运行态配置仍然比你刚批准的边界更宽");
       expect(output).toContain("traceroot.apply.plan.md");
       expect(output).toContain("traceroot.env.agent.example");
-      expect(output).toContain("动作审计已经开始覆盖");
+      expect(output).toContain("动作审计现在已经开始盯住");
+      expect(output).toContain("对外发邮件");
       expect(output).toContain("traceroot-audit logs");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
@@ -187,10 +188,10 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
-      expect(output).toContain("Doctor is staying with you and will keep watching this boundary now");
+      expect(output).toContain("TraceRoot 现在会继续陪跑这个 agent");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
       expect(output).toContain("Doctor Watch 现在会继续盯着");
-      expect(output).toContain("Audit log:");
+      expect(output).toContain("审计日志:");
       expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
       if (previousHome === undefined) {
@@ -264,9 +265,10 @@ describe("CLI", () => {
       const logsOutput = logsCapture.read().stdout;
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("TraceRoot Audit Logs");
-      expect(logsOutput).toContain("Target filter");
-      expect(logsOutput).toContain("Boundary drift");
-      expect(logsOutput).toContain("Watch started");
+      expect(logsOutput).toContain("正在查看");
+      expect(logsOutput).toContain("边界漂移");
+      expect(logsOutput).toContain("开始陪跑");
+      expect(logsOutput).toContain("风险概览");
       expect(logsOutput).toContain("当前配置仍然比你批准的边界更宽");
     } finally {
       if (previousHome === undefined) {
@@ -314,8 +316,8 @@ describe("CLI", () => {
       );
 
       expect(tapExitCode).toBe(0);
-      expect(tapCapture.read().stdout).toContain("TraceRoot Action Tap");
-      expect(tapCapture.read().stdout).toContain("send-email");
+      expect(tapCapture.read().stdout).toContain("TraceRoot 正在接手一次动作审计");
+      expect(tapCapture.read().stdout).toContain("对外发邮件");
 
       const eventsPath = path.join(tempHome, ".traceroot", "audit", "events.jsonl");
       const eventsContent = await readFile(eventsPath, "utf8");
@@ -330,9 +332,95 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
-      expect(logsCapture.read().stdout).toContain("Agent action");
-      expect(logsCapture.read().stdout).toContain("send-email");
+      expect(logsCapture.read().stdout).toContain("Agent 动作");
+      expect(logsCapture.read().stdout).toContain("对外发邮件");
       expect(logsCapture.read().stdout).toContain("Require confirmation before outbound email actions.");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces a live alert when a watched target triggers a high-risk action", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-watch-alert-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-watch-alert-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const tapCapture = createCapture();
+      const tapExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "Require confirmation before outbound email actions.",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        tapCapture.io
+      );
+
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(tapExitCode).toBe(0);
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("TraceRoot 实时提醒");
+      expect(watchOutput).toContain("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("想查看完整来龙去脉，可以运行：traceroot-audit logs");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -899,15 +987,16 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(capture.read().stdout).toContain("TraceRoot Audit Apply");
       expect(capture.read().stdout).toContain("更安全的 compose 覆盖文件");
-      expect(capture.read().stdout).toContain("动作审计已经开始覆盖");
-      expect(capture.read().stdout).toContain('traceroot-audit logs "');
+      expect(capture.read().stdout).toContain("动作审计已经开始盯住");
+      expect(capture.read().stdout).toContain("对外发邮件");
+      expect(capture.read().stdout).toContain("traceroot-audit logs");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
       expect(composeOverride).toContain("127.0.0.1:11434:11434");
       expect(applyPlan).toContain("TraceRoot 应用说明");
       expect(applyPlan).toContain("docker compose -f docker-compose.yml -f docker-compose.traceroot.override.yml up -d");
       expect(applyPlan).toContain("traceroot.tap.plan.md");
-      expect(applyPlan).toContain("动作审计已经开始覆盖");
+      expect(applyPlan).toContain("动作审计已经开始盯住这些高风险动作");
       expect(tapPlan).toContain("TraceRoot 动作审计说明");
       expect(tapPlan).toContain("send-email");
       expect(tapPlan).toContain("已自动接好");

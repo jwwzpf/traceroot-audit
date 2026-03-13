@@ -4,6 +4,8 @@ import { loadHardeningProfile } from "../../hardening/profile";
 import { writeApplyBundle } from "../../hardening/apply";
 import { loadManifest } from "../../manifest/loader";
 import { resolveTarget } from "../../utils/files";
+import { displayUserPath } from "../../utils/paths";
+import { summarizeActionLabels } from "../../audit/presentation";
 
 import type { CliRuntime } from "../index";
 
@@ -41,8 +43,8 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         "TraceRoot Audit Apply",
         "=====================",
         "",
-        `🎯 Target: ${target}`,
-        `🛡️ Approved workflows: ${hardeningProfileResult.profile.selectedIntents
+        `🎯 当前处理位置：${displayUserPath(resolvedTarget.rootDir)}`,
+        `🛡️ 你刚批准的工作流：${hardeningProfileResult.profile.selectedIntents
           .map((intent) => intent.title)
           .join(", ")}`,
         "",
@@ -77,21 +79,21 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
 
       if (bundle.tapPlanPath && bundle.tapWrappers.length > 0) {
         lines.push(
-          `- 动作审计已经开始覆盖 ${bundle.tapCoveredActionsCount} 个高风险动作。之后这些动作一旦触发，TraceRoot 就会留下可追溯的审计记录。`
+          `- 动作审计已经开始盯住这些高风险动作：${summarizeActionLabels(bundle.tapCoveredActions)}。`
         );
         lines.push(
-          `- 想回看 agent 刚才到底做了什么，可以直接运行：traceroot-audit logs "${target}"`
+          `- 以后想回看 agent 刚才到底做了什么，可以直接运行：traceroot-audit logs "${displayUserPath(resolvedTarget.rootDir)}"`
         );
 
         if (bundle.tapPendingActionsCount > 0) {
           lines.push(
-            `- 还有 ${bundle.tapPendingActionsCount} 个高风险动作暂时没有自动接上。需要时再打开 ${bundle.tapPlanPath} 看细节就行。`
+            `- 还有 ${bundle.tapPendingActionsCount} 类高风险动作暂时没有自动接上。需要时再打开 ${displayUserPath(bundle.tapPlanPath, { cwd: resolvedTarget.rootDir })} 看细节就行。`
           );
         }
       }
 
       lines.push(
-        `- 最后把你当前正在使用的 manifest 和 ${bundle.manifestPath} 对照一下，把更小的能力范围同步进去。`
+        `- 最后把你当前正在使用的 manifest 和 ${displayUserPath(bundle.manifestPath, { cwd: resolvedTarget.rootDir })} 对照一下，把更小的能力范围同步进去。`
       );
 
       runtime.io.stdout(`${lines.join("\n")}\n`);

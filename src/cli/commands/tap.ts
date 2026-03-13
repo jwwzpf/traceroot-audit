@@ -5,6 +5,8 @@ import { Command, Option } from "commander";
 
 import { appendAuditEvents } from "../../audit/store";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
+import { actionLabel } from "../../audit/presentation";
+import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
 
@@ -20,12 +22,6 @@ interface TapOptions {
 
 function now(): string {
   return new Date().toISOString();
-}
-
-function formatCommand(args: string[]): string {
-  return args
-    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg))
-    .join(" ");
 }
 
 function alertIcon(severity: AuditSeverity): string {
@@ -94,20 +90,18 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
     .argument("<command...>", "real command to execute after the -- separator")
     .action(async (command: string[], options: TapOptions) => {
       const target = options.target ? path.resolve(options.target) : process.cwd();
-      const commandDisplay = formatCommand(command);
       const startMessage =
         options.message ??
-        `Agent is attempting a ${options.severity} action: ${options.action}.`;
+        `Agent 正在尝试一个${options.severity === "critical" ? "极高风险" : options.severity === "high-risk" ? "高风险" : options.severity === "risky" ? "有风险" : "安全"}动作：${actionLabel(options.action)}。`;
 
       const introLines = [
-        `${alertIcon(options.severity)} TraceRoot Action Tap`,
-        `🧩 Action: ${options.action}`,
-        `🎯 Target: ${target}`,
-        `🛠 Command: ${commandDisplay}`
+        `${alertIcon(options.severity)} TraceRoot 正在接手一次动作审计`,
+        `🧩 当前动作：${actionLabel(options.action)}`,
+        `🎯 所在位置：${displayUserPath(target)}`
       ];
 
       if (options.severity === "high-risk" || options.severity === "critical") {
-        introLines.push("⚡ This action is being recorded as a high-signal runtime audit event.");
+        introLines.push("⚡ 这次动作会被单独记进高风险审计时间线。");
       }
 
       runtime.io.stdout(`${introLines.join("\n")}\n`);
@@ -148,8 +142,8 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
             action: options.action,
             status: success ? "succeeded" : "failed",
             message: success
-              ? `Agent action succeeded: ${options.action}.`
-              : `Agent action failed: ${options.action}.`,
+              ? `Agent 动作执行成功：${actionLabel(options.action)}。`
+              : `Agent 动作执行失败：${actionLabel(options.action)}。`,
             recommendation: success
               ? undefined
               : options.recommendation ?? "Review the command output and decide whether this action should stay enabled.",
@@ -162,7 +156,12 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
         ]);
 
         runtime.io.stdout(
-          `${success ? "✅" : "❌"} TraceRoot recorded ${options.action} as ${success ? "succeeded" : "failed"}.\n`
+          [
+            `${success ? "✅" : "❌"} TraceRoot 已经记下这次动作：${actionLabel(options.action)}`,
+            success
+              ? "📚 之后想回看这次动作做了什么，直接运行：traceroot-audit logs"
+              : "📚 这次失败也已经记进审计时间线里了，之后可以直接运行：traceroot-audit logs"
+          ].join("\n") + "\n"
         );
         runtime.exitCode = result.code;
       } catch (error) {
@@ -178,17 +177,17 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
             surfaceKind: options.surfaceKind,
             action: options.action,
             status: "failed",
-            message: `Agent action failed before completion: ${options.action}.`,
+            message: `Agent 动作还没真正执行完就失败了：${actionLabel(options.action)}。`,
             recommendation:
               options.recommendation ??
-              "Review whether this command should remain wired into the runtime.",
+              "回头检查一下，这个动作还应不应该继续留在 agent 的执行路径里。",
             evidence: {
               command: command,
               error: message
             }
           }
         ]);
-        runtime.io.stderr(`❌ Failed to run wrapped command: ${message}\n`);
+        runtime.io.stderr(`❌ 这次动作没有执行成功：${message}\n`);
         runtime.exitCode = 1;
       }
     });

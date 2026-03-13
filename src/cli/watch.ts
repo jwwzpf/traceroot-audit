@@ -1,5 +1,6 @@
-import { appendAuditEvents, resolveAuditPaths } from "../audit/store";
+import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
+import { actionLabel } from "../audit/presentation";
 import { discoverHost } from "../core/discovery";
 import {
   createHostSnapshot,
@@ -21,6 +22,7 @@ import {
   type HardeningIntentId
 } from "../hardening/profiles";
 import { resolveTarget } from "../utils/files";
+import { displayUserPath } from "../utils/paths";
 
 import type { CliRuntime } from "./index";
 
@@ -36,6 +38,17 @@ function timestamp(): string {
 
 function auditTimestamp(): string {
   return new Date().toISOString();
+}
+
+function actionEventKey(event: AuditEvent): string {
+  return [
+    event.timestamp,
+    event.category,
+    event.status ?? "",
+    event.action ?? "",
+    event.target ?? "",
+    event.message
+  ].join("::");
 }
 
 function watchSource(header?: string): "doctor-watch" | "guard-watch" {
@@ -170,6 +183,49 @@ function renderViolationLine(violation: BoundaryViolation): string {
         : "ℹ️";
 
   return `- ${icon} ${violation.title}: ${violation.message}`;
+}
+
+function alertIconForSeverity(severity: AuditSeverity): string {
+  if (severity === "critical") {
+    return "🚨";
+  }
+
+  if (severity === "high-risk") {
+    return "🛑";
+  }
+
+  if (severity === "risky") {
+    return "⚠️";
+  }
+
+  return "🟢";
+}
+
+function renderLiveActionAlert(event: AuditEvent): string[] {
+  const icon = alertIconForSeverity(event.severity);
+  const lines = [
+    `${icon} ${timestamp()} TraceRoot 实时提醒`,
+    `- Agent 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`
+  ];
+
+  if (event.target) {
+    lines.push(`- 位置：${displayUserPath(event.target)}`);
+  }
+
+  if (event.status === "attempted") {
+    lines.push("- 状态：正在尝试执行");
+  } else if (event.status === "failed") {
+    lines.push("- 状态：执行失败，但这次尝试已经被记进审计时间线");
+  } else if (event.status === "succeeded") {
+    lines.push("- 状态：已经执行成功，并已记进审计时间线");
+  }
+
+  if (event.recommendation) {
+    lines.push(`- 建议：${event.recommendation}`);
+  }
+
+  lines.push("- 想查看完整来龙去脉，可以运行：traceroot-audit logs");
+  return lines;
 }
 
 async function writeAuditEvents(
@@ -425,6 +481,14 @@ export async function runTargetWatch(options: {
   const auditPaths = resolveAuditPaths();
   const initialScan = await scanTarget(target);
   let previousSnapshot = createScanSnapshot(initialScan);
+  const initialAuditEvents = await readAuditEvents({
+    target: resolvedTarget.absolutePath
+  });
+  const seenActionEvents = new Set(
+    initialAuditEvents.events
+      .filter((event) => event.category === "action-event")
+      .map(actionEventKey)
+  );
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
   let previousBoundaryStatus: BoundaryStatus | null = null;
 
@@ -446,11 +510,11 @@ export async function runTargetWatch(options: {
 
   if (compactStart) {
     initialLines.push(
-      `🎯 Watching target: ${target}`,
-      `⏱️ Interval: every ${intervalSeconds}s`,
-      `🗂 Audit log: ${auditPaths.eventsPath}`,
-      `📊 Current score: ${initialScan.riskScore.toFixed(1)}/10`,
-      `📈 Current findings: ${initialScan.summary.total}`,
+      `🎯 正在陪跑: ${target}`,
+      `⏱️ 检查间隔: 每 ${intervalSeconds}s`,
+      `🗂 审计日志: ${auditPaths.eventsPath}`,
+      `📊 当前风险分: ${initialScan.riskScore.toFixed(1)}/10`,
+      `📈 当前发现: ${initialScan.summary.total}`,
       ""
     );
 
@@ -473,7 +537,7 @@ export async function runTargetWatch(options: {
     initialLines.push(
       `🎯 Target: ${target}`,
       `⏱️ Interval: every ${intervalSeconds}s`,
-      `🗂 Audit log: ${auditPaths.eventsPath}`,
+      `🗂 审计日志: ${auditPaths.eventsPath}`,
       `📊 初始风险分：${initialScan.riskScore.toFixed(1)}/10`,
       `📈 初始发现：${initialScan.summary.total}（critical ${initialScan.summary.critical} / high ${initialScan.summary.high} / medium ${initialScan.summary.medium}）`
     );
@@ -516,16 +580,16 @@ export async function runTargetWatch(options: {
   const startupEvents: AuditEvent[] = [
     {
       timestamp: auditTimestamp(),
-      severity: "safe",
-      category: "watch-started",
-      source,
-      target: resolvedTarget.absolutePath,
-      surfaceKind: initialScan.surface.kind,
-      status: "started",
-      message: `${header ?? "TraceRoot Audit Guard"} started watching this target for drift and risky changes.`,
-      evidence: {
-        intervalSeconds,
-        currentRiskScore: initialScan.riskScore
+        severity: "safe",
+        category: "watch-started",
+        source,
+        target: resolvedTarget.absolutePath,
+        surfaceKind: initialScan.surface.kind,
+        status: "started",
+        message: `TraceRoot 已经开始陪跑这个 target，会继续盯着边界变化和高风险动作。`,
+        evidence: {
+          intervalSeconds,
+          currentRiskScore: initialScan.riskScore
       }
     }
   ];
@@ -534,16 +598,16 @@ export async function runTargetWatch(options: {
     startupEvents.push({
       timestamp: auditTimestamp(),
       severity: highestAuditSeverityForSummary(initialScan.summary),
-      category: "finding-change",
-      source,
-      target: resolvedTarget.absolutePath,
-      surfaceKind: initialScan.surface.kind,
-      status: "observed",
-      message: `Live target currently starts at ${initialScan.riskScore.toFixed(1)}/10 with ${initialScan.summary.total} findings (${initialScan.summary.critical} critical, ${initialScan.summary.high} high, ${initialScan.summary.medium} medium).`,
-      recommendation: `Run traceroot-audit doctor ${JSON.stringify(target)} to shrink the boundary before the next change lands.`,
-      evidence: {
-        riskScore: initialScan.riskScore,
-        summary: initialScan.summary
+        category: "finding-change",
+        source,
+        target: resolvedTarget.absolutePath,
+        surfaceKind: initialScan.surface.kind,
+        status: "observed",
+        message: `当前这套 live 配置一开始就在 ${initialScan.riskScore.toFixed(1)}/10，并且有 ${initialScan.summary.total} 条风险发现（critical ${initialScan.summary.critical} / high ${initialScan.summary.high} / medium ${initialScan.summary.medium}）。`,
+        recommendation: `先运行 traceroot-audit doctor ${JSON.stringify(target)}，把边界收紧后再继续陪跑。`,
+        evidence: {
+          riskScore: initialScan.riskScore,
+          summary: initialScan.summary
       }
     });
   }
@@ -602,6 +666,37 @@ export async function runTargetWatch(options: {
     }
 
     if (!diff.changed && !boundaryDiff?.changed) {
+      const latestAuditEvents = await readAuditEvents({
+        target: resolvedTarget.absolutePath
+      });
+      const newActionAlerts = latestAuditEvents.events
+        .filter((event) => event.category === "action-event")
+        .filter((event) => !seenActionEvents.has(actionEventKey(event)))
+        .filter(
+          (event) =>
+            event.status === "attempted" ||
+            (event.status === "failed" && event.severity !== "safe")
+        );
+
+      for (const event of newActionAlerts) {
+        runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
+        seenActionEvents.add(actionEventKey(event));
+      }
+
+      for (const event of latestAuditEvents.events) {
+        if (event.category === "action-event") {
+          seenActionEvents.add(actionEventKey(event));
+        }
+      }
+
+      if (newActionAlerts.length > 0) {
+        previousSnapshot = currentSnapshot;
+        if (currentBoundaryStatus) {
+          previousBoundaryStatus = currentBoundaryStatus;
+        }
+        continue;
+      }
+
       const heartbeat =
         currentBoundaryStatus?.aligned === false
           ? `💓 ${timestamp()} 这轮没有新的风险变化，不过当前配置仍然比你批准的边界更宽（${currentBoundaryStatus.violations.length} 个点）。风险分仍然是 ${latestScan.riskScore.toFixed(1)}/10。\n`
@@ -725,6 +820,30 @@ export async function runTargetWatch(options: {
 
     runtime.io.stdout(`${lines.join("\n")}\n`);
     await writeAuditEvents(runtime, events, auditWriteState);
+
+    const latestAuditEvents = await readAuditEvents({
+      target: resolvedTarget.absolutePath
+    });
+    const newActionAlerts = latestAuditEvents.events
+      .filter((event) => event.category === "action-event")
+      .filter((event) => !seenActionEvents.has(actionEventKey(event)))
+      .filter(
+        (event) =>
+          event.status === "attempted" ||
+          (event.status === "failed" && event.severity !== "safe")
+      );
+
+    for (const event of newActionAlerts) {
+      runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
+      seenActionEvents.add(actionEventKey(event));
+    }
+
+    for (const event of latestAuditEvents.events) {
+      if (event.category === "action-event") {
+        seenActionEvents.add(actionEventKey(event));
+      }
+    }
+
     previousSnapshot = currentSnapshot;
     if (currentBoundaryStatus) {
       previousBoundaryStatus = currentBoundaryStatus;

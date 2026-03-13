@@ -9,7 +9,9 @@ import { loadHardeningProfile } from "../../hardening/profile";
 import { writeHardeningFiles } from "../../hardening/writer";
 import { promptHardeningSelections, resolveWizardTarget } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
+import { summarizeActionLabels } from "../../audit/presentation";
 import { runTargetWatch } from "../watch";
+import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
 
@@ -40,8 +42,8 @@ function renderDoctorSummary(options: {
     "TraceRoot Audit Doctor",
     "======================",
     "",
-    `🎯 Target: ${options.target}`,
-    `🧩 Approved workflows: ${options.selectedWorkflows.join(", ")}`,
+    `🎯 当前处理位置：${displayUserPath(options.plan.rootDir)}`,
+    `🧩 你刚批准的工作流：${options.selectedWorkflows.join(", ")}`,
     "",
     "📉 权限收缩预览：",
     `- 现在：${currentPower}`,
@@ -67,7 +69,7 @@ function renderDoctorSummary(options: {
     lines.push(
       "",
       "✅ 好消息：你当前的配置已经和刚批准的边界对齐了。",
-      `💓 如果你想继续陪跑守护它，可以运行：traceroot-audit doctor "${options.target}" --watch --interval 60`
+      `💓 如果你想继续陪跑守护它，可以运行：traceroot-audit doctor "${displayUserPath(options.plan.rootDir)}" --watch --interval 60`
     );
 
     return `${lines.join("\n")}\n`;
@@ -111,7 +113,7 @@ function renderDoctorSummary(options: {
 
   lines.push(
     "",
-    "🚧 你当前的 live 配置仍然比你刚批准的边界更宽。"
+    "🚧 你当前的运行态配置仍然比你刚批准的边界更宽。"
   );
 
   if (options.boundaryStatus.violations.length > 0) {
@@ -139,14 +141,14 @@ function renderDoctorSummary(options: {
     lines.push("");
 
     lines.push(
-      `🎬 动作审计已经开始覆盖 ${options.bundle.tapCoveredActionsCount} 个高风险动作。`
+      `🎬 动作审计现在已经开始盯住：${summarizeActionLabels(options.bundle.tapCoveredActions)}。`
     );
     lines.push("   之后这些动作一旦触发，TraceRoot 会立刻留下本地审计记录。");
-    lines.push(`   你之后可以直接用：traceroot-audit logs "${options.target}"`);
+    lines.push(`   想回看 agent 做过什么，可以直接用：traceroot-audit logs "${displayUserPath(options.plan.rootDir)}"`);
 
     if (options.bundle.tapPendingActionsCount > 0 && options.bundle.tapPlanPath) {
       lines.push(
-        `- 还有 ${options.bundle.tapPendingActionsCount} 个高风险动作暂时没自动接上，TraceRoot 已经把它们记在 ${displayPath(options.bundle.tapPlanPath)} 里了。`
+        `- 还有 ${options.bundle.tapPendingActionsCount} 类高风险动作暂时没自动接上，TraceRoot 已经把它们记在 ${displayPath(options.bundle.tapPlanPath)} 里了。`
       );
     }
   }
@@ -253,9 +255,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         runtime.io.stdout(
           [
-            `🎯 Target: ${effectiveTarget}`,
-            `🧭 Surface: ${plan.surfaceLabel}`,
-            `🧩 Workflows: ${plan.selectedProfiles.map((profile) => `${profile.icon} ${profile.title}`).join(", ")}`,
+            `🎯 当前处理位置：${displayUserPath(effectiveTarget)}`,
+            `🧭 检测类型：${plan.surfaceLabel}`,
+            `🧩 你选择的工作流：${plan.selectedProfiles.map((profile) => `${profile.icon} ${profile.title}`).join(", ")}`,
             "🛠️ TraceRoot 正在帮你收紧边界，并准备更安全的补丁包..."
           ].join("\n") + "\n"
         );
@@ -331,7 +333,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         }
 
         runtime.io.stdout(
-          "\n💓 Doctor is staying with you and will keep watching this boundary now.\n\n"
+          "\n💓 TraceRoot 现在会继续陪跑这个 agent，并盯着边界和高风险动作。\n\n"
         );
 
         await runTargetWatch({
