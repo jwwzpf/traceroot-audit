@@ -2,6 +2,7 @@ import { discoverHost } from "../core/discovery";
 import { surfaceLabel } from "../core/surfaces";
 import type { CliChoice, CliRuntime } from "../cli/index";
 import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
+import { detectLikelyNotifyChannels, displayNotifyChannel } from "./notify-discovery";
 import type {
   ExposureMode,
   FilesystemScope,
@@ -78,32 +79,12 @@ type NotificationChoice =
   | { mode: "webhook" }
   | { mode: "channel"; channel: string; target: string; account?: string };
 
-function notificationChoices(): CliChoice[] {
+function baseNotificationChoices(): CliChoice[] {
   return [
     {
       value: "local-only",
       label: "🧾 先只保留本地审计",
       hint: "高风险动作会继续记在本地时间线里，但不额外打扰你"
-    },
-    {
-      value: "telegram",
-      label: "💬 发到 Telegram",
-      hint: "适合你已经在 OpenClaw 里接好 Telegram 的情况"
-    },
-    {
-      value: "whatsapp",
-      label: "📱 发到 WhatsApp",
-      hint: "适合你已经在 OpenClaw 里接好 WhatsApp 的情况"
-    },
-    {
-      value: "slack",
-      label: "🧵 发到 Slack",
-      hint: "适合团队一起盯高风险动作"
-    },
-    {
-      value: "discord",
-      label: "🎮 发到 Discord",
-      hint: "适合社区或机器人频道"
     },
     {
       value: "other-channel",
@@ -190,11 +171,78 @@ export async function promptHardeningSelections(
 }
 
 export async function promptNotificationSelection(
-  runtime: CliRuntime
+  runtime: CliRuntime,
+  options: { target?: string } = {}
 ): Promise<NotificationChoice> {
+  const likelyChannels = options.target
+    ? await detectLikelyNotifyChannels(options.target)
+    : [];
+  const likelyChoices: CliChoice[] = likelyChannels.map((item) => ({
+    value: item.channel,
+    label: `${item.channel === "whatsapp" ? "📱" : item.channel === "telegram" ? "💬" : item.channel === "slack" ? "🧵" : item.channel === "discord" ? "🎮" : "🔔"} 发到已识别的 ${displayNotifyChannel(item.channel)}${item.target ? `（${item.target}）` : ""}`,
+    hint: `TraceRoot 在 ${item.evidence.join("、")} 里看到了这个聊天入口`
+  }));
+  const staticChoices = baseNotificationChoices().filter(
+    (choice) =>
+      !likelyChannels.some((item) => item.channel === choice.value) &&
+      !["telegram", "whatsapp", "slack", "discord"].includes(choice.value)
+  );
+  const quickChoices = [
+    ...likelyChoices,
+    ...(["telegram", "whatsapp", "slack", "discord"] as const)
+      .filter((channel) => !likelyChannels.some((item) => item.channel === channel))
+      .map((channel) => ({
+        value: channel,
+        label: `${channel === "whatsapp" ? "📱" : channel === "telegram" ? "💬" : channel === "slack" ? "🧵" : "🎮"} 发到 ${displayNotifyChannel(channel)}`,
+        hint: "适合你已经在 OpenClaw 里接好这个聊天入口的情况"
+      })),
+    ...staticChoices
+  ];
+
+  if (likelyChannels.length > 0) {
+    runtime.io.stdout(
+      `✨ TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：${likelyChannels
+        .map((item) =>
+          item.target
+            ? `${displayNotifyChannel(item.channel)}（${item.target}）`
+            : displayNotifyChannel(item.channel)
+        )
+        .join("、")}。\n`
+    );
+  }
+
+  if (likelyChannels.length === 1 && likelyChannels[0]?.target) {
+    const detected = likelyChannels[0];
+    const useDetectedRoute = await runtime.prompter.confirm(
+      `📲 TraceRoot 看起来已经知道可以把提醒发到 ${displayNotifyChannel(detected.channel)}（${detected.target}）。要直接用这个入口吗？`,
+      true
+    );
+
+    if (useDetectedRoute) {
+      let account = detected.account;
+
+      if (!account) {
+        const wantsAccount = await runtime.prompter.confirm(
+          "👤 这个聊天入口还需要指定 OpenClaw 账户名吗？",
+          false
+        );
+        account = wantsAccount
+          ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
+          : undefined;
+      }
+
+      return {
+        mode: "channel",
+        channel: detected.channel,
+        target: detected.target,
+        account
+      };
+    }
+  }
+
   const choice = await runtime.prompter.chooseOne(
     "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",
-    notificationChoices()
+    quickChoices
   );
 
   if (choice === "local-only") {
@@ -206,6 +254,7 @@ export async function promptNotificationSelection(
   }
 
   let channel = choice;
+  const detectedChannel = likelyChannels.find((item) => item.channel === channel);
   if (choice === "other-channel") {
     channel = await runtime.prompter.chooseOne(
       "💡 你想用哪个已接好的聊天入口？",
@@ -219,18 +268,23 @@ export async function promptNotificationSelection(
     );
   }
 
-  const target = await runtime.prompter.input(
-    `📨 TraceRoot 应该把提醒发到哪里？（${channel}）`,
-    { allowEmpty: false }
-  );
+  const target =
+    detectedChannel?.target ??
+    (await runtime.prompter.input(
+      `📨 TraceRoot 应该把提醒发到哪里？（${channel}）`,
+      { allowEmpty: false }
+    ));
 
-  const wantsAccount = await runtime.prompter.confirm(
-    "👤 这个聊天入口需要指定 OpenClaw 账户名吗？",
-    false
-  );
-  const account = wantsAccount
-    ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
-    : undefined;
+  let account = detectedChannel?.account;
+  if (!account) {
+    const wantsAccount = await runtime.prompter.confirm(
+      "👤 这个聊天入口需要指定 OpenClaw 账户名吗？",
+      false
+    );
+    account = wantsAccount
+      ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
+      : undefined;
+  }
 
   return {
     mode: "channel",

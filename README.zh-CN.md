@@ -52,7 +52,7 @@ npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp -
 ```
 
 对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包；如果加上 `--watch`，它还会继续替你守着这个边界。
-如果你没有提前写好提醒参数，`doctor --watch` 也会顺手问你：高风险动作要不要同步发到你已经接好的聊天入口。
+如果你没有提前写好提醒参数，`doctor --watch` 也会先试着看懂这个运行态里已经接好了哪些聊天入口；如果连“本来就是发给谁”的线索都能看出来，TraceRoot 会直接让你确认，而不是再让你从头填写。你选过一次之后，TraceRoot 还会记住这个提醒入口，下次在同一个 target 上继续陪跑时会直接沿用。
 
 我们也已经把下一步产品主线收敛出来了：除了静态扫描之外，TraceRoot 还要走向本地运行时审计，持续观察 live agent 行为、写入本地审计日志，并在高风险动作开始时及时提醒。当前 v1 规格在 [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md)。
 

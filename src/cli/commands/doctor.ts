@@ -6,6 +6,10 @@ import { buildCurrentHardeningState, buildHardeningPlan } from "../../hardening/
 import { writeApplyBundle } from "../../hardening/apply";
 import { evaluateBoundaryStatus } from "../../hardening/boundary";
 import { loadHardeningProfile } from "../../hardening/profile";
+import {
+  loadWatchPreferences,
+  saveWatchPreferences
+} from "../../hardening/watch-preferences";
 import { writeHardeningFiles } from "../../hardening/writer";
 import {
   promptHardeningSelections,
@@ -14,6 +18,7 @@ import {
 } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
 import { summarizeActionLabels } from "../../audit/presentation";
+import { displayNotifyChannel } from "../../hardening/notify-discovery";
 import { runTargetWatch } from "../watch";
 import { displayUserPath } from "../../utils/paths";
 
@@ -386,7 +391,42 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           Boolean(options.notifyAccount);
 
         if (!alreadyConfiguredNotification) {
-          const selection = await promptNotificationSelection(runtime);
+          const savedPreferences = await loadWatchPreferences(plan.rootDir);
+          if (savedPreferences?.notifications.webhookUrl) {
+            notificationSettings = {
+              ...notificationSettings,
+              webhookUrl: savedPreferences.notifications.webhookUrl
+            };
+            runtime.io.stdout(
+              "\n🧠 TraceRoot 记得你上次想把高风险提醒发到同一个 webhook，这次会继续沿用。\n"
+            );
+          } else if (
+            savedPreferences?.notifications.openclawChannel &&
+            savedPreferences.notifications.openclawTarget
+          ) {
+            notificationSettings = {
+              ...notificationSettings,
+              openclawChannel: savedPreferences.notifications.openclawChannel,
+              openclawTarget: savedPreferences.notifications.openclawTarget,
+              openclawAccount: savedPreferences.notifications.openclawAccount
+            };
+            runtime.io.stdout(
+              `\n🧠 TraceRoot 记得你上次把提醒发到 ${displayNotifyChannel(
+                savedPreferences.notifications.openclawChannel
+              )}（${savedPreferences.notifications.openclawTarget}），这次会继续沿用。\n`
+            );
+          }
+        }
+
+        if (
+          !alreadyConfiguredNotification &&
+          !notificationSettings.webhookUrl &&
+          !notificationSettings.openclawChannel &&
+          !notificationSettings.openclawTarget
+        ) {
+          const selection = await promptNotificationSelection(runtime, {
+            target: effectiveTarget
+          });
 
           if (selection.mode === "webhook") {
             notificationSettings = {
@@ -404,6 +444,17 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               openclawAccount: selection.account
             };
           }
+        }
+
+        if (
+          notificationSettings.webhookUrl ||
+          (notificationSettings.openclawChannel && notificationSettings.openclawTarget)
+        ) {
+          await saveWatchPreferences(plan.rootDir, {
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            notifications: notificationSettings
+          });
         }
 
         await runTargetWatch({
