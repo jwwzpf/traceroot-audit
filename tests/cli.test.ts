@@ -410,6 +410,85 @@ describe("CLI", () => {
     }
   });
 
+  it("can fast-resume doctor watch with the remembered target, boundary, and reminder route", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1",
+          "--notify-channel",
+          "whatsapp",
+          "--notify-target",
+          "+4917612345678"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true, true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 记得你上次陪跑的是");
+      expect(output).toContain("TraceRoot 已经替你记住了上次这套陪跑方式");
+      expect(output).toContain("WhatsApp（+4917612345678）");
+      expect(output).toContain("TraceRoot Audit Doctor Watch");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can keep watching from doctor without switching to another command", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-home-"));

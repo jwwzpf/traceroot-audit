@@ -258,6 +258,22 @@ function describeSavedWorkflows(profile: SavedHardeningProfile): string {
   return profile.selectedIntents.map((intent) => intent.title).join("、");
 }
 
+function describeSavedReminder(options: {
+  webhookUrl?: string;
+  openclawChannel?: string;
+  openclawTarget?: string;
+}): string {
+  if (options.webhookUrl) {
+    return "同一个 webhook 提醒入口";
+  }
+
+  if (options.openclawChannel && options.openclawTarget) {
+    return `${displayNotifyChannel(options.openclawChannel)}（${options.openclawTarget}）`;
+  }
+
+  return "本地审计时间线";
+}
+
 export function registerDoctorCommand(program: Command, runtime: CliRuntime): void {
   program
     .command("doctor")
@@ -318,6 +334,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         }
       ) => {
         let preferredTarget = target;
+        let reusedRecentTarget = false;
         if (!preferredTarget && !options.host) {
           const recentTarget = await loadRecentDoctorTarget();
           if (recentTarget) {
@@ -331,6 +348,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
             if (reuseRecentTarget) {
               preferredTarget = recentTarget;
+              reusedRecentTarget = true;
             }
           }
         }
@@ -354,10 +372,40 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         const resolvedTarget = await resolveTarget(effectiveTarget);
         const existingProfile = await loadHardeningProfile(resolvedTarget.rootDir);
+        const alreadyConfiguredNotification =
+          Boolean(options.notifyWebhook) ||
+          Boolean(options.notifyChannel) ||
+          Boolean(options.notifyTarget) ||
+          Boolean(options.notifyAccount);
+        const savedPreferences = !alreadyConfiguredNotification
+          ? await loadWatchPreferences(resolvedTarget.rootDir)
+          : null;
         let selections =
           existingProfile.profile && selectionsFromSavedProfile(existingProfile.profile);
+        const canFastResume =
+          Boolean(options.watch) &&
+          reusedRecentTarget &&
+          Boolean(selections) &&
+          Boolean(
+            savedPreferences?.notifications.webhookUrl ||
+              (savedPreferences?.notifications.openclawChannel &&
+                savedPreferences.notifications.openclawTarget)
+          );
+        let fastResume = false;
 
-        if (selections) {
+        if (canFastResume) {
+          runtime.io.stdout(
+            `⚡ TraceRoot 已经替你记住了上次这套陪跑方式：${describeSavedWorkflows(
+              existingProfile.profile!
+            )} + ${describeSavedReminder(savedPreferences!.notifications)}。\n`
+          );
+          fastResume = await runtime.prompter.confirm(
+            "这次要直接按上次那套方式继续陪跑吗？",
+            true
+          );
+        }
+
+        if (selections && !fastResume) {
           runtime.io.stdout(
             `🧠 TraceRoot 记得你上次批准过这些工作流：${describeSavedWorkflows(
               existingProfile.profile!
@@ -379,10 +427,12 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         const plan = await buildHardeningPlan(effectiveTarget, selections);
 
-        const shouldWrite = await runtime.prompter.confirm(
-          "📦 Generate the safer bundle now?",
-          true
-        );
+        const shouldWrite = fastResume
+          ? true
+          : await runtime.prompter.confirm(
+              "📦 Generate the safer bundle now?",
+              true
+            );
 
         if (!shouldWrite) {
           runtime.io.stdout("Stopped before generating the safer bundle.\n");
@@ -460,22 +510,17 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           openclawAccount: options.notifyAccount
         };
 
-        const alreadyConfiguredNotification =
-          Boolean(options.notifyWebhook) ||
-          Boolean(options.notifyChannel) ||
-          Boolean(options.notifyTarget) ||
-          Boolean(options.notifyAccount);
-
         if (!alreadyConfiguredNotification) {
-          const savedPreferences = await loadWatchPreferences(plan.rootDir);
           if (savedPreferences?.notifications.webhookUrl) {
             notificationSettings = {
               ...notificationSettings,
               webhookUrl: savedPreferences.notifications.webhookUrl
             };
-            runtime.io.stdout(
+            if (!fastResume) {
+              runtime.io.stdout(
               "\n🧠 TraceRoot 记得你上次想把高风险提醒发到同一个 webhook，这次会继续沿用。\n"
-            );
+              );
+            }
           } else if (
             savedPreferences?.notifications.openclawChannel &&
             savedPreferences.notifications.openclawTarget
@@ -486,11 +531,13 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               openclawTarget: savedPreferences.notifications.openclawTarget,
               openclawAccount: savedPreferences.notifications.openclawAccount
             };
-            runtime.io.stdout(
+            if (!fastResume) {
+              runtime.io.stdout(
               `\n🧠 TraceRoot 记得你上次把提醒发到 ${displayNotifyChannel(
                 savedPreferences.notifications.openclawChannel
               )}（${savedPreferences.notifications.openclawTarget}），这次会继续沿用。\n`
-            );
+              );
+            }
           }
         }
 

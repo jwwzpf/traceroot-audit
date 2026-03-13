@@ -55,6 +55,7 @@ For most users, `doctor` is now the main entry point. It finds a likely surface,
 If you have already approved a boundary for the same target before, TraceRoot now remembers that decision and asks whether you want to keep using it instead of making you answer the full workflow wizard again.
 If you come back later without passing a path, TraceRoot can also remember the last target you asked it to watch so you can keep going from where you left off.
 If you do not pass notification flags up front, `doctor --watch` first tries to recognize which chat channels this runtime already has connected and, when possible, who they already point to. That lets TraceRoot ask for a quick confirmation instead of making you fill everything in from scratch. Once you choose a route, TraceRoot remembers it for the next watch run on the same target.
+When all three pieces are already known — the target, the approved boundary, and the reminder route — `doctor --watch` can now jump back in with a single confirmation instead of rebuilding the whole setup flow.
 
 We are also defining the next product step beyond static scanning: a local runtime audit layer that watches live agent behavior, writes local audit logs, and raises attention when high-risk actions begin. The current v1 spec lives in [docs/runtime-audit-v1.md](./docs/runtime-audit-v1.md).
 
