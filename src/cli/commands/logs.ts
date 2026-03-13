@@ -6,6 +6,7 @@ import { Command, Option } from "commander";
 import { readAuditEvents } from "../../audit/store";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import { actionLabel } from "../../audit/presentation";
+import { loadRecentDoctorTarget, recentTargetLabel } from "../../hardening/recent-target";
 import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
@@ -17,6 +18,7 @@ interface LogsOptions {
   limit: string;
   tail?: boolean;
   interval: string;
+  all?: boolean;
 }
 
 function severityIcon(severity: AuditSeverity): string {
@@ -369,12 +371,22 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
         .default("20")
     )
     .option("--tail", "keep polling and print new events as they arrive")
+    .option("--all", "show the full machine-wide audit timeline instead of resuming the last doctor target")
     .addOption(
       new Option("--interval <seconds>", "when used with --tail, seconds between refreshes")
         .default("2")
     )
     .action(async (targetArg: string | undefined, options: LogsOptions) => {
-      const target = normalizeTargetFilter(options.target ?? targetArg);
+      let target = normalizeTargetFilter(options.target ?? targetArg);
+      if (!target && !options.all) {
+        const recentTarget = await loadRecentDoctorTarget();
+        if (recentTarget) {
+          target = normalizeTargetFilter(recentTarget);
+          runtime.io.stdout(
+            `🧠 TraceRoot 先帮你继续看上次陪跑的 target：${recentTargetLabel(recentTarget)}。\n\n`
+          );
+        }
+      }
       const limit = Number.parseInt(options.limit, 10);
       const intervalSeconds = Number.parseInt(options.interval, 10);
 

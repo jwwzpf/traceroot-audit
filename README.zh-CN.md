@@ -125,6 +125,8 @@ node dist/cli/index.js logs --today
 node dist/cli/index.js logs --tail
 ```
 
+如果 TraceRoot 已经记得你最近在陪跑哪个 target，`logs` 现在会默认直接接回那条时间线，不用你再把路径重新敲一遍；如果你想看整台机器的全局审计记录，再加 `--all` 就可以。
+
 包裹一个真实高风险动作，让 TraceRoot 在执行前后都写入审计事件：
 
 ```bash

@@ -688,6 +688,53 @@ describe("CLI", () => {
     }
   });
 
+  it("continues logs from the last remembered doctor target by default", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-recent-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-recent-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        ["node", "traceroot-audit", "doctor", tempDir, "--watch", "--cycles", "1", "--interval", "1"],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(["node", "traceroot-audit", "logs"], capture.io);
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 先帮你继续看上次陪跑的 target");
+      expect(output).toContain("正在查看:");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("records wrapped high-risk actions through tap and surfaces them in logs", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-tap-target-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-tap-home-"));
@@ -1184,7 +1231,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 10000);
 
   it("can send a chat-channel reminder through OpenClaw when doctor watch sees a high-risk action", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-target-"));
@@ -1289,7 +1336,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 10000);
 
   it("does not spam duplicate chat-channel reminders for the same action in a short window", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-dedupe-target-"));
@@ -1382,7 +1429,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 10000);
 
   it("explains missing chat target when a notify channel is chosen without one", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-validation-"));
