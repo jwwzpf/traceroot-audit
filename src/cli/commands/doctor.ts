@@ -451,7 +451,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           Boolean(options.notifyTarget) ||
           Boolean(options.notifyAccount);
         let preferredTarget = target;
-        let reusedRecentTarget = false;
         let offeredRecentTargetFastResume = false;
         let preConfirmedFastResume = false;
         if (!preferredTarget && !options.host) {
@@ -465,7 +464,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                 "↩️ 这次会在同一个位置重新帮你设置，不过不会沿用旧的边界和提醒方式。\n"
               );
               preferredTarget = recentTarget;
-              reusedRecentTarget = true;
             }
 
             if (!options.reconfigure && options.watch && !alreadyConfiguredNotification) {
@@ -500,7 +498,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                   );
                   offeredRecentTargetFastResume = true;
                   preferredTarget = recentTarget;
-                  reusedRecentTarget = true;
                   preConfirmedFastResume = true;
                 }
               } catch {
@@ -519,7 +516,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
               if (reuseRecentTarget) {
                 preferredTarget = recentTarget;
-                reusedRecentTarget = true;
               }
             }
           }
@@ -553,14 +549,13 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         const canFastResume =
           !options.reconfigure &&
           Boolean(options.watch) &&
-          reusedRecentTarget &&
           Boolean(selections) &&
           hasSavedReminderPreference(savedPreferences);
         let fastResume = preConfirmedFastResume;
 
         if (canFastResume && !preConfirmedFastResume) {
           runtime.io.stdout(
-            `⚡ TraceRoot 已经替你记住了上次这套陪跑方式：${describeSavedWorkflows(
+            `⚡ 上次那套方式 TraceRoot 也还记着：${describeSavedWorkflows(
               existingProfile.profile!
             )} + ${describeSavedReminder({
               mode: savedPreferences!.mode,
@@ -569,10 +564,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               openclawTarget: savedPreferences!.notifications.openclawTarget
             })}。\n`
           );
-          fastResume = await runtime.prompter.confirm(
-            "这次要直接按上次那套方式继续陪跑吗？",
-            true
+          runtime.io.stdout(
+            "↩️ 这次 TraceRoot 会直接按上次那套方式续上；如果你想重新选工作流或提醒方式，可以加上 --reconfigure。\n"
           );
+          fastResume = true;
         }
 
         if (selections && !fastResume) {

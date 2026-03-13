@@ -561,6 +561,82 @@ describe("CLI", () => {
     }
   });
 
+  it("can fast-resume doctor watch even when the user passes the same target explicitly", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-explicit-resume-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-explicit-resume-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("上次那套方式 TraceRoot 也还记着");
+      expect(output).toContain("这次 TraceRoot 会直接按上次那套方式续上");
+      expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
+      expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
+      expect(output).not.toContain("权限收缩预览");
+      expect(output).toContain("TraceRoot Audit Doctor Watch");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can force doctor watch to reconfigure even when a remembered watch session exists", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-reconfigure-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-reconfigure-home-"));
@@ -820,7 +896,8 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
-      expect(output).toContain("TraceRoot 记得你上次把提醒发到 WhatsApp（+4917612345678）");
+      expect(output).toContain("上次那套方式 TraceRoot 也还记着");
+      expect(output).toContain("WhatsApp（+4917612345678）");
       expect(output).toContain("whatsapp → +4917612345678");
     } finally {
       await messenger.close();
