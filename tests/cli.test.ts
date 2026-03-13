@@ -958,6 +958,21 @@ describe("CLI", () => {
         ),
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "mcp-array-config.json"),
+        JSON.stringify(
+          {
+            mcpServers: {
+              poster: {
+                command: ["tsx", "mailer.ts", "--live"]
+              }
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       await mkdir(path.join(tempDir, "skills", "mailer-tool", "src"), { recursive: true });
       await writeFile(
         path.join(tempDir, "skills", "mailer-tool", "src", "send.ts"),
@@ -1028,6 +1043,15 @@ describe("CLI", () => {
           };
         };
       };
+      const mcpArrayConfig = JSON.parse(
+        await readFile(path.join(tempDir, "mcp-array-config.json"), "utf8")
+      ) as {
+        mcpServers: {
+          poster: {
+            command: string[];
+          };
+        };
+      };
       const nestedPackageJson = JSON.parse(
         await readFile(path.join(tempDir, "skills", "mailer-tool", "package.json"), "utf8")
       ) as {
@@ -1065,6 +1089,7 @@ describe("CLI", () => {
       expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「start」 启动脚本");
       expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「mailer-tool」 命令入口");
       expect(tapPlan).toContain("mcp-config.json 里的 MCP 服务 「mailer」 入口");
+      expect(tapPlan).toContain("mcp-array-config.json 里的 MCP 服务 「poster」 入口");
       expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
@@ -1072,6 +1097,8 @@ describe("CLI", () => {
       expect(toolConfig).toContain("node .traceroot/tap/");
       expect(mcpConfig.servers.mailer.command).toBe("node");
       expect(mcpConfig.servers.mailer.args[0]).toContain(".traceroot/tap/");
+      expect(mcpArrayConfig.mcpServers.poster.command[0]).toBe("node");
+      expect(mcpArrayConfig.mcpServers.poster.command[1]).toContain(".traceroot/tap/");
       expect(nestedPackageJson.scripts.start).toContain("node .traceroot/tap/");
       expect(nestedPackageJson.bin["mailer-tool"]).toContain(".traceroot/tap/");
       await expect(

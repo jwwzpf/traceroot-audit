@@ -48,6 +48,7 @@ export interface TapEntrypoint {
   kind: "npm-script" | "bin" | "config-command";
   name: string;
   displayLabel: string;
+  commandValueStyle?: "string" | "argv";
   currentCommand: string;
   suggestedCommand: string;
   currentArgs?: string[];
@@ -302,6 +303,7 @@ interface ConfigEntrypointCandidate {
   kind: "config-command";
   name: string;
   displayLabel: string;
+  commandValueStyle: "string" | "argv";
   command: string;
   args?: string[];
   filePath: string;
@@ -955,6 +957,7 @@ function collectConfigEntrypoints(
           filePath: options.relativePath,
           segments: nextSegments
         }),
+        commandValueStyle: "string",
         command: value,
         args: siblingArgsEntry && isStringArray(siblingArgsEntry[1]) ? [...siblingArgsEntry[1]] : undefined,
         filePath: options.relativePath,
@@ -964,6 +967,31 @@ function collectConfigEntrypoints(
           ? propertyPathForSegments([...segments, siblingArgsEntry[0]])
           : undefined,
         argsPathSegments: siblingArgsEntry ? [...segments, siblingArgsEntry[0]] : undefined,
+        format: options.format
+      });
+      continue;
+    }
+
+    if (
+      isStringArray(value) &&
+      value.length > 0 &&
+      looksLikeCommandField(key) &&
+      looksLikeExecutableCommand(value[0] ?? "")
+    ) {
+      const propertyPath = propertyPathForSegments(nextSegments);
+      candidates.push({
+        kind: "config-command",
+        name: `${options.relativePath}:${propertyPath}`,
+        displayLabel: displayLabelForConfigCandidate({
+          filePath: options.relativePath,
+          segments: nextSegments
+        }),
+        commandValueStyle: "argv",
+        command: value[0]!,
+        args: value.slice(1),
+        filePath: options.relativePath,
+        propertyPath,
+        pathSegments: nextSegments,
         format: options.format
       });
       continue;
@@ -1069,14 +1097,18 @@ function buildSuggestedEntrypoints(options: {
       }
 
       if (candidate.kind === "config-command") {
+        const prefersArgvCommand = candidate.commandValueStyle === "argv";
         return {
           kind: candidate.kind,
           name: candidate.name,
           displayLabel: candidate.displayLabel,
+          commandValueStyle: candidate.commandValueStyle,
           currentCommand: candidate.command,
-          suggestedCommand: candidate.args ? "node" : options.wrapperLaunchCommand,
+          suggestedCommand:
+            prefersArgvCommand || candidate.args ? "node" : options.wrapperLaunchCommand,
           currentArgs: candidate.args,
-          suggestedArgs: candidate.args ? [options.wrapperRelativePath] : undefined,
+          suggestedArgs:
+            prefersArgvCommand || candidate.args ? [options.wrapperRelativePath] : undefined,
           installStatus: "manual",
           filePath: candidate.filePath,
           propertyPath: candidate.propertyPath,
@@ -1290,43 +1322,54 @@ async function installTapEntrypoints(options: {
       }
 
       if (typeof lastSegment === "number") {
-        if (!Array.isArray(cursor) || typeof cursor[lastSegment] !== "string") {
+        if (
+          !Array.isArray(cursor) ||
+          (typeof cursor[lastSegment] !== "string" &&
+            !(entrypoint.commandValueStyle === "argv" && isStringArray(cursor[lastSegment])))
+        ) {
           continue;
         }
 
         const currentValue = cursor[lastSegment];
+        const currentCommandValue =
+          entrypoint.commandValueStyle === "argv" && isStringArray(currentValue)
+            ? currentValue[0]
+            : currentValue;
         const currentArgs =
-          entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
+          entrypoint.commandValueStyle === "argv" && isStringArray(currentValue)
+            ? currentValue.slice(1)
+            : entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
             ? getContainerAtPath(parsed, entrypoint.argsPathSegments)
             : undefined;
         const argsAlreadyMatch =
-          entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
+          entrypoint.commandValueStyle === "argv" && Array.isArray(entrypoint.suggestedArgs)
+            ? Array.isArray(currentArgs) &&
+              JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
+            : entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
             ? Array.isArray(currentArgs) &&
               JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
             : true;
 
-        if (currentValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
+        if (currentCommandValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
           entrypoint.installStatus = "already-installed";
           installedCommands.push({
             kind: entrypoint.kind,
             name: entrypoint.name,
-            beforeCommand: currentValue,
+            beforeCommand: Array.isArray(currentArgs)
+              ? `${String(currentCommandValue)} ${currentArgs.join(" ")}`
+              : String(currentCommandValue),
             afterCommand: Array.isArray(entrypoint.suggestedArgs)
-              ? `${currentValue} ${entrypoint.suggestedArgs.join(" ")}`
-              : currentValue
+              ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
+              : entrypoint.suggestedCommand
           });
           continue;
         }
 
-        if (currentValue !== entrypoint.currentCommand) {
+        if (currentCommandValue !== entrypoint.currentCommand) {
           continue;
         }
 
-        if (
-          entrypoint.argsPathSegments &&
-          Array.isArray(entrypoint.currentArgs) &&
-          Array.isArray(entrypoint.suggestedArgs)
-        ) {
+        if (entrypoint.commandValueStyle === "argv" && Array.isArray(entrypoint.currentArgs)) {
           if (
             !Array.isArray(currentArgs) ||
             JSON.stringify(currentArgs) !== JSON.stringify(entrypoint.currentArgs)
@@ -1335,21 +1378,25 @@ async function installTapEntrypoints(options: {
           }
         }
 
-        if (
+        if (entrypoint.commandValueStyle === "argv") {
+          cursor[lastSegment] = [entrypoint.suggestedCommand, ...(entrypoint.suggestedArgs ?? [])];
+        } else if (
           entrypoint.argsPathSegments &&
           Array.isArray(entrypoint.suggestedArgs) &&
           !setValueAtPath(parsed, entrypoint.argsPathSegments, entrypoint.suggestedArgs)
         ) {
           continue;
+        } else {
+          cursor[lastSegment] = entrypoint.suggestedCommand;
         }
-
-        cursor[lastSegment] = entrypoint.suggestedCommand;
         entrypoint.installStatus = "installed";
         changed = true;
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
-          beforeCommand: entrypoint.currentCommand,
+          beforeCommand: Array.isArray(entrypoint.currentArgs)
+            ? `${entrypoint.currentCommand} ${entrypoint.currentArgs.join(" ")}`
+            : entrypoint.currentCommand,
           afterCommand: Array.isArray(entrypoint.suggestedArgs)
             ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
             : entrypoint.suggestedCommand
@@ -1363,42 +1410,52 @@ async function installTapEntrypoints(options: {
 
       const container = cursor as Record<string, unknown>;
       const currentValue = container[lastSegment];
-      if (typeof currentValue !== "string") {
+      if (
+        typeof currentValue !== "string" &&
+        !(entrypoint.commandValueStyle === "argv" && isStringArray(currentValue))
+      ) {
         continue;
       }
 
+      const currentCommandValue =
+        entrypoint.commandValueStyle === "argv" && isStringArray(currentValue)
+          ? currentValue[0]
+          : currentValue;
       const currentArgs =
-        entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
+        entrypoint.commandValueStyle === "argv" && isStringArray(currentValue)
+          ? currentValue.slice(1)
+          : entrypoint.argsPathSegments && Array.isArray(entrypoint.currentArgs)
           ? getContainerAtPath(parsed, entrypoint.argsPathSegments)
           : undefined;
       const argsAlreadyMatch =
-        entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
+        entrypoint.commandValueStyle === "argv" && Array.isArray(entrypoint.suggestedArgs)
+          ? Array.isArray(currentArgs) &&
+            JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
+          : entrypoint.argsPathSegments && Array.isArray(entrypoint.suggestedArgs)
           ? Array.isArray(currentArgs) &&
             JSON.stringify(currentArgs) === JSON.stringify(entrypoint.suggestedArgs)
           : true;
 
-      if (currentValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
+      if (currentCommandValue === entrypoint.suggestedCommand && argsAlreadyMatch) {
         entrypoint.installStatus = "already-installed";
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
-          beforeCommand: currentValue,
+          beforeCommand: Array.isArray(currentArgs)
+            ? `${String(currentCommandValue)} ${currentArgs.join(" ")}`
+            : String(currentCommandValue),
           afterCommand: Array.isArray(entrypoint.suggestedArgs)
-            ? `${currentValue} ${entrypoint.suggestedArgs.join(" ")}`
-            : currentValue
+            ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
+            : entrypoint.suggestedCommand
         });
         continue;
       }
 
-      if (currentValue !== entrypoint.currentCommand) {
+      if (currentCommandValue !== entrypoint.currentCommand) {
         continue;
       }
 
-      if (
-        entrypoint.argsPathSegments &&
-        Array.isArray(entrypoint.currentArgs) &&
-        Array.isArray(entrypoint.suggestedArgs)
-      ) {
+      if (entrypoint.commandValueStyle === "argv" && Array.isArray(entrypoint.currentArgs)) {
         if (
           !Array.isArray(currentArgs) ||
           JSON.stringify(currentArgs) !== JSON.stringify(entrypoint.currentArgs)
@@ -1407,21 +1464,25 @@ async function installTapEntrypoints(options: {
         }
       }
 
-      if (
+      if (entrypoint.commandValueStyle === "argv") {
+        container[lastSegment] = [entrypoint.suggestedCommand, ...(entrypoint.suggestedArgs ?? [])];
+      } else if (
         entrypoint.argsPathSegments &&
         Array.isArray(entrypoint.suggestedArgs) &&
         !setValueAtPath(parsed, entrypoint.argsPathSegments, entrypoint.suggestedArgs)
       ) {
         continue;
+      } else {
+        container[lastSegment] = entrypoint.suggestedCommand;
       }
-
-      container[lastSegment] = entrypoint.suggestedCommand;
       entrypoint.installStatus = "installed";
       changed = true;
       installedCommands.push({
         kind: entrypoint.kind,
         name: entrypoint.name,
-        beforeCommand: entrypoint.currentCommand,
+        beforeCommand: Array.isArray(entrypoint.currentArgs)
+          ? `${entrypoint.currentCommand} ${entrypoint.currentArgs.join(" ")}`
+          : entrypoint.currentCommand,
         afterCommand: Array.isArray(entrypoint.suggestedArgs)
           ? `${entrypoint.suggestedCommand} ${entrypoint.suggestedArgs.join(" ")}`
           : entrypoint.suggestedCommand
@@ -1619,7 +1680,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
       `- **风险级别：** ${wrapper.severity}`,
       `- **原始脚本：** \`${path.relative(rootDir, wrapper.sourcePath).replace(/\\/g, "/")}\``,
       `- **TraceRoot 给你准备好的接入文件：** \`${path.relative(rootDir, wrapper.wrapperPath).replace(/\\/g, "/")}\``,
-      `- **如果你要手动接入，直接用这个命令：** \`${wrapper.launchCommand}\``,
+      `- **TraceRoot 会用它来留下审计记录：** \`${wrapper.launchCommand}\``,
       `- **为什么值得先接它：** ${wrapper.recommendation}`,
       ""
     );
