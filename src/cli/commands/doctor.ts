@@ -401,6 +401,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
       "after preparing the safer bundle, keep watching this target for new drift"
     )
     .option(
+      "--reconfigure",
+      "ignore remembered target, boundary, and reminder settings, and walk through setup again"
+    )
+    .option(
       "--interval <seconds>",
       "when used with --watch, seconds between checks",
       "60"
@@ -432,6 +436,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           host?: boolean;
           includeCwd?: boolean;
           watch?: boolean;
+          reconfigure?: boolean;
           interval?: string;
           cycles?: string;
           notifyWebhook?: string;
@@ -452,7 +457,18 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         if (!preferredTarget && !options.host) {
           const recentTarget = await loadRecentDoctorTarget();
           if (recentTarget) {
-            if (options.watch && !alreadyConfiguredNotification) {
+            if (options.reconfigure) {
+              runtime.io.stdout(
+                `🧠 TraceRoot 记得你上次陪跑的是：${recentTargetLabel(recentTarget)}。\n`
+              );
+              runtime.io.stdout(
+                "↩️ 这次会在同一个位置重新帮你设置，不过不会沿用旧的边界和提醒方式。\n"
+              );
+              preferredTarget = recentTarget;
+              reusedRecentTarget = true;
+            }
+
+            if (!options.reconfigure && options.watch && !alreadyConfiguredNotification) {
               try {
                 const resolvedRecentTarget = await resolveTarget(recentTarget);
                 const recentProfile = await loadHardeningProfile(
@@ -479,17 +495,13 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                       openclawTarget: recentPreferences!.notifications.openclawTarget
                     })}。\n`
                   );
-                  offeredRecentTargetFastResume = true;
-                  const resumeRecentTarget = await runtime.prompter.confirm(
-                    "这次要直接按上次那套方式继续陪跑吗？",
-                    true
+                  runtime.io.stdout(
+                    "↩️ 这次 TraceRoot 会直接按上次那套方式续上；如果你想重新选工作流或提醒方式，可以加上 --reconfigure。\n"
                   );
-
-                  if (resumeRecentTarget) {
-                    preferredTarget = recentTarget;
-                    reusedRecentTarget = true;
-                    preConfirmedFastResume = true;
-                  }
+                  offeredRecentTargetFastResume = true;
+                  preferredTarget = recentTarget;
+                  reusedRecentTarget = true;
+                  preConfirmedFastResume = true;
                 }
               } catch {
                 // fall back to the regular recent-target prompt below
@@ -532,12 +544,14 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         const resolvedTarget = await resolveTarget(effectiveTarget);
         const existingProfile = await loadHardeningProfile(resolvedTarget.rootDir);
-        const savedPreferences = !alreadyConfiguredNotification
+        const savedPreferences = !alreadyConfiguredNotification && !options.reconfigure
           ? await loadWatchPreferences(resolvedTarget.rootDir)
           : null;
-        let selections =
-          existingProfile.profile && selectionsFromSavedProfile(existingProfile.profile);
+        let selections = !options.reconfigure && existingProfile.profile
+          ? selectionsFromSavedProfile(existingProfile.profile)
+          : null;
         const canFastResume =
+          !options.reconfigure &&
           Boolean(options.watch) &&
           reusedRecentTarget &&
           Boolean(selections) &&
