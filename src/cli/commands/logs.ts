@@ -114,6 +114,12 @@ function summarizeEvents(events: AuditEvent[]): {
   boundaryEvents: number;
   driftEvents: number;
   latestAttention: AuditEvent | null;
+  attentionActions: Array<{
+    actionLabel: string;
+    count: number;
+    failed: number;
+    severity: AuditSeverity;
+  }>;
 } {
   let critical = 0;
   let highRisk = 0;
@@ -123,6 +129,10 @@ function summarizeEvents(events: AuditEvent[]): {
   let boundaryEvents = 0;
   let driftEvents = 0;
   let latestAttention: AuditEvent | null = null;
+  const attentionActions = new Map<
+    string,
+    { actionLabel: string; count: number; failed: number; severity: AuditSeverity }
+  >();
 
   for (const event of events) {
     if (event.severity === "critical") critical += 1;
@@ -132,6 +142,30 @@ function summarizeEvents(events: AuditEvent[]): {
 
     if (event.category === "action-event") {
       actionEvents += 1;
+
+      if (event.severity !== "safe") {
+        const label = actionLabel(event.action);
+        const existing = attentionActions.get(label) ?? {
+          actionLabel: label,
+          count: 0,
+          failed: 0,
+          severity: event.severity
+        };
+
+        existing.count += 1;
+        if (event.status === "failed") {
+          existing.failed += 1;
+        }
+        if (event.severity === "critical") {
+          existing.severity = "critical";
+        } else if (event.severity === "high-risk" && existing.severity !== "critical") {
+          existing.severity = "high-risk";
+        } else if (event.severity === "risky" && existing.severity === "safe") {
+          existing.severity = "risky";
+        }
+
+        attentionActions.set(label, existing);
+      }
     }
 
     if (event.category === "boundary-drift") {
@@ -160,7 +194,23 @@ function summarizeEvents(events: AuditEvent[]): {
     actionEvents,
     boundaryEvents,
     driftEvents,
-    latestAttention
+    latestAttention,
+    attentionActions: [...attentionActions.values()]
+      .sort((left, right) => {
+        const severityWeight = (severity: AuditSeverity): number => {
+          if (severity === "critical") return 4;
+          if (severity === "high-risk") return 3;
+          if (severity === "risky") return 2;
+          return 1;
+        };
+
+        return (
+          severityWeight(right.severity) - severityWeight(left.severity) ||
+          right.count - left.count ||
+          right.failed - left.failed
+        );
+      })
+      .slice(0, 3)
   };
 }
 
@@ -262,6 +312,22 @@ async function printLogs(
         lines.push(`- 建议：${summary.latestAttention.recommendation}`);
       }
       lines.push("");
+    }
+
+    if (summary.attentionActions.length > 0) {
+      lines.push("🔥 今天最值得留意的动作：");
+      for (const action of summary.attentionActions) {
+        const prefix = severityIcon(action.severity);
+        const failureSuffix = action.failed > 0 ? `，其中 ${action.failed} 次没有完成` : "";
+        lines.push(`- ${prefix} ${action.actionLabel}：出现了 ${action.count} 次${failureSuffix}`);
+      }
+      lines.push("");
+    } else if (summary.actionEvents === 0) {
+      lines.push(
+        "🫶 今天还没有触发值得单独提醒的 agent 动作。",
+        "   TraceRoot 目前主要在盯边界有没有重新变宽，以及新的风险信号有没有冒出来。",
+        ""
+      );
     }
 
     lines.push("📘 最近发生的事：", "");

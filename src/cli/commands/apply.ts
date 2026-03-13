@@ -89,6 +89,9 @@ export function registerApplyCommand(program: Command, runtime: CliRuntime): voi
         lines.push(
           `- 以后想回看 agent 刚才到底做了什么，可以直接运行：traceroot-audit logs "${displayUserPath(resolvedTarget.rootDir)}"`
         );
+        lines.push(
+          `- 想只看今天最值得注意的动作，可以直接运行：traceroot-audit logs "${displayUserPath(resolvedTarget.rootDir)}" --today`
+        );
 
         if (bundle.tapPendingActionsCount > 0) {
           lines.push(

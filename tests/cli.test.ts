@@ -145,6 +145,7 @@ describe("CLI", () => {
       expect(output).toContain("对外发邮件");
       expect(output).toContain("已经自动接好 1 个高风险动作入口");
       expect(output).toContain("traceroot-audit logs");
+      expect(output).toContain("--today");
       expect(output).toContain("traceroot-audit doctor");
       expect(output).toContain("--watch --interval 60");
     } finally {
@@ -270,6 +271,7 @@ describe("CLI", () => {
       expect(logsOutput).toContain("当前运行态重新变宽了");
       expect(logsOutput).toContain("TraceRoot 已经开始陪跑这个 agent");
       expect(logsOutput).toContain("风险概览");
+      expect(logsOutput).toContain("今天还没有触发值得单独提醒的 agent 动作");
       expect(logsOutput).toContain("最近发生的事");
       expect(logsOutput).toContain("当前配置仍然比你批准的边界更宽");
     } finally {
@@ -334,6 +336,8 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("今天最值得留意的动作");
+      expect(logsCapture.read().stdout).toContain("对外发邮件：出现了 1 次");
       expect(logsCapture.read().stdout).toContain("Agent 开始尝试：对外发邮件");
       expect(logsCapture.read().stdout).toContain("Agent 已完成：对外发邮件");
       expect(logsCapture.read().stdout).toContain("TraceRoot 建议先做: Require confirmation before outbound email actions.");
@@ -1091,6 +1095,7 @@ describe("CLI", () => {
       expect(capture.read().stdout).toContain("对外发邮件");
       expect(capture.read().stdout).toContain("已经自动接好");
       expect(capture.read().stdout).toContain("traceroot-audit logs");
+      expect(capture.read().stdout).toContain("--today");
       expect(capture.read().stdout).not.toContain("看细节就行");
       expect(envTemplate).toContain("SMTP_API_KEY=");
       expect(envTemplate).toContain("# AWS_SECRET_ACCESS_KEY=");
