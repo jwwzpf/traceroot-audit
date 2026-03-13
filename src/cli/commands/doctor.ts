@@ -37,6 +37,7 @@ function renderDoctorSummary(options: {
 
   const currentPower = formatCapabilities(options.plan.currentCapabilities);
   const approvedPower = formatCapabilities(options.plan.recommendedCapabilities);
+  const capabilitiesChanged = currentPower !== approvedPower;
 
   const lines = [
     "TraceRoot Audit Doctor",
@@ -44,10 +45,25 @@ function renderDoctorSummary(options: {
     "",
     `🎯 当前处理位置：${displayUserPath(options.plan.rootDir)}`,
     `🧩 你刚批准的工作流：${options.selectedWorkflows.join(", ")}`,
-    "",
-    "📉 权限收缩预览：",
-    `- 现在：${currentPower}`,
-    `- 收紧后：${approvedPower}`,
+    "🛠️ TraceRoot 正在帮你收紧边界，并准备更安全的补丁包...",
+    ""
+  ];
+
+  if (capabilitiesChanged) {
+    lines.push(
+      "📉 权限收缩预览：",
+      `- 现在：${currentPower}`,
+      `- 收紧后：${approvedPower}`
+    );
+  } else {
+    lines.push(
+      "📉 这次收紧的重点：",
+      `- 动作能力：${currentPower}`,
+      "- 这次不需要再给 agent 更多动作能力，TraceRoot 会重点收紧它的运行方式。"
+    );
+  }
+
+  lines.push(
     `- 审批方式：${options.plan.approvalPolicy}`,
     `- 文件写入范围：${options.plan.fileWritePolicy}`,
     `- 网络暴露范围：${options.plan.exposurePolicy}`,
@@ -55,7 +71,7 @@ function renderDoctorSummary(options: {
     "✨ TraceRoot 已经先帮你准备好了这些内容：",
     `- 📜 更小权限的 manifest 建议：${displayPath(options.bundle.manifestPath)}`,
     `- 🧭 应用步骤说明：${displayPath(options.bundle.planPath)}`
-  ];
+  );
 
   if (options.bundle.envExamplePath) {
     lines.push(`- 🔐 更干净的运行时环境变量模板：${displayPath(options.bundle.envExamplePath)}`);
@@ -251,15 +267,6 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         const selections = await promptHardeningSelections(runtime);
         const plan = await buildHardeningPlan(effectiveTarget, selections);
-
-        runtime.io.stdout(
-          [
-            `🎯 当前处理位置：${displayUserPath(effectiveTarget)}`,
-            `🧭 检测类型：${plan.surfaceLabel}`,
-            `🧩 你选择的工作流：${plan.selectedProfiles.map((profile) => `${profile.icon} ${profile.title}`).join(", ")}`,
-            "🛠️ TraceRoot 正在帮你收紧边界，并准备更安全的补丁包..."
-          ].join("\n") + "\n"
-        );
 
         const shouldWrite = await runtime.prompter.confirm(
           "📦 Generate the safer bundle now?",
