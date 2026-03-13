@@ -51,7 +51,10 @@ export function registerHardenCommand(program: Command, runtime: CliRuntime): vo
           return;
         }
 
-        const selections: HardeningSelections = await promptHardeningSelections(runtime, target);
+        const selections: HardeningSelections = await promptHardeningSelections(
+          runtime,
+          effectiveTarget
+        );
         const plan = await buildHardeningPlan(effectiveTarget, selections);
 
         runtime.io.stdout(renderHardeningHumanOutput(plan));

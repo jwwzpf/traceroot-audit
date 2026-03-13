@@ -167,8 +167,16 @@ function createStaticPrompter(answers: {
   const confirmAnswers = [...(answers.confirm ?? [])];
 
   return {
-    async chooseOne(_question: string, choices: CliChoice[]) {
+    async chooseOne(
+      _question: string,
+      choices: CliChoice[],
+      options: { defaultValue?: string } = {}
+    ) {
       const answer = chooseOneAnswers.shift();
+
+      if (!answer && options.defaultValue && choices.some((choice) => choice.value === options.defaultValue)) {
+        return options.defaultValue;
+      }
 
       if (!answer && choices.some((choice) => choice.value === "local-only")) {
         return "local-only";
@@ -342,7 +350,6 @@ describe("CLI", () => {
         ["node", "traceroot-audit", "doctor", tempDir],
         capture.io,
         createStaticPrompter({
-          chooseOne: ["always-confirm", "no-write", "localhost-only"],
           confirm: [true]
         })
       );
@@ -927,7 +934,7 @@ describe("CLI", () => {
       expect(output).toContain(
         "TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：WhatsApp（+4917611122233）"
       );
-      expect(output).toContain("whatsapp → +4917611122233");
+      expect(output).toContain("📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：WhatsApp（+4917611122233）");
     } finally {
       await messenger.close();
       if (previousHome === undefined) {
@@ -1005,7 +1012,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("上次那套方式 TraceRoot 也还记着");
       expect(output).toContain("WhatsApp（+4917612345678）");
-      expect(output).toContain("whatsapp → +4917612345678");
+      expect(output).toContain("📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：WhatsApp（+4917612345678）");
     } finally {
       await messenger.close();
       if (previousHome === undefined) {
@@ -1732,7 +1739,7 @@ describe("CLI", () => {
 
       expect(tapExitCode).toBe(0);
       expect(watchExitCode).toBe(0);
-      expect(watchOutput).toContain("whatsapp → +4917612345678");
+      expect(watchOutput).toContain("📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：WhatsApp（+4917612345678）");
       expect(argv).toContain("message");
       expect(argv).toContain("send");
       expect(argv).toContain("--channel");
@@ -1845,6 +1852,80 @@ describe("CLI", () => {
         delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
       } else {
         process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 10000);
+
+  it("can default to a detected chat reminder route without extra choices", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-detected-channel-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-detected-channel-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain(
+        "TraceRoot 看起来你这次更像想让 AI 做这些事：📧 邮件整理与回复。"
+      );
+      expect(output).toContain("TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：Telegram（@ops-room）");
+      expect(output).toContain("直接回车就可以先用 TraceRoot 推荐的那个入口");
+      expect(output).toContain("Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
       }
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });

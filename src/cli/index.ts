@@ -36,7 +36,11 @@ export interface CliChoice {
 }
 
 export interface CliPrompter {
-  chooseOne(question: string, choices: CliChoice[]): Promise<string>;
+  chooseOne(
+    question: string,
+    choices: CliChoice[],
+    options?: { defaultValue?: string }
+  ): Promise<string>;
   chooseMany(
     question: string,
     choices: CliChoice[],
@@ -67,16 +71,41 @@ function createDefaultPrompter(): CliPrompter {
     }
   }
 
-  async function chooseOne(question: string, choices: CliChoice[]): Promise<string> {
+  async function chooseOne(
+    question: string,
+    choices: CliChoice[],
+    options: { defaultValue?: string } = {}
+  ): Promise<string> {
     return withInterface(async (prompt) => {
+      const defaultValue =
+        options.defaultValue && choices.some((choice) => choice.value === options.defaultValue)
+          ? options.defaultValue
+          : undefined;
+      const defaultIndex =
+        defaultValue !== undefined
+          ? choices.findIndex((choice) => choice.value === defaultValue) + 1
+          : undefined;
+
       while (true) {
         process.stdout.write(`${question}\n`);
         choices.forEach((choice, index) => {
           const hint = choice.hint ? ` — ${choice.hint}` : "";
-          process.stdout.write(`  ${index + 1}. ${choice.label}${hint}\n`);
+          const recommended = defaultValue === choice.value ? " [推荐]" : "";
+          process.stdout.write(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
         });
 
-        const answer = (await prompt.question("请输入编号：")).trim();
+        const answer = (
+          await prompt.question(
+            defaultIndex
+              ? `请输入编号（直接回车采用 TraceRoot 的推荐：${defaultIndex}）：`
+              : "请输入编号："
+          )
+        ).trim();
+
+        if (answer === "" && defaultValue) {
+          return defaultValue;
+        }
+
         const index = Number.parseInt(answer, 10);
 
         if (Number.isInteger(index) && index >= 1 && index <= choices.length) {

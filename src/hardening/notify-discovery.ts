@@ -40,12 +40,19 @@ function firstMatch(content: string, pattern: RegExp): string | undefined {
   return pattern.exec(content)?.[1]?.trim();
 }
 
+function propertyPattern(name: string): RegExp {
+  return new RegExp(
+    `["']?${name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}["']?\\s*[:=]\\s*["']?([^\\s"',\\]}]+)["']?`,
+    "i"
+  );
+}
+
 function extractTargetCandidates(channel: string, content: string): string[] {
   const genericTargets = uniqueStrings([
-    firstMatch(content, /\btarget\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i),
-    firstMatch(content, /\brecipient\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i),
-    firstMatch(content, /\bdestination\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i),
-    firstMatch(content, /\bto\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i)
+    firstMatch(content, propertyPattern("target")),
+    firstMatch(content, propertyPattern("recipient")),
+    firstMatch(content, propertyPattern("destination")),
+    firstMatch(content, propertyPattern("to"))
   ]);
 
   if (channel === "whatsapp" || channel === "signal") {
@@ -66,8 +73,10 @@ function extractTargetCandidates(channel: string, content: string): string[] {
   if (channel === "slack" || channel === "discord" || channel === "mattermost" || channel === "msteams" || channel === "googlechat" || channel === "imessage") {
     const namedChannels = [...content.matchAll(/(#[A-Za-z0-9._-]{2,})/g)].map((match) => match[1]);
     const ids = uniqueStrings([
-      firstMatch(content, /\bchannel[_-]?id\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i),
-      firstMatch(content, /\broom[_-]?id\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i)
+      firstMatch(content, propertyPattern("channel_id")),
+      firstMatch(content, propertyPattern("channel-id")),
+      firstMatch(content, propertyPattern("room_id")),
+      firstMatch(content, propertyPattern("room-id"))
     ]);
     return uniqueStrings([...genericTargets, ...namedChannels, ...ids]);
   }
@@ -77,8 +86,10 @@ function extractTargetCandidates(channel: string, content: string): string[] {
 
 function extractAccountCandidates(content: string): string[] {
   return uniqueStrings([
-    firstMatch(content, /\baccount(?:[_-]?name)?\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i),
-    firstMatch(content, /\bprofile\s*[:=]\s*["']?([^\s"',\]}]+)["']?/i)
+    firstMatch(content, propertyPattern("account")),
+    firstMatch(content, propertyPattern("account_name")),
+    firstMatch(content, propertyPattern("account-name")),
+    firstMatch(content, propertyPattern("profile"))
   ]);
 }
 

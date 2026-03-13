@@ -39,6 +39,7 @@ import {
   getHardeningProfileById,
   type HardeningIntentId
 } from "../hardening/profiles";
+import { displayNotifyChannel } from "../hardening/notify-discovery";
 import { resolveTarget } from "../utils/files";
 import { displayUserPath } from "../utils/paths";
 
@@ -745,7 +746,7 @@ export async function runTargetWatch(options: {
 
   if (notificationConfig.openclawChannel && notificationConfig.openclawTarget) {
     initialLines.push(
-      `📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：${notificationConfig.openclawChannel} → ${notificationConfig.openclawTarget}`,
+      `📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：${displayNotifyChannel(notificationConfig.openclawChannel)}（${notificationConfig.openclawTarget}）`,
       ""
     );
   } else if (hasNotificationChannel(notificationConfig)) {

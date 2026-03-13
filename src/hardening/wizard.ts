@@ -71,10 +71,9 @@ const intentSignalMatchers: Record<HardeningIntentId, RegExp[]> = {
     /\bchat\b/i,
     /\bsupport\b/i,
     /\bmessage\b/i,
-    /\bslack\b/i,
-    /\btelegram\b/i,
-    /\bwhatsapp\b/i,
-    /\bdiscord\b/i,
+    /\bcustomer\b/i,
+    /\bticket\b/i,
+    /\bhelpdesk\b/i,
     /\btwilio\b/i
   ],
   "market-monitoring": [
@@ -298,16 +297,19 @@ export async function promptHardeningSelections(
     { defaultValues: suggestedIntentIds }
   )) as HardeningIntentId[];
   const outboundApproval = (await runtime.prompter.chooseOne(
-    "🛑 How should outbound side-effecting actions behave?",
-    approvalChoices()
+    "🛑 外发或副作用动作，TraceRoot 默认该怎么帮你守住？",
+    approvalChoices(),
+    { defaultValue: "always-confirm" }
   )) as OutboundApprovalMode;
   const filesystemScope = (await runtime.prompter.chooseOne(
-    "📁 How much local file write access should this workflow have?",
-    fileScopeChoices()
+    "📁 这套工作流最多该碰到多大的本地写文件范围？",
+    fileScopeChoices(),
+    { defaultValue: "workspace-only" }
   )) as FilesystemScope;
   const exposureMode = (await runtime.prompter.chooseOne(
-    "🌐 Should this runtime be reachable from other devices?",
-    exposureChoices()
+    "🌐 这个运行态要不要允许其他设备连进来？",
+    exposureChoices(),
+    { defaultValue: "localhost-only" }
   )) as ExposureMode;
 
   return {
@@ -357,40 +359,22 @@ export async function promptNotificationSelection(
         )
         .join("、")}。\n`
     );
-  }
-
-  if (likelyChannels.length === 1 && likelyChannels[0]?.target) {
-    const detected = likelyChannels[0];
-    const useDetectedRoute = await runtime.prompter.confirm(
-      `📲 TraceRoot 看起来已经知道可以把提醒发到 ${displayNotifyChannel(detected.channel)}（${detected.target}）。要直接用这个入口吗？`,
-      true
+    runtime.io.stdout(
+      "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
     );
-
-    if (useDetectedRoute) {
-      let account = detected.account;
-
-      if (!account) {
-        const wantsAccount = await runtime.prompter.confirm(
-          "👤 这个聊天入口还需要指定 OpenClaw 账户名吗？",
-          false
-        );
-        account = wantsAccount
-          ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
-          : undefined;
-      }
-
-      return {
-        mode: "channel",
-        channel: detected.channel,
-        target: detected.target,
-        account
-      };
-    }
+  } else {
+    runtime.io.stdout(
+      "💡 TraceRoot 暂时还没认出你已经接好的聊天入口，所以会默认先只保留本地审计时间线。\n"
+    );
   }
+
+  const defaultNotificationChoice =
+    likelyChannels[0]?.channel ?? "local-only";
 
   const choice = await runtime.prompter.chooseOne(
     "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",
-    quickChoices
+    quickChoices,
+    { defaultValue: defaultNotificationChoice }
   );
 
   if (choice === "local-only") {
@@ -419,25 +403,14 @@ export async function promptNotificationSelection(
   const target =
     detectedChannel?.target ??
     (await runtime.prompter.input(
-      `📨 TraceRoot 应该把提醒发到哪里？（${channel}）`,
+      `📨 TraceRoot 应该把提醒发到哪里？（${displayNotifyChannel(channel)}）`,
       { allowEmpty: false }
     ));
-
-  let account = detectedChannel?.account;
-  if (!account) {
-    const wantsAccount = await runtime.prompter.confirm(
-      "👤 这个聊天入口需要指定 OpenClaw 账户名吗？",
-      false
-    );
-    account = wantsAccount
-      ? await runtime.prompter.input("填写账户名", { allowEmpty: false })
-      : undefined;
-  }
 
   return {
     mode: "channel",
     channel,
     target,
-    account
+    account: detectedChannel?.account
   };
 }
