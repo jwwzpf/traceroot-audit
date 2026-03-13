@@ -47,6 +47,7 @@ export interface TapWrapperFile {
 export interface TapEntrypoint {
   kind: "npm-script" | "bin" | "config-command";
   name: string;
+  displayLabel: string;
   currentCommand: string;
   suggestedCommand: string;
   currentArgs?: string[];
@@ -290,6 +291,7 @@ interface TapActionSpec {
 interface PackageEntrypointCandidate {
   kind: "npm-script" | "bin";
   name: string;
+  displayLabel: string;
   command: string;
   filePath: string;
   propertyPath: string;
@@ -299,6 +301,7 @@ interface PackageEntrypointCandidate {
 interface ConfigEntrypointCandidate {
   kind: "config-command";
   name: string;
+  displayLabel: string;
   command: string;
   args?: string[];
   filePath: string;
@@ -728,6 +731,11 @@ async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypo
           candidates.push({
             kind: "npm-script",
             name,
+            displayLabel: displayLabelForPackageCandidate({
+              kind: "npm-script",
+              name,
+              filePath: relativeFilePath
+            }),
             command: value,
             filePath: relativeFilePath,
             propertyPath: `scripts.${name}`,
@@ -743,6 +751,14 @@ async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypo
             parsed.name ||
             path.basename(path.dirname(packageJsonPath)) ||
             path.basename(rootDir),
+          displayLabel: displayLabelForPackageCandidate({
+            kind: "bin",
+            name:
+              parsed.name ||
+              path.basename(path.dirname(packageJsonPath)) ||
+              path.basename(rootDir),
+            filePath: relativeFilePath
+          }),
           command: parsed.bin,
           filePath: relativeFilePath,
           propertyPath: "bin",
@@ -757,6 +773,11 @@ async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypo
           candidates.push({
             kind: "bin",
             name,
+            displayLabel: displayLabelForPackageCandidate({
+              kind: "bin",
+              name,
+              filePath: relativeFilePath
+            }),
             command: value,
             filePath: relativeFilePath,
             propertyPath: `bin.${name}`,
@@ -773,7 +794,7 @@ async function detectPackageEntrypoints(rootDir: string): Promise<PackageEntrypo
 }
 
 function looksLikeCommandField(key: string): boolean {
-  return /(command|entrypoint|exec|run|script)/i.test(key);
+  return /^(command|cmd|program|entrypoint|exec|run|script)$/i.test(key);
 }
 
 function looksLikeArgsField(key: string): boolean {
@@ -805,6 +826,89 @@ function propertyPathForSegments(segments: Array<string | number>): string {
 
     return accumulator.length === 0 ? segment : `${accumulator}.${segment}`;
   }, "");
+}
+
+function quotedName(name: string): string {
+  return `「${name}」`;
+}
+
+function displayLabelForPackageCandidate(candidate: {
+  kind: "npm-script" | "bin";
+  name: string;
+  filePath: string;
+}): string {
+  if (candidate.kind === "npm-script") {
+    return `${candidate.filePath} 里的 ${quotedName(candidate.name)} 启动脚本`;
+  }
+
+  return `${candidate.filePath} 里的 ${quotedName(candidate.name)} 命令入口`;
+}
+
+function lastNamedSegment(
+  segments: Array<string | number>,
+  anchor: string
+): string | undefined {
+  const index = segments.findIndex(
+    (segment) => typeof segment === "string" && segment.toLowerCase() === anchor.toLowerCase()
+  );
+
+  if (index >= 0) {
+    const next = segments[index + 1];
+    if (typeof next === "string" && next.length > 0) {
+      return next;
+    }
+  }
+
+  return undefined;
+}
+
+function isStructuralFieldName(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return /^(command|cmd|program|entrypoint|exec|run|script|args|arguments|argv)$/i.test(value);
+}
+
+function displayLabelForConfigCandidate(options: {
+  filePath: string;
+  segments: Array<string | number>;
+}): string {
+  const normalizedFilePath = options.filePath.replace(/\\/g, "/");
+  const lowerFilePath = normalizedFilePath.toLowerCase();
+  const lowerSegments = options.segments
+    .filter((segment): segment is string => typeof segment === "string")
+    .map((segment) => segment.toLowerCase());
+
+  const mcpServerName =
+    lastNamedSegment(options.segments, "mcpServers") ??
+    lastNamedSegment(options.segments, "servers");
+
+  if (mcpServerName && (/mcp/.test(lowerFilePath) || lowerSegments.includes("mcpservers"))) {
+    return `${normalizedFilePath} 里的 MCP 服务 ${quotedName(mcpServerName)} 入口`;
+  }
+
+  const toolName =
+    lastNamedSegment(options.segments, "tools") ?? lastNamedSegment(options.segments, "tool");
+  if (toolName && !isStructuralFieldName(toolName)) {
+    return `${normalizedFilePath} 里的工具 ${quotedName(toolName)} 入口`;
+  }
+
+  const skillName =
+    lastNamedSegment(options.segments, "skills") ?? lastNamedSegment(options.segments, "skill");
+  if (skillName && !isStructuralFieldName(skillName)) {
+    return `${normalizedFilePath} 里的技能 ${quotedName(skillName)} 入口`;
+  }
+
+  if (/openclaw|claw/.test(lowerFilePath) || lowerSegments.includes("runtime")) {
+    return `${normalizedFilePath} 里的运行时动作入口`;
+  }
+
+  if (lowerSegments.includes("tool")) {
+    return `${normalizedFilePath} 里的工具入口`;
+  }
+
+  return `${normalizedFilePath} 里的动作入口`;
 }
 
 function collectConfigEntrypoints(
@@ -847,6 +951,10 @@ function collectConfigEntrypoints(
       candidates.push({
         kind: "config-command",
         name: `${options.relativePath}:${propertyPath}`,
+        displayLabel: displayLabelForConfigCandidate({
+          filePath: options.relativePath,
+          segments: nextSegments
+        }),
         command: value,
         args: siblingArgsEntry && isStringArray(siblingArgsEntry[1]) ? [...siblingArgsEntry[1]] : undefined,
         filePath: options.relativePath,
@@ -950,6 +1058,7 @@ function buildSuggestedEntrypoints(options: {
         return {
           kind: candidate.kind,
           name: candidate.name,
+          displayLabel: candidate.displayLabel,
           currentCommand: candidate.command,
           suggestedCommand: options.wrapperLaunchCommand,
           installStatus: "manual",
@@ -963,6 +1072,7 @@ function buildSuggestedEntrypoints(options: {
         return {
           kind: candidate.kind,
           name: candidate.name,
+          displayLabel: candidate.displayLabel,
           currentCommand: candidate.command,
           suggestedCommand: candidate.args ? "node" : options.wrapperLaunchCommand,
           currentArgs: candidate.args,
@@ -980,6 +1090,7 @@ function buildSuggestedEntrypoints(options: {
       return {
         kind: candidate.kind,
         name: candidate.name,
+        displayLabel: candidate.displayLabel,
         currentCommand: candidate.command,
         suggestedCommand:
           candidate.kind === "bin"
@@ -1518,11 +1629,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
       for (const entrypoint of wrapper.entrypoints) {
         if (entrypoint.kind === "npm-script" || entrypoint.kind === "bin") {
-          const locationLabel = entrypoint.filePath
-            ? `${entrypoint.filePath} → ${entrypoint.propertyPath}`
-            : entrypoint.kind === "npm-script"
-              ? `npm run ${entrypoint.name}`
-              : entrypoint.name;
+          const locationLabel = entrypoint.displayLabel;
 
           if (entrypoint.installStatus === "installed") {
             lines.push(
@@ -1553,7 +1660,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
         if (entrypoint.kind === "config-command") {
           if (entrypoint.installStatus === "installed") {
             lines.push(
-              `- 已自动接好：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+              `- 已自动接好：\`${entrypoint.displayLabel}\``,
               "- 这个配置入口已经被纳入 TraceRoot 的动作审计时间线。",
               ""
             );
@@ -1562,7 +1669,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
 
           if (entrypoint.installStatus === "already-installed") {
             lines.push(
-              `- 已在保护中：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+              `- 已在保护中：\`${entrypoint.displayLabel}\``,
               "- TraceRoot 已经在记录这个配置入口触发的动作。",
               ""
             );
@@ -1570,7 +1677,7 @@ async function buildTapWrappers(rootDir: string, profileSurface: string): Promis
           }
 
           lines.push(
-            `- 还没自动接上：\`${entrypoint.filePath} → ${entrypoint.propertyPath}\``,
+            `- 还没自动接上：\`${entrypoint.displayLabel}\``,
             `- 如果你之后想把它也纳入审计时间线，可以打开这个说明文件继续看：\`${path.relative(rootDir, tapPlanPath).replace(/\\/g, "/")}\``,
             ""
           );

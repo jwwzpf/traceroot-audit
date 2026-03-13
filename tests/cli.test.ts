@@ -1060,9 +1060,10 @@ describe("CLI", () => {
       expect(tapPlan).toContain("TraceRoot 动作审计说明");
       expect(tapPlan).toContain("send-email");
       expect(tapPlan).toContain("已自动接好");
-      expect(tapPlan).toContain("tool-config.yaml → tool.command");
-      expect(tapPlan).toContain("skills/mailer-tool/package.json → scripts.start");
-      expect(tapPlan).toContain("skills/mailer-tool/package.json → bin.mailer-tool");
+      expect(tapPlan).toContain("tool-config.yaml 里的工具入口");
+      expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「start」 启动脚本");
+      expect(tapPlan).toContain("skills/mailer-tool/package.json 里的 「mailer-tool」 命令入口");
+      expect(tapPlan).toContain("mcp-config.json 里的 MCP 服务 「mailer」 入口");
       expect(tapPlan).toContain("node .traceroot/tap/");
       const packageJson = await readFile(path.join(tempDir, "package.json"), "utf8");
       expect(packageJson).toContain("node .traceroot/tap/");
