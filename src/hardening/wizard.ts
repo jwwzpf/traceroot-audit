@@ -359,17 +359,35 @@ export async function promptNotificationSelection(
         )
         .join("、")}。\n`
     );
-    runtime.io.stdout(
-      "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
-    );
   } else {
     runtime.io.stdout(
-      "💡 TraceRoot 暂时还没认出你已经接好的聊天入口，所以会默认先只保留本地审计时间线。\n"
+      "💡 TraceRoot 暂时还没认出你已经接好的聊天入口，所以这次会先只保留本地审计时间线。\n"
     );
+    return { mode: "local-only" };
+  }
+
+  if (likelyChannels.length === 1 && likelyChannels[0]?.target) {
+    const detected = likelyChannels[0];
+    runtime.io.stdout(
+      `💡 TraceRoot 这次会直接把高风险提醒顺手发到 ${displayNotifyChannel(
+        detected.channel
+      )}（${detected.target}）。如果你之后想改提醒方式，再重新运行 doctor 就可以。\n`
+    );
+
+    return {
+      mode: "channel",
+      channel: detected.channel,
+      target: detected.target,
+      account: detected.account
+    };
   }
 
   const defaultNotificationChoice =
     likelyChannels[0]?.channel ?? "local-only";
+
+  runtime.io.stdout(
+    "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
+  );
 
   const choice = await runtime.prompter.chooseOne(
     "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",

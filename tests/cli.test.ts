@@ -884,7 +884,7 @@ describe("CLI", () => {
     }
   });
 
-  it("can let doctor collect the chat reminder choice interactively", async () => {
+  it("can let doctor automatically use a detected chat reminder route", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-channel-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-channel-home-"));
     const previousHome = process.env.HOME;
@@ -924,7 +924,7 @@ describe("CLI", () => {
         createStaticPrompter({
           chooseMany: [["email-reply"]],
           chooseOne: ["always-confirm", "no-write", "localhost-only"],
-          confirm: [true, true, false]
+          confirm: [true]
         })
       );
 
@@ -933,6 +933,9 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain(
         "TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：WhatsApp（+4917611122233）"
+      );
+      expect(output).toContain(
+        "TraceRoot 这次会直接把高风险提醒顺手发到 WhatsApp（+4917611122233）"
       );
       expect(output).toContain("📣 高风险动作一出现，TraceRoot 也会同步把提醒发到你选好的聊天入口：WhatsApp（+4917611122233）");
     } finally {
@@ -1919,7 +1922,7 @@ describe("CLI", () => {
         "TraceRoot 看起来你这次更像想让 AI 做这些事：📧 邮件整理与回复。"
       );
       expect(output).toContain("TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：Telegram（@ops-room）");
-      expect(output).toContain("直接回车就可以先用 TraceRoot 推荐的那个入口");
+      expect(output).toContain("TraceRoot 这次会直接把高风险提醒顺手发到 Telegram（@ops-room）");
       expect(output).toContain("Telegram（@ops-room）");
     } finally {
       if (previousHome === undefined) {
