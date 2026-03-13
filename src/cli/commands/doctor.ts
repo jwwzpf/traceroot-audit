@@ -31,9 +31,12 @@ import {
 import { recommendedManifestFormat } from "../../hardening/analysis";
 import { summarizeActionLabels } from "../../audit/presentation";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
+import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-discovery";
 import { runTargetWatch } from "../watch";
 import { displayUserPath } from "../../utils/paths";
 import { resolveTarget } from "../../utils/files";
+import { discoverHost } from "../../core/discovery";
+import { runHostWatch } from "../watch";
 
 import type { CliRuntime } from "../index";
 
@@ -381,6 +384,34 @@ function hasSavedReminderPreference(
   return false;
 }
 
+function renderHostDoctorWatchIntro(options: {
+  candidateCount: number;
+  suggestedNames: string[];
+  reminder: string;
+}): string {
+  const lines = [
+    "TraceRoot Audit Doctor",
+    "======================",
+    "",
+    "🖥️ 这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口。",
+    `📌 当前已经看到 ${options.candidateCount} 个可能真的会驱动 AI 动作的入口。`
+  ];
+
+  if (options.suggestedNames.length > 0) {
+    lines.push(`🎯 现在最值得先盯住的是：${options.suggestedNames.join("、")}`);
+  }
+
+  lines.push(
+    `🔔 提醒方式：${options.reminder}`,
+    "",
+    "💓 接下来如果这台机器上有 agent 开始做高风险动作，TraceRoot 会尽快提醒你，并把动作记进本地审计时间线。",
+    "📚 想回看今天发生了什么，可以直接用：traceroot-audit logs --today",
+    ""
+  );
+
+  return `${lines.join("\n")}\n`;
+}
+
 export function registerDoctorCommand(program: Command, runtime: CliRuntime): void {
   program
     .command("doctor")
@@ -450,6 +481,109 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           Boolean(options.notifyChannel) ||
           Boolean(options.notifyTarget) ||
           Boolean(options.notifyAccount);
+
+        if (options.host && options.watch && !target) {
+          const intervalSeconds = Number.parseInt(options.interval ?? "60", 10);
+          const maxCycles = options.cycles
+            ? Number.parseInt(options.cycles, 10)
+            : undefined;
+
+          if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+            runtime.io.stderr("`--interval` must be a positive integer number of seconds.\n");
+            runtime.exitCode = 1;
+            return;
+          }
+
+          if (
+            options.cycles !== undefined &&
+            (!Number.isInteger(maxCycles) || (maxCycles ?? 0) <= 0)
+          ) {
+            runtime.io.stderr("`--cycles` must be a positive integer when provided.\n");
+            runtime.exitCode = 1;
+            return;
+          }
+
+          const hostDiscovery = await discoverHost({
+            includeCwd: options.includeCwd
+          });
+
+          if (hostDiscovery.candidates.length === 0) {
+            runtime.io.stdout(
+              [
+                "TraceRoot Audit Doctor",
+                "======================",
+                "",
+                "暂时还没在这台机器上看到明显的 OpenClaw / runtime / skill 入口。",
+                "等你的 runtime 真正跑起来以后，再重新运行 `traceroot-audit doctor --watch --host` 就可以了。"
+              ].join("\n") + "\n"
+            );
+            return;
+          }
+
+          let notificationSettings = {
+            webhookUrl: options.notifyWebhook,
+            openclawChannel: options.notifyChannel,
+            openclawTarget: options.notifyTarget,
+            openclawAccount: options.notifyAccount
+          };
+
+          if (!alreadyConfiguredNotification) {
+            const likelyChannels = await detectLikelyNotifyChannelsForTargets(
+              hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath)
+            );
+            const selection = await promptNotificationSelection(runtime, {
+              likelyChannels
+            });
+
+            if (selection.mode === "webhook") {
+              notificationSettings = {
+                ...notificationSettings,
+                webhookUrl: await runtime.prompter.input(
+                  "🪝 TraceRoot 应该把提醒发到哪个 webhook？",
+                  { allowEmpty: false }
+                )
+              };
+            } else if (selection.mode === "channel") {
+              notificationSettings = {
+                ...notificationSettings,
+                openclawChannel: selection.channel,
+                openclawTarget: selection.target,
+                openclawAccount: selection.account
+              };
+            }
+          }
+
+          runtime.io.stdout(
+            renderHostDoctorWatchIntro({
+              candidateCount: hostDiscovery.candidates.length,
+              suggestedNames: hostDiscovery.candidates
+                .slice(0, 3)
+                .map((candidate) => candidate.displayPath),
+              reminder: describeSavedReminder({
+                mode:
+                  notificationSettings.webhookUrl
+                    ? "webhook"
+                    : notificationSettings.openclawChannel && notificationSettings.openclawTarget
+                      ? "channel"
+                      : "local-only",
+                webhookUrl: notificationSettings.webhookUrl,
+                openclawChannel: notificationSettings.openclawChannel,
+                openclawTarget: notificationSettings.openclawTarget
+              })
+            })
+          );
+
+          await runHostWatch({
+            runtime,
+            intervalSeconds,
+            maxCycles,
+            includeCwd: options.includeCwd,
+            header: "TraceRoot Audit Doctor Watch",
+            notifications: notificationSettings
+          });
+          return;
+        }
+
         let preferredTarget = target;
         let offeredRecentTargetFastResume = false;
         let preConfirmedFastResume = false;

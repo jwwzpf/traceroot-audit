@@ -5,7 +5,11 @@ import {
 import { surfaceLabel } from "../core/surfaces";
 import type { CliChoice, CliRuntime } from "../cli/index";
 import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
-import { detectLikelyNotifyChannels, displayNotifyChannel } from "./notify-discovery";
+import {
+  detectLikelyNotifyChannels,
+  displayNotifyChannel,
+  type LikelyNotifyChannel
+} from "./notify-discovery";
 import { discoverFiles, resolveTarget } from "../utils/files";
 import type {
   ExposureMode,
@@ -322,11 +326,11 @@ export async function promptHardeningSelections(
 
 export async function promptNotificationSelection(
   runtime: CliRuntime,
-  options: { target?: string } = {}
+  options: { target?: string; likelyChannels?: LikelyNotifyChannel[] } = {}
 ): Promise<NotificationChoice> {
-  const likelyChannels = options.target
-    ? await detectLikelyNotifyChannels(options.target)
-    : [];
+  const likelyChannels =
+    options.likelyChannels ??
+    (options.target ? await detectLikelyNotifyChannels(options.target) : []);
   const likelyChoices: CliChoice[] = likelyChannels.map((item) => ({
     value: item.channel,
     label: `${item.channel === "whatsapp" ? "📱" : item.channel === "telegram" ? "💬" : item.channel === "slack" ? "🧵" : item.channel === "discord" ? "🎮" : "🔔"} 发到已识别的 ${displayNotifyChannel(item.channel)}${item.target ? `（${item.target}）` : ""}`,

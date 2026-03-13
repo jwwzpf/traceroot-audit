@@ -386,20 +386,102 @@ async function emitLiveActionAlerts(options: {
   }
 }
 
+function hostActionBelongsToVisibleSurface(
+  event: AuditEvent,
+  candidates: Array<{ absolutePath: string }>
+): boolean {
+  if (!event.target) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const base = candidate.absolutePath.endsWith("/")
+      ? candidate.absolutePath
+      : `${candidate.absolutePath}/`;
+
+    return event.target === candidate.absolutePath || event.target.startsWith(base);
+  });
+}
+
+async function discoverHostRuntimeFeeds(options: {
+  candidates: Array<{ absolutePath: string }>;
+}): Promise<RuntimeEventFeed[]> {
+  const feedMap = new Map<string, RuntimeEventFeed>();
+
+  for (const candidate of options.candidates) {
+    const feeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+
+    for (const feed of feeds) {
+      if (!feedMap.has(feed.absolutePath)) {
+        feedMap.set(feed.absolutePath, feed);
+      }
+    }
+  }
+
+  return [...feedMap.values()].sort((left, right) =>
+    left.displayPath.localeCompare(right.displayPath)
+  );
+}
+
+function summarizeHostCandidatesForHuman(
+  candidates: Array<{ displayPath: string; categoryLabel: string; tier: "best-first" | "possible" }>
+): string {
+  if (candidates.length === 0) {
+    return "暂时还没看到明显的 agent / runtime 入口。";
+  }
+
+  return candidates
+    .slice(0, 3)
+    .map((candidate) => `${candidate.displayPath}（${hostCandidateCategoryForHuman(candidate)}）`)
+    .join("、");
+}
+
 export async function runHostWatch(options: {
   runtime: CliRuntime;
   intervalSeconds: number;
   maxCycles?: number;
   includeCwd?: boolean;
   header?: string;
+  notifications?: NotificationConfig;
 }): Promise<void> {
   const { runtime, intervalSeconds, maxCycles, includeCwd, header } = options;
   const initialDiscovery = await discoverHost({
     includeCwd: includeCwd ?? false
   });
   const auditWriteState = { warned: false };
+  const notificationState = { warned: false };
+  const notificationConfig = resolveNotificationConfig(options.notifications);
+  const notificationValidationError = validateNotificationConfig(notificationConfig);
+  if (notificationValidationError) {
+    runtime.io.stderr(`${notificationValidationError}\n`);
+    runtime.exitCode = 1;
+    return;
+  }
+  const alertState = {
+    lastSentAtByFingerprint: new Map<string, number>()
+  };
   const auditPaths = resolveAuditPaths();
+  const heartbeatEveryMs = heartbeatIntervalMs({
+    header,
+    intervalSeconds
+  });
+  let lastHeartbeatAt = 0;
   let previousSnapshot = createHostSnapshot(initialDiscovery);
+  const runtimeFeeds = await discoverHostRuntimeFeeds({
+    candidates: initialDiscovery.candidates
+  });
+  const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
+  const initialAuditEvents = await readAuditEvents();
+  const seenActionEvents = new Set(
+    initialAuditEvents.events
+      .filter((event) => event.category === "action-event")
+      .map(actionEventKey)
+  );
+  const recentStartupAlerts = initialAuditEvents.events
+    .filter(isAlertWorthyActionEvent)
+    .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
+    .filter((event) => hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates))
+    .slice(0, 3);
   const initialBestFirst = initialDiscovery.candidates.filter(
     (candidate) => candidate.tier === "best-first"
   );
@@ -407,30 +489,71 @@ export async function runHostWatch(options: {
     initialBestFirst.length > 0 ? initialBestFirst : initialDiscovery.candidates
   ).slice(0, 3);
 
-  const initialLines = [
-    header ?? "TraceRoot Audit Guard",
-    "=".repeat((header ?? "TraceRoot Audit Guard").length),
-    "",
-    "🖥️ Mode: host",
-    `⏱️ Interval: every ${intervalSeconds}s`,
-    `🗂 Audit log: ${auditPaths.eventsPath}`,
-    `📌 当前看得到的入口：${initialDiscovery.candidates.length}`,
-    initialBestFirst.length > 0
-      ? `🎯 Best first right now: ${initialBestFirst
-          .map((candidate) => candidate.displayPath)
-          .slice(0, 3)
-          .join(", ")}`
-      : "🧭 No best-first surfaces right now; showing the top possible ones instead.",
-    "",
-    "💓 Guard is watching for:",
-    "- new AI action surfaces",
-    "- surfaces promoted into best-first priority",
-    "- surfaces disappearing from the machine-level view",
-    ""
-  ];
+  const title = header ?? "TraceRoot Audit Guard";
+  const isDoctorStyle = title.includes("Doctor");
+  const initialLines = [title, "=".repeat(title.length), ""];
+
+  if (isDoctorStyle) {
+    initialLines.push(
+      "🖥️ TraceRoot 现在会在这台机器上继续陪跑你常见的 agent / runtime 入口。",
+      `⏱️ 检查间隔：每 ${intervalSeconds}s`,
+      `🗂 审计日志：${auditPaths.eventsPath}`,
+      `📌 当前已经看到 ${initialDiscovery.candidates.length} 个可能真的会驱动 AI 动作的入口`,
+      initialBestFirst.length > 0
+        ? `🎯 现在最值得先盯住的是：${summarizeHostCandidatesForHuman(initialBestFirst)}`
+        : `🧭 目前先从这些可能入口开始陪跑：${summarizeHostCandidatesForHuman(initialSuggested)}`,
+      ""
+    );
+
+    if (notificationConfig.openclawChannel && notificationConfig.openclawTarget) {
+      initialLines.push(
+        `📣 高风险动作一出现，TraceRoot 也会顺手把提醒发到 ${displayNotifyChannel(notificationConfig.openclawChannel)}（${notificationConfig.openclawTarget}）`,
+        ""
+      );
+    } else if (hasNotificationChannel(notificationConfig)) {
+      initialLines.push(
+        "📣 高风险动作一出现，TraceRoot 也会顺手把提醒发到你接好的提醒入口。",
+        ""
+      );
+    } else {
+      initialLines.push(
+        "🧾 这次先只保留本地审计时间线；之后想补外部提醒也可以随时重开。",
+        ""
+      );
+    }
+
+    initialLines.push(
+      "💓 TraceRoot 会继续盯着：",
+      "- 这台机器上新冒出来的 agent / runtime 入口",
+      "- 原本普通的入口，突然变成更值得优先关注的入口",
+      "- 运行时自己吐出来的高风险动作事件",
+      "- 这些入口有没有突然消失或换位置",
+      ""
+    );
+  } else {
+    initialLines.push(
+      "🖥️ Mode: host",
+      `⏱️ Interval: every ${intervalSeconds}s`,
+      `🗂 Audit log: ${auditPaths.eventsPath}`,
+      `📌 当前看得到的入口：${initialDiscovery.candidates.length}`,
+      initialBestFirst.length > 0
+        ? `🎯 Best first right now: ${initialBestFirst
+            .map((candidate) => candidate.displayPath)
+            .slice(0, 3)
+            .join(", ")}`
+        : "🧭 No best-first surfaces right now; showing the top possible ones instead.",
+      "",
+      "💓 Guard is watching for:",
+      "- new AI action surfaces",
+      "- surfaces promoted into best-first priority",
+      "- surfaces disappearing from the machine-level view",
+      "- runtime feeds emitting risky action events",
+      ""
+    );
+  }
 
   if (initialSuggested.length > 0) {
-    initialLines.push("🚀 现在最值得先做：");
+    initialLines.push(isDoctorStyle ? "🚀 如果你想先看最值得注意的几个入口：" : "🚀 现在最值得先做：");
 
     for (const candidate of initialSuggested) {
       initialLines.push(
@@ -443,6 +566,17 @@ export async function runHostWatch(options: {
   }
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
+
+  if (recentStartupAlerts.length > 0) {
+    await emitLiveActionAlerts({
+      runtime,
+      events: recentStartupAlerts.reverse(),
+      seenActionEvents,
+      notificationConfig,
+      notificationState,
+      alertState
+    });
+  }
   await writeAuditEvents(
     runtime,
     [
@@ -454,7 +588,7 @@ export async function runHostWatch(options: {
         target: null,
         surfaceKind: "host",
         status: "started",
-        message: `Host watch started. TraceRoot is now watching common OpenClaw/runtime locations on this machine.`,
+        message: "TraceRoot 已经开始在这台机器上陪跑，会继续盯着常见的 OpenClaw / runtime / skill 入口。",
         evidence: {
           searchedRoots: initialDiscovery.searchedRoots,
           includeCwd: initialDiscovery.includeCwd
@@ -470,11 +604,11 @@ export async function runHostWatch(options: {
         status: "observed",
         message:
           initialDiscovery.candidates.length > 0
-            ? `Host discovery currently sees ${initialDiscovery.candidates.length} likely AI action surfaces. Best first: ${initialSuggested.map((candidate) => candidate.displayPath).join(", ")}.`
-            : "Host discovery is running, but no likely AI action surfaces are visible yet.",
+            ? `这台机器上目前已经看到 ${initialDiscovery.candidates.length} 个可能真的会驱动 AI 动作的入口。现在最值得先看：${initialSuggested.map((candidate) => candidate.displayPath).join("、")}。`
+            : "TraceRoot 已经开始整机陪跑，不过暂时还没看到明显的 agent / runtime 入口。",
         recommendation:
           initialSuggested[0]?.recommendedCommand ??
-          "Run traceroot-audit discover --host again after your runtime or skills are installed.",
+          "等你的 runtime 或 skill 真正跑起来后，再重新运行 traceroot-audit doctor --watch --host。",
         evidence: {
           candidateCount: initialDiscovery.candidates.length,
           bestFirstCount: initialBestFirst.length
@@ -494,19 +628,67 @@ export async function runHostWatch(options: {
     const latestDiscovery = await discoverHost({
       includeCwd: includeCwd ?? false
     });
+    const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
+      candidates: latestDiscovery.candidates
+    });
+    for (const feed of latestRuntimeFeeds) {
+      if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
+        runtimeFeeds.push(feed);
+        runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
+      }
+    }
+
+    const feedEvents = await readNewRuntimeFeedEvents({
+      feeds: runtimeFeeds,
+      cursor: runtimeFeedCursor,
+      targetRoot: latestDiscovery.homeDir
+    });
+    await writeAuditEvents(runtime, feedEvents, auditWriteState);
+    const newActionAlerts = feedEvents
+      .filter(isAlertWorthyActionEvent)
+      .filter((event) => !seenActionEvents.has(actionEventKey(event)));
+    await emitLiveActionAlerts({
+      runtime,
+      events: newActionAlerts,
+      seenActionEvents,
+      notificationConfig,
+      notificationState,
+      alertState
+    });
+    for (const event of feedEvents) {
+      if (event.category === "action-event") {
+        seenActionEvents.add(actionEventKey(event));
+      }
+    }
+
     const currentSnapshot = createHostSnapshot(latestDiscovery);
     const diff = diffHostSnapshots(previousSnapshot, currentSnapshot);
+    const now = Date.now();
 
     if (!diff.changed) {
-      runtime.io.stdout(
-        `💓 ${timestamp()} No machine-level agent surface changes detected.\n`
-      );
+      if (newActionAlerts.length === 0 &&
+        shouldEmitHeartbeat({
+          now,
+          cycle,
+          totalCycles,
+          lastHeartbeatAt,
+          heartbeatEveryMs
+        })) {
+        runtime.io.stdout(
+          isDoctorStyle
+            ? `💓 ${timestamp()} 这轮没有新的整机入口变化，也没有新的高风险动作提醒。TraceRoot 还在安静地陪跑。\n`
+            : `💓 ${timestamp()} No machine-level agent surface changes detected.\n`
+        );
+        lastHeartbeatAt = now;
+      }
       previousSnapshot = currentSnapshot;
       continue;
     }
 
     const lines = [
-      `🚨 ${timestamp()} TraceRoot Guard detected a machine-level change`
+      isDoctorStyle
+        ? `🚨 ${timestamp()} TraceRoot 刚刚注意到这台机器上的 agent / runtime 入口有变化`
+        : `🚨 ${timestamp()} TraceRoot Guard detected a machine-level change`
     ];
     const events: AuditEvent[] = [];
 
@@ -580,7 +762,11 @@ export async function runHostWatch(options: {
     }
 
     for (const candidate of diff.removed) {
-      lines.push(`- ✅ Surface disappeared: ${candidate.displayPath}`);
+      lines.push(
+        isDoctorStyle
+          ? `- ✅ 这个入口现在已经看不到了：${candidate.displayPath}`
+          : `- ✅ Surface disappeared: ${candidate.displayPath}`
+      );
       events.push({
         timestamp: auditTimestamp(),
         severity: "safe",
@@ -590,7 +776,7 @@ export async function runHostWatch(options: {
         surfaceKind: surfaceKindFromLabel(candidate.categoryLabel),
         action: "surface-disappeared",
         status: "resolved",
-        message: `A previously visible AI action surface is no longer present: ${candidate.displayPath}.`,
+        message: `一个之前还能看到的入口，现在已经不在这台机器上了：${candidate.displayPath}。`,
         evidence: {
           previousTier: candidate.tier
         }

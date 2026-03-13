@@ -147,6 +147,59 @@ export async function detectLikelyNotifyChannels(
     });
 }
 
+export async function detectLikelyNotifyChannelsForTargets(
+  targets: string[]
+): Promise<LikelyNotifyChannel[]> {
+  const merged = new Map<
+    string,
+    {
+      evidence: Set<string>;
+      target?: string;
+      account?: string;
+    }
+  >();
+
+  for (const target of targets) {
+    const channels = await detectLikelyNotifyChannels(target);
+
+    for (const channel of channels) {
+      const current = merged.get(channel.channel) ?? {
+        evidence: new Set<string>()
+      };
+
+      for (const item of channel.evidence) {
+        current.evidence.add(item);
+      }
+
+      if (!current.target && channel.target) {
+        current.target = channel.target;
+      }
+
+      if (!current.account && channel.account) {
+        current.account = channel.account;
+      }
+
+      merged.set(channel.channel, current);
+    }
+  }
+
+  return [...merged.entries()]
+    .map(([channel, value]) => ({
+      channel,
+      evidence: [...value.evidence].slice(0, 2),
+      target: value.target,
+      account: value.account
+    }))
+    .sort((left, right) => {
+      const evidenceDelta = right.evidence.length - left.evidence.length;
+      if (evidenceDelta !== 0) {
+        return evidenceDelta;
+      }
+
+      return left.channel.localeCompare(right.channel);
+    });
+}
+
 export function displayNotifyChannel(channel: string): string {
   return displayChannelNames[channel] ?? channel;
 }

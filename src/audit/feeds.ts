@@ -10,6 +10,7 @@ import { displayUserPath } from "../utils/paths";
 export interface RuntimeEventFeed {
   absolutePath: string;
   displayPath: string;
+  rootDir: string;
 }
 
 export interface RuntimeFeedCursor {
@@ -330,14 +331,16 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
       if (content.trim().length === 0) {
         feedMap.set(absolutePath, {
           absolutePath,
-          displayPath: displayUserPath(absolutePath)
+          displayPath: displayUserPath(absolutePath),
+          rootDir: targetRoot
         });
         continue;
       }
 
       feedMap.set(absolutePath, {
         absolutePath,
-        displayPath: displayUserPath(absolutePath)
+        displayPath: displayUserPath(absolutePath),
+        rootDir: targetRoot
       });
     } catch {
       continue;
@@ -357,7 +360,8 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
   for (const absolutePath of globMatches) {
     feedMap.set(absolutePath, {
       absolutePath,
-      displayPath: displayUserPath(absolutePath)
+      displayPath: displayUserPath(absolutePath),
+      rootDir: targetRoot
     });
   }
 
@@ -412,7 +416,7 @@ export async function readNewRuntimeFeedEvents(options: {
     options.cursor.lineCounts.set(feed.absolutePath, lines.length);
 
     for (const line of newLines) {
-      const event = parseRuntimeFeedEvent(line, options.targetRoot);
+      const event = parseRuntimeFeedEvent(line, feed.rootDir ?? options.targetRoot);
       if (event) {
         events.push(event);
       }
