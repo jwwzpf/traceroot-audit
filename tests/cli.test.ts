@@ -266,9 +266,10 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("TraceRoot Audit Logs");
       expect(logsOutput).toContain("正在查看");
-      expect(logsOutput).toContain("边界漂移");
-      expect(logsOutput).toContain("开始陪跑");
+      expect(logsOutput).toContain("当前运行态重新变宽了");
+      expect(logsOutput).toContain("TraceRoot 已经开始陪跑这个 agent");
       expect(logsOutput).toContain("风险概览");
+      expect(logsOutput).toContain("最近发生的事");
       expect(logsOutput).toContain("当前配置仍然比你批准的边界更宽");
     } finally {
       if (previousHome === undefined) {
@@ -332,9 +333,9 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
-      expect(logsCapture.read().stdout).toContain("Agent 动作");
-      expect(logsCapture.read().stdout).toContain("对外发邮件");
-      expect(logsCapture.read().stdout).toContain("Require confirmation before outbound email actions.");
+      expect(logsCapture.read().stdout).toContain("Agent 开始尝试：对外发邮件");
+      expect(logsCapture.read().stdout).toContain("Agent 已完成：对外发邮件");
+      expect(logsCapture.read().stdout).toContain("TraceRoot 建议先做: Require confirmation before outbound email actions.");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

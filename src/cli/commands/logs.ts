@@ -71,12 +71,48 @@ function categoryLabel(event: AuditEvent): string {
   }
 }
 
+function eventHeadline(event: AuditEvent): string {
+  if (event.category === "action-event") {
+    const label = actionLabel(event.action);
+
+    switch (event.status) {
+      case "attempted":
+        return `Agent 开始尝试：${label}`;
+      case "succeeded":
+        return `Agent 已完成：${label}`;
+      case "failed":
+        return `Agent 没有完成：${label}`;
+      default:
+        return `Agent 触发了一个动作：${label}`;
+    }
+  }
+
+  switch (event.category) {
+    case "watch-started":
+      return "TraceRoot 已经开始陪跑这个 agent";
+    case "watch-heartbeat":
+      return "TraceRoot 还在继续陪跑";
+    case "risk-change":
+      return "整体风险出现了变化";
+    case "finding-change":
+      return "TraceRoot 发现了新的风险信号";
+    case "boundary-drift":
+      return "当前运行态重新变宽了";
+    case "surface-change":
+      return "机器上的 agent 入口有变化";
+    default:
+      return categoryLabel(event);
+  }
+}
+
 function summarizeEvents(events: AuditEvent[]): {
   critical: number;
   highRisk: number;
   risky: number;
   safe: number;
   actionEvents: number;
+  boundaryEvents: number;
+  driftEvents: number;
   latestAttention: AuditEvent | null;
 } {
   let critical = 0;
@@ -84,6 +120,8 @@ function summarizeEvents(events: AuditEvent[]): {
   let risky = 0;
   let safe = 0;
   let actionEvents = 0;
+  let boundaryEvents = 0;
+  let driftEvents = 0;
   let latestAttention: AuditEvent | null = null;
 
   for (const event of events) {
@@ -96,7 +134,20 @@ function summarizeEvents(events: AuditEvent[]): {
       actionEvents += 1;
     }
 
-    if (!latestAttention && event.severity !== "safe") {
+    if (event.category === "boundary-drift") {
+      boundaryEvents += 1;
+      driftEvents += 1;
+    }
+
+    if (
+      event.category === "risk-change" ||
+      event.category === "finding-change" ||
+      event.category === "surface-change"
+    ) {
+      driftEvents += 1;
+    }
+
+    if (event.severity !== "safe") {
       latestAttention = event;
     }
   }
@@ -107,6 +158,8 @@ function summarizeEvents(events: AuditEvent[]): {
     risky,
     safe,
     actionEvents,
+    boundaryEvents,
+    driftEvents,
     latestAttention
   };
 }
@@ -124,21 +177,21 @@ function eventKey(event: AuditEvent): string {
 }
 
 function renderEvent(event: AuditEvent): string[] {
+  const headline = eventHeadline(event);
   const lines = [
-    `${severityIcon(event.severity)} [${formatTimestamp(event.timestamp)}] ${categoryLabel(event)}`,
-    `   ${event.message}`
+    `${severityIcon(event.severity)} [${formatTimestamp(event.timestamp)}] ${headline}`
   ];
 
-  if (event.target) {
-    lines.push(`   📍 位置: ${displayUserPath(event.target)}`);
+  if (event.message && event.message !== headline) {
+    lines.push(`   📝 ${event.message}`);
   }
 
-  if (event.action) {
-    lines.push(`   🧩 动作: ${actionLabel(event.action)}`);
+  if (event.target) {
+    lines.push(`   📍 发生在: ${displayUserPath(event.target)}`);
   }
 
   if (event.recommendation) {
-    lines.push(`   🔧 建议: ${event.recommendation}`);
+    lines.push(`   🔧 TraceRoot 建议先做: ${event.recommendation}`);
   }
 
   return lines;
@@ -195,20 +248,23 @@ async function printLogs(
       `📚 本次显示 ${eventsAscending.length} 条审计记录`,
       `🧮 风险概览: 🚨 ${summary.critical} / 🛑 ${summary.highRisk} / ⚠️ ${summary.risky} / 🟢 ${summary.safe}`,
       `🎬 动作记录: ${summary.actionEvents} 条`,
+      `🧱 边界与漂移: ${summary.boundaryEvents} 条边界漂移，${summary.driftEvents} 条整体变化`,
       ""
     );
 
     if (summary.latestAttention) {
       lines.push("👀 当前最值得注意的事情：");
-      lines.push(`- ${summary.latestAttention.message}`);
-      if (summary.latestAttention.action) {
-        lines.push(`- 动作：${actionLabel(summary.latestAttention.action)}`);
+      lines.push(`- ${eventHeadline(summary.latestAttention)}`);
+      if (summary.latestAttention.message && summary.latestAttention.message !== eventHeadline(summary.latestAttention)) {
+        lines.push(`- 说明：${summary.latestAttention.message}`);
       }
       if (summary.latestAttention.recommendation) {
         lines.push(`- 建议：${summary.latestAttention.recommendation}`);
       }
       lines.push("");
     }
+
+    lines.push("📘 最近发生的事：", "");
 
     runtime.io.stdout(`${lines.join("\n")}\n`);
   }
