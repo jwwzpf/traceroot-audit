@@ -617,16 +617,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           );
         } else {
           plan = await buildHardeningPlan(effectiveTarget, selections);
-
-          const shouldWrite = await runtime.prompter.confirm(
-            "📦 现在就把这套更安全的补丁包准备好吗？",
-            true
+          runtime.io.stdout(
+            "📦 TraceRoot 现在会直接把这套更安全的补丁包先准备好，后面你需要时就能直接用。\n"
           );
-
-          if (!shouldWrite) {
-            runtime.io.stdout("Stopped before generating the safer bundle.\n");
-            return;
-          }
 
           await writeHardeningFiles(plan, {
             manifestFormat: recommendedManifestFormat(plan.manifestPath)
