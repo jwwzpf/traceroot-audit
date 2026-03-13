@@ -28,6 +28,7 @@ function createCapture() {
 async function createWebhookReceiver() {
   const queue: Array<Record<string, unknown>> = [];
   let resolver: ((value: Record<string, unknown>) => void) | null = null;
+  let totalCount = 0;
 
   const server = createServer((req, res) => {
     let body = "";
@@ -37,6 +38,7 @@ async function createWebhookReceiver() {
     req.on("end", () => {
       const payload =
         body.trim().length > 0 ? (JSON.parse(body) as Record<string, unknown>) : {};
+      totalCount += 1;
       if (resolver) {
         resolver(payload);
         resolver = null;
@@ -75,6 +77,9 @@ async function createWebhookReceiver() {
           resolve(payload);
         };
       });
+    },
+    getCount(): number {
+      return totalCount;
     },
     async close(): Promise<void> {
       await new Promise<void>((resolve, reject) => {
@@ -669,6 +674,90 @@ describe("CLI", () => {
       expect(payload.severity).toBe("high-risk");
       expect(payload.actionLabel).toBe("对外发邮件");
       expect(payload.recommendation).toBe("先确认这封外部邮件是不是真的该发出去。");
+    } finally {
+      await webhook.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not spam duplicate webhook reminders for the same action in a short window", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-dedupe-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-dedupe-home-"));
+    const previousHome = process.env.HOME;
+    const webhook = await createWebhookReceiver();
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "3",
+          "--interval",
+          "1",
+          "--notify-webhook",
+          webhook.url
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const tapArgs = [
+        "node",
+        "traceroot-audit",
+        "tap",
+        "--action",
+        "send-email",
+        "--severity",
+        "high-risk",
+        "--target",
+        tempDir,
+        "--runtime",
+        "openclaw",
+        "--surface-kind",
+        "runtime",
+        "--recommendation",
+        "先确认这封外部邮件是不是真的该发出去。",
+        "--",
+        process.execPath,
+        "-e",
+        "process.exit(0)"
+      ];
+
+      await runCli(tapArgs, createCapture().io);
+      await webhook.waitForRequest();
+      await runCli(tapArgs, createCapture().io);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await watchPromise;
+
+      expect(webhook.getCount()).toBe(1);
     } finally {
       await webhook.close();
       if (previousHome === undefined) {

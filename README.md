@@ -339,7 +339,7 @@ node dist/cli/index.js apply /path/to/openclaw
 
 Once you have approved a safer profile, `doctor --watch` is now the recommended way to keep watching the target and tell you when the live setup is still broader than that approved boundary or drifts beyond it later. The lower-level `guard` command still exists for advanced flows.
 
-If you already have your own alert endpoint, `doctor --watch` can also mirror high-risk action reminders to a webhook while still keeping the full local audit timeline on disk.
+If you already have your own alert endpoint, `doctor --watch` can also mirror high-risk action reminders to a webhook while still keeping the full local audit timeline on disk. Repeated copies of the same risky action are automatically quieted for a short window so TraceRoot does not spam you.
 
 Example:
 

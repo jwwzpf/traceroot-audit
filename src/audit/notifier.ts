@@ -4,10 +4,12 @@ import { displayUserPath } from "../utils/paths";
 
 export interface NotificationConfig {
   webhookUrl?: string;
+  cooldownSeconds?: number;
 }
 
 export interface ResolvedNotificationConfig {
   webhookUrl?: string;
+  cooldownMs: number;
 }
 
 function normalizeWebhookUrl(value?: string): string | undefined {
@@ -67,10 +69,22 @@ function buildTextSummary(event: AuditEvent): string {
 export function resolveNotificationConfig(
   config: NotificationConfig = {}
 ): ResolvedNotificationConfig {
+  const envCooldown = Number.parseInt(
+    process.env.TRACEROOT_NOTIFY_COOLDOWN_SECONDS ?? "",
+    10
+  );
+  const cooldownSeconds =
+    typeof config.cooldownSeconds === "number" && config.cooldownSeconds > 0
+      ? config.cooldownSeconds
+      : Number.isInteger(envCooldown) && envCooldown > 0
+        ? envCooldown
+        : 30;
+
   return {
     webhookUrl:
       normalizeWebhookUrl(config.webhookUrl) ??
-      normalizeWebhookUrl(process.env.TRACEROOT_NOTIFY_WEBHOOK_URL)
+      normalizeWebhookUrl(process.env.TRACEROOT_NOTIFY_WEBHOOK_URL),
+    cooldownMs: cooldownSeconds * 1000
   };
 }
 

@@ -63,6 +63,15 @@ function actionEventKey(event: AuditEvent): string {
   ].join("::");
 }
 
+function actionAlertFingerprint(event: AuditEvent): string {
+  return [
+    event.action ?? "",
+    event.runtime ?? "",
+    event.target ?? "",
+    event.severity
+  ].join("::");
+}
+
 function watchSource(header?: string): "doctor-watch" | "guard-watch" {
   return header?.includes("Doctor") ? "doctor-watch" : "guard-watch";
 }
@@ -309,12 +318,31 @@ async function emitLiveActionAlerts(options: {
   seenActionEvents: Set<string>;
   notificationConfig: ResolvedNotificationConfig;
   notificationState: { warned: boolean };
+  alertState: { lastSentAtByFingerprint: Map<string, number> };
 }): Promise<void> {
-  const { runtime, events, seenActionEvents, notificationConfig, notificationState } = options;
+  const {
+    runtime,
+    events,
+    seenActionEvents,
+    notificationConfig,
+    notificationState,
+    alertState
+  } = options;
+
+  const now = Date.now();
 
   for (const event of events) {
+    const fingerprint = actionAlertFingerprint(event);
+    const previousSentAt = alertState.lastSentAtByFingerprint.get(fingerprint) ?? 0;
+
+    if (now - previousSentAt < notificationConfig.cooldownMs) {
+      seenActionEvents.add(actionEventKey(event));
+      continue;
+    }
+
     runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
     await notifyActionEvent(runtime, event, notificationConfig, notificationState);
+    alertState.lastSentAtByFingerprint.set(fingerprint, now);
     seenActionEvents.add(actionEventKey(event));
   }
 }
@@ -551,9 +579,14 @@ export async function runTargetWatch(options: {
   const auditWriteState = { warned: false };
   const notificationState = { warned: false };
   const notificationConfig = resolveNotificationConfig(options.notifications);
+  const alertState = {
+    lastSentAtByFingerprint: new Map<string, number>()
+  };
   const auditPaths = resolveAuditPaths();
   const initialScan = await scanTarget(target);
   let previousSnapshot = createScanSnapshot(initialScan);
+  let lastDeepCheckAt = Date.now();
+  const deepCheckIntervalMs = Math.max(intervalSeconds * 1000, 30_000);
   const initialAuditEvents = await readAuditEvents({
     target: resolvedTarget.absolutePath
   });
@@ -610,6 +643,7 @@ export async function runTargetWatch(options: {
       "- 风险分突然升高",
       "- 新风险突然出现",
       "- 当前配置又比你批准的边界更宽",
+      "- 高风险动作会尽快提醒你，但相同动作短时间内不会反复打扰",
       ""
     );
   } else {
@@ -652,6 +686,8 @@ export async function runTargetWatch(options: {
       initialLines.push("- 当前配置有没有重新超出你批准的边界");
     }
 
+    initialLines.push("- 高风险动作会尽快提醒你，但相同动作短时间内不会反复打扰");
+
     initialLines.push("");
   }
 
@@ -683,7 +719,8 @@ export async function runTargetWatch(options: {
       events: recentStartupAlerts.reverse(),
       seenActionEvents,
       notificationConfig: {},
-      notificationState
+      notificationState,
+      alertState
     });
   }
 
@@ -763,30 +800,50 @@ export async function runTargetWatch(options: {
       }
     }
 
-    const latestScan = await scanTarget(target);
     const feedEvents = await readNewRuntimeFeedEvents({
       feeds: runtimeFeeds,
       cursor: runtimeFeedCursor,
       targetRoot: resolvedTarget.rootDir
     });
     await writeAuditEvents(runtime, feedEvents, auditWriteState);
-    const currentSnapshot = createScanSnapshot(latestScan);
-    const diff = diffScanSnapshots(previousSnapshot, currentSnapshot);
+    const now = Date.now();
+    const shouldRunDeepCheck =
+      cycle === 1 || now - lastDeepCheckAt >= deepCheckIntervalMs;
+    let latestScan = initialScan;
+    let currentSnapshot = previousSnapshot;
+    let diff = {
+      changed: false,
+      riskChanged: false,
+      riskDelta: 0,
+      newFindingCount: 0,
+      resolvedFindingCount: 0
+    };
     let boundaryDiff = null;
     let currentBoundaryStatus: BoundaryStatus | null = null;
 
-    if (hardeningProfileResult.profile && previousBoundaryStatus) {
-      const latestBoundaryState = await buildCurrentHardeningState(
-        target,
-        hardeningProfileResult.profile.selectedIntents.map(
-          (intent) => intent.id as HardeningIntentId
-        )
-      );
-      currentBoundaryStatus = evaluateBoundaryStatus(
-        hardeningProfileResult.profile,
-        latestBoundaryState
-      );
-      boundaryDiff = diffBoundaryStatus(previousBoundaryStatus, currentBoundaryStatus);
+    if (shouldRunDeepCheck) {
+      latestScan = await scanTarget(target);
+      currentSnapshot = createScanSnapshot(latestScan);
+      diff = diffScanSnapshots(previousSnapshot, currentSnapshot);
+      lastDeepCheckAt = now;
+
+      if (hardeningProfileResult.profile && previousBoundaryStatus) {
+        const latestBoundaryState = await buildCurrentHardeningState(
+          target,
+          hardeningProfileResult.profile.selectedIntents.map(
+            (intent) => intent.id as HardeningIntentId
+          )
+        );
+        currentBoundaryStatus = evaluateBoundaryStatus(
+          hardeningProfileResult.profile,
+          latestBoundaryState
+        );
+        boundaryDiff = diffBoundaryStatus(previousBoundaryStatus, currentBoundaryStatus);
+      } else {
+        currentBoundaryStatus = previousBoundaryStatus;
+      }
+    } else {
+      currentBoundaryStatus = previousBoundaryStatus;
     }
 
     if (!diff.changed && !boundaryDiff?.changed) {
@@ -802,7 +859,8 @@ export async function runTargetWatch(options: {
         events: newActionAlerts,
         seenActionEvents,
         notificationConfig,
-        notificationState
+        notificationState,
+        alertState
       });
 
       for (const event of latestAuditEvents.events) {
@@ -812,10 +870,16 @@ export async function runTargetWatch(options: {
       }
 
       if (newActionAlerts.length > 0) {
-        previousSnapshot = currentSnapshot;
-        if (currentBoundaryStatus) {
+        if (shouldRunDeepCheck) {
+          previousSnapshot = currentSnapshot;
+        }
+        if (currentBoundaryStatus && shouldRunDeepCheck) {
           previousBoundaryStatus = currentBoundaryStatus;
         }
+        continue;
+      }
+
+      if (!shouldRunDeepCheck) {
         continue;
       }
 
@@ -955,7 +1019,8 @@ export async function runTargetWatch(options: {
       events: newActionAlerts,
       seenActionEvents,
       notificationConfig,
-      notificationState
+      notificationState,
+      alertState
     });
 
     for (const event of latestAuditEvents.events) {
