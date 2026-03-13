@@ -4,6 +4,7 @@ import path from "node:path";
 export interface StoredWatchPreferences {
   version: 1;
   updatedAt: string;
+  mode: "local-only" | "webhook" | "channel";
   notifications: {
     webhookUrl?: string;
     openclawChannel?: string;
@@ -21,12 +22,32 @@ export async function loadWatchPreferences(
 ): Promise<StoredWatchPreferences | null> {
   try {
     const raw = await readFile(preferencesPath(rootDir), "utf8");
-    const parsed = JSON.parse(raw) as StoredWatchPreferences;
+    const parsed = JSON.parse(raw) as
+      | StoredWatchPreferences
+      | (Omit<StoredWatchPreferences, "mode"> & { mode?: unknown });
     if (parsed?.version !== 1 || typeof parsed.notifications !== "object") {
       return null;
     }
 
-    return parsed;
+    const inferredMode =
+      parsed.mode === "local-only" ||
+      parsed.mode === "webhook" ||
+      parsed.mode === "channel"
+        ? parsed.mode
+        : parsed.notifications.webhookUrl
+          ? "webhook"
+          : parsed.notifications.openclawChannel && parsed.notifications.openclawTarget
+            ? "channel"
+            : null;
+
+    if (!inferredMode) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      mode: inferredMode
+    };
   } catch {
     return null;
   }

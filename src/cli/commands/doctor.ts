@@ -259,10 +259,15 @@ function describeSavedWorkflows(profile: SavedHardeningProfile): string {
 }
 
 function describeSavedReminder(options: {
+  mode?: "local-only" | "webhook" | "channel";
   webhookUrl?: string;
   openclawChannel?: string;
   openclawTarget?: string;
 }): string {
+  if (options.mode === "local-only") {
+    return "只保留本地审计时间线，不额外打扰你";
+  }
+
   if (options.webhookUrl) {
     return "同一个 webhook 提醒入口";
   }
@@ -272,6 +277,40 @@ function describeSavedReminder(options: {
   }
 
   return "本地审计时间线";
+}
+
+function hasSavedReminderPreference(
+  preferences:
+    | {
+        mode: "local-only" | "webhook" | "channel";
+        notifications: {
+          webhookUrl?: string;
+          openclawChannel?: string;
+          openclawTarget?: string;
+        };
+      }
+    | null
+): boolean {
+  if (!preferences) {
+    return false;
+  }
+
+  if (preferences.mode === "local-only") {
+    return true;
+  }
+
+  if (preferences.mode === "webhook") {
+    return Boolean(preferences.notifications.webhookUrl);
+  }
+
+  if (preferences.mode === "channel") {
+    return Boolean(
+      preferences.notifications.openclawChannel &&
+        preferences.notifications.openclawTarget
+    );
+  }
+
+  return false;
 }
 
 export function registerDoctorCommand(program: Command, runtime: CliRuntime): void {
@@ -386,18 +425,19 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           Boolean(options.watch) &&
           reusedRecentTarget &&
           Boolean(selections) &&
-          Boolean(
-            savedPreferences?.notifications.webhookUrl ||
-              (savedPreferences?.notifications.openclawChannel &&
-                savedPreferences.notifications.openclawTarget)
-          );
+          hasSavedReminderPreference(savedPreferences);
         let fastResume = false;
 
         if (canFastResume) {
           runtime.io.stdout(
             `⚡ TraceRoot 已经替你记住了上次这套陪跑方式：${describeSavedWorkflows(
               existingProfile.profile!
-            )} + ${describeSavedReminder(savedPreferences!.notifications)}。\n`
+            )} + ${describeSavedReminder({
+              mode: savedPreferences!.mode,
+              webhookUrl: savedPreferences!.notifications.webhookUrl,
+              openclawChannel: savedPreferences!.notifications.openclawChannel,
+              openclawTarget: savedPreferences!.notifications.openclawTarget
+            })}。\n`
           );
           fastResume = await runtime.prompter.confirm(
             "这次要直接按上次那套方式继续陪跑吗？",
@@ -511,7 +551,13 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
         };
 
         if (!alreadyConfiguredNotification) {
-          if (savedPreferences?.notifications.webhookUrl) {
+          if (savedPreferences?.mode === "local-only") {
+            if (!fastResume) {
+              runtime.io.stdout(
+                "\n🧠 TraceRoot 记得你上次只保留本地审计时间线，这次也会继续保持安静，不额外打扰你。\n"
+              );
+            }
+          } else if (savedPreferences?.notifications.webhookUrl) {
             notificationSettings = {
               ...notificationSettings,
               webhookUrl: savedPreferences.notifications.webhookUrl
@@ -543,6 +589,7 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
 
         if (
           !alreadyConfiguredNotification &&
+          savedPreferences?.mode !== "local-only" &&
           !notificationSettings.webhookUrl &&
           !notificationSettings.openclawChannel &&
           !notificationSettings.openclawTarget
@@ -569,16 +616,19 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           }
         }
 
-        if (
-          notificationSettings.webhookUrl ||
-          (notificationSettings.openclawChannel && notificationSettings.openclawTarget)
-        ) {
-          await saveWatchPreferences(plan.rootDir, {
-            version: 1,
-            updatedAt: new Date().toISOString(),
-            notifications: notificationSettings
-          });
-        }
+        const savedReminderMode =
+          notificationSettings.webhookUrl
+            ? "webhook"
+            : notificationSettings.openclawChannel && notificationSettings.openclawTarget
+              ? "channel"
+              : "local-only";
+
+        await saveWatchPreferences(plan.rootDir, {
+          version: 1,
+          updatedAt: new Date().toISOString(),
+          mode: savedReminderMode,
+          notifications: notificationSettings
+        });
 
         await runTargetWatch({
           runtime,

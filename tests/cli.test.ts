@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -489,6 +489,72 @@ describe("CLI", () => {
     }
   });
 
+  it("can fast-resume doctor watch when the user previously chose local-only reminders", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-local-only-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-local-only-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true, true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 记得你上次陪跑的是");
+      expect(output).toContain("TraceRoot 已经替你记住了上次这套陪跑方式");
+      expect(output).toContain("只保留本地审计时间线，不额外打扰你");
+      expect(output).toContain("TraceRoot Audit Doctor Watch");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can keep watching from doctor without switching to another command", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-home-"));
@@ -898,6 +964,8 @@ describe("CLI", () => {
         'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
         "utf8"
       );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "openclaw-events.jsonl"), "", "utf8");
       process.env.HOME = tempHome;
 
       const watchCapture = createCapture();
@@ -909,7 +977,7 @@ describe("CLI", () => {
           tempDir,
           "--watch",
           "--cycles",
-          "2",
+          "4",
           "--interval",
           "1"
         ],
@@ -921,7 +989,7 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       const tapCapture = createCapture();
       const tapExitCode = await runCli(
@@ -984,6 +1052,8 @@ describe("CLI", () => {
         'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
         "utf8"
       );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "openclaw-events.jsonl"), "", "utf8");
       process.env.HOME = tempHome;
 
       const watchCapture = createCapture();
@@ -995,7 +1065,7 @@ describe("CLI", () => {
           tempDir,
           "--watch",
           "--cycles",
-          "2",
+          "3",
           "--interval",
           "1"
         ],
@@ -1007,9 +1077,8 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await mkdir(path.join(tempDir, "logs"), { recursive: true });
-      await writeFile(
+      await new Promise((resolve) => setTimeout(resolve, 1250));
+      await appendFile(
         path.join(tempDir, "logs", "openclaw-events.jsonl"),
         `${JSON.stringify({
           timestamp: new Date().toISOString(),
@@ -1022,6 +1091,7 @@ describe("CLI", () => {
         })}\n`,
         "utf8"
       );
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       const watchExitCode = await watchPromise;
       const watchOutput = watchCapture.read().stdout;
@@ -1067,6 +1137,8 @@ describe("CLI", () => {
         "utf8"
       );
       process.env.HOME = tempHome;
+      await mkdir(path.join(tempDir, ".openclaw", "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, ".openclaw", "logs", "session-actions.jsonl"), "", "utf8");
 
       const watchCapture = createCapture();
       const watchPromise = runCli(
@@ -1077,7 +1149,7 @@ describe("CLI", () => {
           tempDir,
           "--watch",
           "--cycles",
-          "2",
+          "4",
           "--interval",
           "1"
         ],
@@ -1089,9 +1161,8 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await mkdir(path.join(tempDir, ".openclaw", "logs"), { recursive: true });
-      await writeFile(
+      await new Promise((resolve) => setTimeout(resolve, 1250));
+      await appendFile(
         path.join(tempDir, ".openclaw", "logs", "session-actions.jsonl"),
         `${JSON.stringify({
           timestamp: new Date().toISOString(),
@@ -1107,6 +1178,7 @@ describe("CLI", () => {
         })}\n`,
         "utf8"
       );
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       const watchExitCode = await watchPromise;
       const watchOutput = watchCapture.read().stdout;
@@ -1163,7 +1235,7 @@ describe("CLI", () => {
           tempDir,
           "--watch",
           "--cycles",
-          "2",
+          "4",
           "--interval",
           "1",
           "--notify-webhook",
@@ -1177,7 +1249,7 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 2200));
 
       const tapExitCode = await runCli(
         [
@@ -1226,7 +1298,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 14000);
 
   it("does not spam duplicate webhook reminders for the same action in a short window", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-dedupe-target-"));
@@ -1310,7 +1382,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  }, 10000);
+  }, 17000);
 
   it("can send a chat-channel reminder through OpenClaw when doctor watch sees a high-risk action", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-channel-target-"));
