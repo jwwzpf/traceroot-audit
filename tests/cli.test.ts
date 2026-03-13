@@ -320,8 +320,9 @@ describe("CLI", () => {
       );
 
       expect(tapExitCode).toBe(0);
-      expect(tapCapture.read().stdout).toContain("TraceRoot 正在接手一次动作审计");
+      expect(tapCapture.read().stdout).toContain("TraceRoot 刚盯到一个值得你留意的动作");
       expect(tapCapture.read().stdout).toContain("对外发邮件");
+      expect(tapCapture.read().stdout).toContain("TraceRoot 已经把这次动作记下来了");
 
       const eventsPath = path.join(tempHome, ".traceroot", "audit", "events.jsonl");
       const eventsContent = await readFile(eventsPath, "utf8");

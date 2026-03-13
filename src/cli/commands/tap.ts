@@ -95,9 +95,10 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
         `Agent 正在尝试一个${options.severity === "critical" ? "极高风险" : options.severity === "high-risk" ? "高风险" : options.severity === "risky" ? "有风险" : "安全"}动作：${actionLabel(options.action)}。`;
 
       const introLines = [
-        `${alertIcon(options.severity)} TraceRoot 正在接手一次动作审计`,
+        `${alertIcon(options.severity)} TraceRoot 刚盯到一个值得你留意的动作`,
         `🧩 当前动作：${actionLabel(options.action)}`,
-        `🎯 所在位置：${displayUserPath(target)}`
+        `🎯 所在位置：${displayUserPath(target)}`,
+        "📚 这次尝试会立刻被记进本地审计时间线。"
       ];
 
       if (options.severity === "high-risk" || options.severity === "critical") {
@@ -157,9 +158,9 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
 
         runtime.io.stdout(
           [
-            `${success ? "✅" : "❌"} TraceRoot 已经记下这次动作：${actionLabel(options.action)}`,
+            `${success ? "✅" : "❌"} TraceRoot 已经把这次动作记下来了：${actionLabel(options.action)}`,
             success
-              ? "📚 之后想回看这次动作做了什么，直接运行：traceroot-audit logs"
+              ? "📚 之后想回看它刚才做了什么，直接运行：traceroot-audit logs"
               : "📚 这次失败也已经记进审计时间线里了，之后可以直接运行：traceroot-audit logs"
           ].join("\n") + "\n"
         );
@@ -187,7 +188,7 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
             }
           }
         ]);
-        runtime.io.stderr(`❌ 这次动作没有执行成功：${message}\n`);
+        runtime.io.stderr(`❌ TraceRoot 看到这个动作没有执行成功：${message}\n`);
         runtime.exitCode = 1;
       }
     });

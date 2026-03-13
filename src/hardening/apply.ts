@@ -463,9 +463,10 @@ export async function runTraceRootAction(config) {
 
   console.log(
     [
-      \`\${iconForSeverity(config.severity)} TraceRoot 正在记下一次动作审计\`,
+      \`\${iconForSeverity(config.severity)} TraceRoot 刚盯到一个值得你留意的动作\`,
       \`🧩 当前动作：\${actionLabel(config.action)}\`,
-      \`🎯 所在位置：\${displayUserPath(target)}\`
+      \`🎯 所在位置：\${displayUserPath(target)}\`,
+      "📚 这次尝试会立刻被记进本地审计时间线。"
     ].join("\\n")
   );
 
@@ -516,7 +517,7 @@ export async function runTraceRootAction(config) {
           }
         }
       ]);
-      console.log(\`\${succeeded ? "✅" : "❌"} TraceRoot 已经记下这次动作：\${actionLabel(config.action)}\${succeeded ? "（成功）" : "（失败）"}\`);
+      console.log(\`\${succeeded ? "✅" : "❌"} TraceRoot 已经把这次动作记下来了：\${actionLabel(config.action)}\${succeeded ? "（成功）" : "（失败）"}\`);
       process.exitCode = result.code;
       return;
     } catch (error) {
@@ -550,7 +551,7 @@ export async function runTraceRootAction(config) {
     }
   ]);
 
-  console.error(\`❌ TraceRoot 没能替这个动作完成审计接入：\${errorMessage}\`);
+  console.error(\`❌ TraceRoot 看到这个动作没能顺利跑完：\${errorMessage}\`);
   process.exitCode = 1;
 }
 `;
