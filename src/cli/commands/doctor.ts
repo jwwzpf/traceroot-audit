@@ -187,8 +187,8 @@ function renderDoctorSummary(options: {
       );
     }
     lines.push("   之后这些动作一旦触发，TraceRoot 会立刻留下本地审计记录。");
-    lines.push(`   想回看 agent 做过什么，可以直接用：traceroot-audit logs "${displayUserPath(options.plan.rootDir)}"`);
-    lines.push(`   想只看今天最值得注意的动作，可以直接用：traceroot-audit logs "${displayUserPath(options.plan.rootDir)}" --today`);
+    lines.push("   想回看 agent 做过什么，可以直接用：traceroot-audit logs");
+    lines.push("   想只看今天最值得注意的动作，可以直接用：traceroot-audit logs --today");
 
     if (options.bundle.tapPendingActionsCount > 0 && options.bundle.tapPlanPath) {
       lines.push(
@@ -233,7 +233,7 @@ function renderDoctorSummary(options: {
   lines.push(
     "",
     "🚀 如果你想继续让 TraceRoot 陪跑这个 agent：",
-    `- traceroot-audit doctor "${options.target}" --watch --interval 60`
+    "- traceroot-audit doctor --watch --interval 60"
   );
 
   return `${lines.join("\n")}\n`;
@@ -301,7 +301,7 @@ function renderDoctorResumeSummary(options: {
 
   lines.push(
     "",
-    `📚 想看今天发生了什么，可以直接用：traceroot-audit logs "${displayUserPath(options.target)}" --today`
+    "📚 想看今天发生了什么，可以直接用：traceroot-audit logs --today"
   );
 
   return `${lines.join("\n")}\n`;
