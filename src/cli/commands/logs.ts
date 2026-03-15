@@ -309,7 +309,8 @@ function looksLikeGenericRuntimeNarration(message: string): boolean {
   return [
     /^agent is attempting to /i,
     /^agent attempted to /i,
-    /^agent started to /i,
+    /^agent started /i,
+    /^agent began /i,
     /^agent completed /i,
     /^agent finished /i,
     /^agent succeeded /i,

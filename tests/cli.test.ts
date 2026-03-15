@@ -1260,6 +1260,88 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 先帮你继续看上次整机陪跑的时间线");
       expect(output).toContain("🖥 正在查看: 整机陪跑时间线");
       expect(output).toContain("Agent 开始尝试：对外发邮件");
+      expect(output).toContain("这个动作刚刚开始，TraceRoot 已经先把它记进审计时间线里。");
+      expect(output).not.toContain("Agent is attempting to send an external email.");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("turns generic runtime narration into TraceRoot's own words in logs", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-humanize-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            runtime: "mcp",
+            channel: "whatsapp",
+            sender: "+4917612345678",
+            event: {
+              type: "sensitive-data-access",
+              status: "attempted",
+              target: "crm-sync"
+            },
+            message: "Agent started reading sensitive customer records."
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Agent 开始尝试：读取敏感数据");
+      expect(output).toContain("这个动作刚刚开始，TraceRoot 已经先把它记进审计时间线里。");
+      expect(output).not.toContain("Agent started reading sensitive customer records.");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
