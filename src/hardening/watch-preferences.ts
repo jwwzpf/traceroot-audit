@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export interface StoredWatchPreferences {
@@ -15,6 +16,10 @@ export interface StoredWatchPreferences {
 
 function preferencesPath(rootDir: string): string {
   return path.join(rootDir, ".traceroot", "doctor-watch.json");
+}
+
+function machinePreferencesPath(): string {
+  return path.join(os.homedir(), ".traceroot", "doctor-watch-host.json");
 }
 
 export async function loadWatchPreferences(
@@ -58,6 +63,48 @@ export async function saveWatchPreferences(
   preferences: StoredWatchPreferences
 ): Promise<void> {
   const filePath = preferencesPath(rootDir);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(preferences, null, 2)}\n`, "utf8");
+}
+
+export async function loadMachineWatchPreferences(): Promise<StoredWatchPreferences | null> {
+  try {
+    const raw = await readFile(machinePreferencesPath(), "utf8");
+    const parsed = JSON.parse(raw) as
+      | StoredWatchPreferences
+      | (Omit<StoredWatchPreferences, "mode"> & { mode?: unknown });
+    if (parsed?.version !== 1 || typeof parsed.notifications !== "object") {
+      return null;
+    }
+
+    const inferredMode =
+      parsed.mode === "local-only" ||
+      parsed.mode === "webhook" ||
+      parsed.mode === "channel"
+        ? parsed.mode
+        : parsed.notifications.webhookUrl
+          ? "webhook"
+          : parsed.notifications.openclawChannel && parsed.notifications.openclawTarget
+            ? "channel"
+            : null;
+
+    if (!inferredMode) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      mode: inferredMode
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveMachineWatchPreferences(
+  preferences: StoredWatchPreferences
+): Promise<void> {
+  const filePath = machinePreferencesPath();
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(preferences, null, 2)}\n`, "utf8");
 }

@@ -326,7 +326,7 @@ export async function promptHardeningSelections(
 
 export async function promptNotificationSelection(
   runtime: CliRuntime,
-  options: { target?: string; likelyChannels?: LikelyNotifyChannel[] } = {}
+  options: { target?: string; likelyChannels?: LikelyNotifyChannel[]; quiet?: boolean } = {}
 ): Promise<NotificationChoice> {
   const likelyChannels =
     options.likelyChannels ??
@@ -353,7 +353,7 @@ export async function promptNotificationSelection(
     ...staticChoices
   ];
 
-  if (likelyChannels.length > 0) {
+  if (likelyChannels.length > 0 && !options.quiet) {
     runtime.io.stdout(
       `✨ TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：${likelyChannels
         .map((item) =>
@@ -363,20 +363,23 @@ export async function promptNotificationSelection(
         )
         .join("、")}。\n`
     );
-  } else {
+  } else if (!options.quiet) {
     runtime.io.stdout(
       "💡 TraceRoot 暂时还没认出你已经接好的聊天入口，所以这次会先只保留本地审计时间线。\n"
     );
+  } else if (likelyChannels.length === 0) {
     return { mode: "local-only" };
   }
 
   if (likelyChannels.length === 1 && likelyChannels[0]?.target) {
     const detected = likelyChannels[0];
-    runtime.io.stdout(
-      `💡 TraceRoot 这次会直接把高风险提醒顺手发到 ${displayNotifyChannel(
-        detected.channel
-      )}（${detected.target}）。如果你之后想改提醒方式，再重新运行 doctor 就可以。\n`
-    );
+    if (!options.quiet) {
+      runtime.io.stdout(
+        `💡 TraceRoot 这次会直接把高风险提醒顺手发到 ${displayNotifyChannel(
+          detected.channel
+        )}（${detected.target}）。如果你之后想改提醒方式，再重新运行 doctor 就可以。\n`
+      );
+    }
 
     return {
       mode: "channel",
@@ -389,9 +392,11 @@ export async function promptNotificationSelection(
   const defaultNotificationChoice =
     likelyChannels[0]?.channel ?? "local-only";
 
-  runtime.io.stdout(
-    "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
-  );
+  if (!options.quiet) {
+    runtime.io.stdout(
+      "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
+    );
+  }
 
   const choice = await runtime.prompter.chooseOne(
     "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",

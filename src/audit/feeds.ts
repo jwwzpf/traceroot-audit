@@ -11,6 +11,7 @@ export interface RuntimeEventFeed {
   absolutePath: string;
   displayPath: string;
   rootDir: string;
+  kind?: "generic-jsonl" | "openclaw-command-log" | "openclaw-gateway-log";
 }
 
 export interface RuntimeFeedCursor {
@@ -30,7 +31,10 @@ const candidateRelativePaths = [
   path.join("logs", "agent-events.jsonl"),
   path.join("logs", "action-events.jsonl"),
   path.join(".openclaw", "events.jsonl"),
-  path.join(".mcp", "events.jsonl")
+  path.join(".mcp", "events.jsonl"),
+  path.join("logs", "commands.log"),
+  path.join("logs", "gateway.log"),
+  path.join("logs", "gateway.err.log")
 ];
 
 const candidateGlobPatterns = [
@@ -39,8 +43,29 @@ const candidateGlobPatterns = [
   ".openclaw/**/*events*.jsonl",
   ".openclaw/**/*actions*.jsonl",
   ".mcp/**/*events*.jsonl",
-  ".mcp/**/*actions*.jsonl"
+  ".mcp/**/*actions*.jsonl",
+  "logs/**/*commands*.log",
+  ".openclaw/**/*commands*.log"
 ];
+
+function classifyFeedKind(absolutePath: string): RuntimeEventFeed["kind"] {
+  const basename = path.basename(absolutePath).toLowerCase();
+
+  if (basename === "commands.log") {
+    return "openclaw-command-log";
+  }
+
+  if (
+    basename === "gateway.log" ||
+    basename === "gateway.err.log" ||
+    basename === "openclaw-gateway.log" ||
+    /^openclaw-\d{4}-\d{2}-\d{2}\.log$/.test(basename)
+  ) {
+    return "openclaw-gateway-log";
+  }
+
+  return "generic-jsonl";
+}
 
 function normalizeSeverity(value?: unknown): AuditSeverity | undefined {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -175,7 +200,233 @@ function inferMessage(action: string | undefined, status: AuditEvent["status"], 
   return `${actor} 刚刚报告了一个动作：${label}。`;
 }
 
-function parseRuntimeFeedEvent(line: string, targetRoot: string): AuditEvent | null {
+function inferActionFromText(message: string): string | undefined {
+  const normalized = message.trim().toLowerCase();
+
+  if (/(send|draft).*(email|mail)|(email|mail).*(send|draft)/.test(normalized)) {
+    return "send-email";
+  }
+
+  if (/(publish|post|tweet|social|tiktok|youtube|linkedin|reddit)/.test(normalized)) {
+    return "public-post";
+  }
+
+  if (/(message|whatsapp|telegram|slack|discord|wechat)/.test(normalized)) {
+    return "send-message";
+  }
+
+  if (/(delete|remove|rm|unlink|wipe|purge)/.test(normalized)) {
+    return "delete-files";
+  }
+
+  if (
+    /(write|modify|edit|update|rename|move|copy)/.test(normalized) &&
+    /(file|files|fs|disk|path|workspace)/.test(normalized)
+  ) {
+    return "modify-files";
+  }
+
+  if (/(payment|purchase|checkout|order|stripe|paypal|wallet)/.test(normalized)) {
+    return "purchase-or-payment";
+  }
+
+  if (/(bank|finance|broker|trade|portfolio|account-balance)/.test(normalized)) {
+    return "bank-access";
+  }
+
+  if (/(secret|token|credential|password|key)/.test(normalized)) {
+    return "sensitive-secret-access";
+  }
+
+  if (/(sensitive|private|customer-data|pii|record|records)/.test(normalized)) {
+    return "sensitive-data-access";
+  }
+
+  return undefined;
+}
+
+function inferStatusFromMessage(message: string): AuditEvent["status"] {
+  const normalized = message.trim().toLowerCase();
+
+  if (/(attempt|attempting|trying|starting|about to|preparing to)/.test(normalized)) {
+    return "attempted";
+  }
+
+  if (/(failed|failure|error|unable to|denied|refused)/.test(normalized)) {
+    return "failed";
+  }
+
+  if (/(completed|finished|sent|published|posted|deleted|removed|updated)/.test(normalized)) {
+    return "succeeded";
+  }
+
+  return "observed";
+}
+
+function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEvent | null {
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const action = pickString(parsed, ["action"]);
+  if (!action) {
+    return null;
+  }
+
+  const sourceChannel = pickString(parsed, ["source"]) ?? "openclaw";
+  const sender = pickString(parsed, ["senderId"]);
+  const sessionKey = pickString(parsed, ["sessionKey"]);
+  const normalized = action.toLowerCase();
+
+  let message = `OpenClaw 刚收到一个控制命令：${action}。`;
+  if (normalized === "new") {
+    message = `OpenClaw 刚收到一个新任务启动命令（来源：${sourceChannel}）。`;
+  } else if (normalized === "stop") {
+    message = `OpenClaw 刚收到一个停止命令（来源：${sourceChannel}）。`;
+  } else if (normalized === "resume") {
+    message = `OpenClaw 刚收到一个恢复运行命令（来源：${sourceChannel}）。`;
+  }
+
+  if (sender) {
+    message += ` 发送方：${sender}。`;
+  }
+
+  return {
+    timestamp: pickString(parsed, ["timestamp"]) ?? new Date().toISOString(),
+    severity: "safe",
+    category: "action-event",
+    source: "runtime-feed",
+    target: targetRoot,
+    runtime: "openclaw",
+    surfaceKind: "runtime",
+    action: `openclaw-command-${normalized}`,
+    status: "observed",
+    message,
+    evidence: {
+      source: "openclaw-command-logger",
+      sessionKey,
+      channel: sourceChannel,
+      raw: parsed
+    }
+  };
+}
+
+function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEvent | null {
+  const plainTextEvent = parseOpenClawGatewayTextLine(line, targetRoot);
+  if (plainTextEvent) {
+    return plainTextEvent;
+  }
+
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const message =
+    pickString(parsed, ["msg", "message", "text", ["log", "message"]]) ?? "";
+  if (!message) {
+    return null;
+  }
+
+  const action = inferActionFromText(message);
+  if (!action) {
+    return null;
+  }
+
+  const severity =
+    normalizeSeverity(pickString(parsed, ["level", "severity", "risk"])) ??
+    severityFromAction(action);
+  const subsystem = pickString(parsed, ["subsystem", "logger", "scope"]);
+  const runtimeName = pickString(parsed, ["runtime", "service"]) ?? "openclaw";
+  const targetValue = pickString(parsed, ["target", "path", "file"]);
+  const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
+
+  return {
+    timestamp: pickString(parsed, ["timestamp", "time"]) ?? new Date().toISOString(),
+    severity,
+    category: "action-event",
+    source: "runtime-feed",
+    target,
+    runtime: runtimeName,
+    surfaceKind: "runtime",
+    action,
+    status: inferStatusFromMessage(message),
+    message: `${runtimeName} 刚提到：${message}`,
+    recommendation: inferRecommendation(action, severity),
+    evidence: {
+      source: "openclaw-gateway-log",
+      subsystem,
+      raw: parsed
+    }
+  };
+}
+
+function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const textMatch =
+    trimmed.match(
+      /^(?<timestamp>\d{4}-\d{2}-\d{2}[T ][^ ]+)\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
+    ) ??
+    trimmed.match(
+      /^\[(?<timestamp>[^\]]+)\]\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
+    );
+
+  const timestampValue = textMatch?.groups?.timestamp?.trim();
+  const levelValue = textMatch?.groups?.level?.trim();
+  const scopeValue = textMatch?.groups?.scope?.trim();
+  const message = textMatch?.groups?.message?.trim() ?? trimmed;
+  const action = inferActionFromText(message);
+
+  if (!action) {
+    return null;
+  }
+
+  const severity = normalizeSeverity(levelValue) ?? severityFromAction(action);
+
+  return {
+    timestamp: timestampValue ?? new Date().toISOString(),
+    severity,
+    category: "action-event",
+    source: "runtime-feed",
+    target: targetRoot,
+    runtime: "openclaw",
+    surfaceKind: "runtime",
+    action,
+    status: inferStatusFromMessage(message),
+    message: `openclaw 刚提到：${message}`,
+    recommendation: inferRecommendation(action, severity),
+    evidence: {
+      source: "openclaw-gateway-log",
+      subsystem: scopeValue,
+      rawLine: trimmed
+    }
+  };
+}
+
+function parseRuntimeFeedEvent(
+  line: string,
+  targetRoot: string,
+  feedKind: RuntimeEventFeed["kind"] = "generic-jsonl"
+): AuditEvent | null {
+  if (feedKind === "openclaw-command-log") {
+    return parseOpenClawCommandLogLine(line, targetRoot);
+  }
+
+  if (feedKind === "openclaw-gateway-log") {
+    return parseOpenClawGatewayLogLine(line, targetRoot);
+  }
+
   let parsed: Record<string, unknown> | unknown[];
 
   try {
@@ -320,6 +571,43 @@ function parseRuntimeFeedEvent(line: string, targetRoot: string): AuditEvent | n
   };
 }
 
+async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<string[]> {
+  const rootName = path.basename(targetRoot).toLowerCase();
+  const looksLikeOpenClawRoot =
+    rootName.startsWith(".openclaw") || rootName.includes("openclaw");
+
+  if (!looksLikeOpenClawRoot) {
+    return [];
+  }
+
+  const candidates = new Set<string>();
+
+  try {
+    const configRaw = await readFile(path.join(targetRoot, "openclaw.json"), "utf8");
+    const config = JSON.parse(configRaw) as {
+      logging?: { file?: unknown };
+    };
+
+    if (typeof config.logging?.file === "string" && config.logging.file.trim().length > 0) {
+      candidates.add(path.resolve(targetRoot, config.logging.file.trim()));
+    }
+  } catch {
+    // ignore invalid or missing config
+  }
+
+  const defaultLogs = await fg("/tmp/openclaw/openclaw-*.log", {
+    absolute: true,
+    onlyFiles: true,
+    unique: true
+  });
+
+  for (const filePath of defaultLogs) {
+    candidates.add(filePath);
+  }
+
+  return [...candidates];
+}
+
 export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<RuntimeEventFeed[]> {
   const feedMap = new Map<string, RuntimeEventFeed>();
 
@@ -332,7 +620,8 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
         feedMap.set(absolutePath, {
           absolutePath,
           displayPath: displayUserPath(absolutePath),
-          rootDir: targetRoot
+          rootDir: targetRoot,
+          kind: classifyFeedKind(absolutePath)
         });
         continue;
       }
@@ -340,7 +629,8 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
       feedMap.set(absolutePath, {
         absolutePath,
         displayPath: displayUserPath(absolutePath),
-        rootDir: targetRoot
+        rootDir: targetRoot,
+        kind: classifyFeedKind(absolutePath)
       });
     } catch {
       continue;
@@ -361,7 +651,18 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
     feedMap.set(absolutePath, {
       absolutePath,
       displayPath: displayUserPath(absolutePath),
-      rootDir: targetRoot
+      rootDir: targetRoot,
+      kind: classifyFeedKind(absolutePath)
+    });
+  }
+
+  const companionFeeds = await discoverOpenClawCompanionFeeds(targetRoot);
+  for (const absolutePath of companionFeeds) {
+    feedMap.set(absolutePath, {
+      absolutePath,
+      displayPath: displayUserPath(absolutePath),
+      rootDir: targetRoot,
+      kind: classifyFeedKind(absolutePath)
     });
   }
 
@@ -416,8 +717,16 @@ export async function readNewRuntimeFeedEvents(options: {
     options.cursor.lineCounts.set(feed.absolutePath, lines.length);
 
     for (const line of newLines) {
-      const event = parseRuntimeFeedEvent(line, feed.rootDir ?? options.targetRoot);
+      const event = parseRuntimeFeedEvent(
+        line,
+        feed.rootDir ?? options.targetRoot,
+        feed.kind
+      );
       if (event) {
+        event.evidence = {
+          ...(event.evidence ?? {}),
+          feedPath: feed.absolutePath
+        };
         events.push(event);
       }
     }

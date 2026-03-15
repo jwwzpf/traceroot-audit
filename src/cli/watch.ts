@@ -246,12 +246,17 @@ function shouldEmitHeartbeat(options: {
   totalCycles: number;
   lastHeartbeatAt: number;
   heartbeatEveryMs: number;
+  isDoctorStyle?: boolean;
 }): boolean {
-  if (options.cycle === 1) {
+  if (Number.isFinite(options.totalCycles) && options.cycle === options.totalCycles) {
     return true;
   }
 
-  if (Number.isFinite(options.totalCycles) && options.cycle === options.totalCycles) {
+  if (options.isDoctorStyle && options.cycle === 1) {
+    return false;
+  }
+
+  if (options.cycle === 1) {
     return true;
   }
 
@@ -264,6 +269,15 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
     `- Agent 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`
   ];
+
+  const feedPath =
+    typeof event.evidence?.feedPath === "string" && event.evidence.feedPath.trim().length > 0
+      ? displayUserPath(event.evidence.feedPath)
+      : undefined;
+
+  if (feedPath) {
+    lines.push(`- TraceRoot 是从这个运行时日志里听到的：${feedPath}`);
+  }
 
   if (event.target) {
     lines.push(`- 位置：${displayUserPath(event.target)}`);
@@ -343,8 +357,12 @@ async function notifyActionEvent(
     if (!state.warned) {
       const message =
         error instanceof Error ? error.message : "unknown notification delivery error";
+      const humanMessage =
+        /OpenClaw channel relay failed: spawn .+ ENOENT/.test(message)
+          ? "当前还没找到可用的 OpenClaw 提醒通道程序，所以这次先只保留在本地审计时间线里。"
+          : `这次提醒没能同步发出去，不过本地审计记录还在继续。\n   原因：${message}`;
       runtime.io.stderr(
-        `⚠️ TraceRoot 没能把这次提醒同步发出去，不过本地审计记录还在继续。\n   原因：${message}\n`
+        `⚠️ TraceRoot 这次没能把提醒同步发出去，不过本地审计记录还在继续。\n   ${humanMessage}\n`
       );
       state.warned = true;
     }
@@ -672,7 +690,8 @@ export async function runHostWatch(options: {
           cycle,
           totalCycles,
           lastHeartbeatAt,
-          heartbeatEveryMs
+          heartbeatEveryMs,
+          isDoctorStyle
         })) {
         runtime.io.stdout(
           isDoctorStyle
@@ -855,6 +874,7 @@ export async function runTargetWatch(options: {
   }
 
   const title = header ?? "TraceRoot Audit Guard";
+  const isDoctorStyle = compactStart || title.includes("Doctor");
   const initialLines = [title, "=".repeat(title.length), ""];
 
   if (compactStart) {
@@ -1133,7 +1153,8 @@ export async function runTargetWatch(options: {
           cycle,
           totalCycles,
           lastHeartbeatAt,
-          heartbeatEveryMs
+          heartbeatEveryMs,
+          isDoctorStyle
         })
       ) {
         const heartbeat =

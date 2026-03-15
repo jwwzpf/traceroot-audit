@@ -44,6 +44,7 @@ Run without global install:
 
 ```bash
 npx traceroot-audit doctor
+npx traceroot-audit doctor --watch
 npx traceroot-audit doctor --watch --host
 npx traceroot-audit doctor /path/to/openclaw
 npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
@@ -53,7 +54,8 @@ npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp -
 ```
 
 For most users, `doctor` is now the main entry point. It finds a likely surface, asks what you actually want the AI to do, generates a smaller approved boundary, prepares a safer patch bundle, and can keep watching the boundary with `--watch`.
-If you do not even know where OpenClaw, MCP, or local skills live on your machine yet, `doctor --watch --host` is now the simplest way to start: TraceRoot looks for likely local agent surfaces, starts machine-level watch, and begins writing a local audit timeline as soon as risky runtime actions show up.
+If you do not even know where OpenClaw, MCP, or local skills live on your machine yet, `doctor --watch` is now the simplest way to start: when no remembered target exists, TraceRoot automatically switches into machine-level watch, looks for likely local agent surfaces, and begins writing a local audit timeline as soon as risky runtime actions show up. `doctor --watch --host` still exists when you want to force that machine-level path explicitly.
+If you keep using machine-level watch, TraceRoot now remembers that reminder route too, so the next `doctor --watch` can keep using the same webhook or chat channel without making you set it up again. When it already knows that machine-level setup, it resumes that companion mode directly instead of reintroducing itself from scratch.
 If you have already approved a boundary for the same target before, TraceRoot now remembers that decision and asks whether you want to keep using it instead of making you answer the full workflow wizard again.
 If you come back later without passing a path, TraceRoot can also remember the last target you asked it to watch so you can keep going from where you left off.
 If you do not pass notification flags up front, `doctor --watch` first tries to recognize which chat channels this runtime already has connected and, when possible, who they already point to. That lets TraceRoot ask for a quick confirmation instead of making you fill everything in from scratch. Once you choose how you want reminders handled — chat channel, webhook, or local-only — TraceRoot remembers that preference for the next watch run on the same target.

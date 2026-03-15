@@ -617,6 +617,8 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("今天最值得留意的动作");
+      expect(logsOutput).toContain("这个动作刚刚开始，TraceRoot 已经先把它记进审计时间线里。");
+      expect(logsOutput).not.toContain("Agent is attempting to send an external email.");
     } finally {
       await messenger.close();
       if (previousHome === undefined) {
@@ -628,6 +630,364 @@ describe("CLI", () => {
         delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
       } else {
         process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("starts machine-level doctor watch automatically when no path is given", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-smart-host-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const messengerArgs = await messenger.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("你这次没有指定路径，所以 TraceRoot 会直接在这台机器上开始陪跑");
+      expect(output).toContain("这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口");
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(messengerArgs).toContain("--channel");
+      expect(messengerArgs).toContain("telegram");
+      expect(messengerArgs).toContain("--target");
+      expect(messengerArgs).toContain("@ops-room");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("remembers the reminder route for machine-level doctor watch", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-reminder-home-"));
+    const previousHome = process.env.HOME;
+    const webhook = await createWebhookReceiver();
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1",
+          "--notify-webhook",
+          webhook.url
+        ],
+        createCapture().io,
+        createStaticPrompter({})
+      );
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const payload = await webhook.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 还记得你上次整机陪跑时的提醒方式：同一个 webhook 提醒入口");
+      expect(output).toContain("TraceRoot 已经直接续上了你上次的整机陪跑方式");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(payload.summary).toBe("Agent 刚刚触发了一个高风险动作：对外发邮件");
+    } finally {
+      await webhook.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps resuming machine-level doctor watch even when an older target exists", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-priority-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-priority-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"],
+          confirm: [true]
+        })
+      );
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 还记得你上次整机陪跑时的提醒方式");
+      expect(output).toContain("TraceRoot 已经直接续上了你上次的整机陪跑方式");
+      expect(output).not.toContain(`TraceRoot 记得你上次陪跑的是：${tempDir}`);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets logs --today continue the machine-level timeline after host watch", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-host-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 先帮你继续看上次整机陪跑的时间线");
+      expect(output).toContain("🖥 正在查看: 整机陪跑时间线");
+      expect(output).toContain("Agent 开始尝试：对外发邮件");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
       }
       await rm(tempHome, { recursive: true, force: true });
     }
@@ -1595,6 +1955,196 @@ describe("CLI", () => {
     }
   });
 
+  it("can ingest OpenClaw gateway logs from the runtime config without extra wiring", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-native-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const gatewayLog = path.join(tempHome, "openclaw-gateway.log");
+      await writeFile(
+        path.join(openClawDir, "openclaw.json"),
+        JSON.stringify(
+          {
+            logging: {
+              file: gatewayLog
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: "warn",
+            subsystem: "gateway",
+            message: "Attempting to send email to customer@example.com"
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("openclaw-gateway.log");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("openclaw 刚提到");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest plain-text OpenClaw gateway logs without extra wiring", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-plain-gateway-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const gatewayLog = path.join(tempHome, "openclaw-gateway.log");
+      await writeFile(
+        path.join(openClawDir, "openclaw.json"),
+        JSON.stringify(
+          {
+            logging: {
+              file: gatewayLog
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("openclaw-gateway.log");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("来源日志");
+      expect(logsOutput).toContain("openclaw-gateway.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can send a webhook reminder when doctor watch sees a high-risk action", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-target-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-webhook-home-"));
@@ -1729,7 +2279,7 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
       const tapArgs = [
         "node",
@@ -1818,7 +2368,7 @@ describe("CLI", () => {
         })
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
       const tapExitCode = await runCli(
         [

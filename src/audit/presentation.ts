@@ -30,6 +30,12 @@ export function actionLabel(action?: string): string {
       return "访问银行或支付账户";
     case "sensitive-data-access":
       return "读取敏感数据";
+    case "openclaw-command-new":
+      return "收到新任务指令";
+    case "openclaw-command-stop":
+      return "收到停止指令";
+    case "openclaw-command-resume":
+      return "收到恢复运行指令";
   }
 
   if (/(send|draft).*(email|mail)|(email|mail).*(send|draft)/.test(normalized)) {

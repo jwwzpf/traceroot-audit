@@ -44,6 +44,7 @@ npm run build
 
 ```bash
 npx traceroot-audit doctor
+npx traceroot-audit doctor --watch
 npx traceroot-audit doctor --watch --host
 npx traceroot-audit doctor /path/to/openclaw
 npx traceroot-audit doctor /path/to/openclaw --watch --interval 60
@@ -53,7 +54,8 @@ npx traceroot-audit doctor /path/to/openclaw --watch --notify-channel whatsapp -
 ```
 
 对大多数用户来说，`doctor` 现在是主入口。它会先找到可能的 surface，再问你真正想让 AI 做什么，然后自动生成更小的批准边界和更安全的补丁包；如果加上 `--watch`，它还会继续替你守着这个边界。
-如果你连 OpenClaw、MCP、skill 到底装在机器上的哪里都不确定，`doctor --watch --host` 现在就是最简单的起点：TraceRoot 会先在整台机器上找可能的本地 agent 入口，直接开始陪跑，并在高风险动作出现时把它们写进本地审计时间线。
+如果你连 OpenClaw、MCP、skill 到底装在机器上的哪里都不确定，`doctor --watch` 现在就是最简单的起点：当 TraceRoot 手里还没有记住的 target 时，它会自动切到整机陪跑模式，先在这台机器上找可能的本地 agent 入口，再开始持续记住高风险动作。`doctor --watch --host` 依然保留给你明确想强制走整机模式的时候。
+如果你之后继续沿用整机陪跑，TraceRoot 现在也会把这套提醒方式一起记住；下一次再运行 `doctor --watch` 时，它会继续沿用上次那个 webhook 或聊天入口，而不是让你重新设置一遍。等这套整机陪跑方式已经记住以后，TraceRoot 会直接续上它，不再像第一次那样重新介绍一遍。
 如果你已经在同一个 target 上批准过一次边界，TraceRoot 现在会记住它，并先问你这次要不要继续沿用，而不是再让你把整套工作流问题重新答一遍。
 如果你过一会儿再回来，又懒得重新找路径，TraceRoot 也会记得你上次陪跑的是哪个 target，让你直接从上次停下来的地方继续。
 如果你没有提前写好提醒参数，`doctor --watch` 也会先试着看懂这个运行态里已经接好了哪些聊天入口；如果连“本来就是发给谁”的线索都能看出来，TraceRoot 会直接让你确认，而不是再让你从头填写。你选过一次之后，不管你最后选的是聊天入口、webhook，还是“先只保留本地审计”，TraceRoot 都会把这套提醒方式记住，下次在同一个 target 上继续陪跑时直接沿用。

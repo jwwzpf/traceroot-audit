@@ -6,7 +6,10 @@ import { Command, Option } from "commander";
 import { readAuditEvents } from "../../audit/store";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import { actionLabel } from "../../audit/presentation";
-import { loadRecentDoctorTarget, recentTargetLabel } from "../../hardening/recent-target";
+import {
+  loadRecentDoctorContext,
+  recentTargetLabel
+} from "../../hardening/recent-target";
 import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
@@ -104,6 +107,45 @@ function eventHeadline(event: AuditEvent): string {
       return "机器上的 agent 入口有变化";
     default:
       return categoryLabel(event);
+  }
+}
+
+function looksLikeGenericRuntimeNarration(message: string): boolean {
+  const normalized = message.trim();
+  return [
+    /^agent is attempting to /i,
+    /^agent attempted to /i,
+    /^agent started to /i,
+    /^agent completed /i,
+    /^agent finished /i,
+    /^agent succeeded /i,
+    /^agent failed /i,
+    /^agent triggered /i
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function eventDetail(event: AuditEvent): string | undefined {
+  if (!event.message) {
+    return undefined;
+  }
+
+  if (event.category !== "action-event") {
+    return event.message;
+  }
+
+  if (!looksLikeGenericRuntimeNarration(event.message)) {
+    return event.message;
+  }
+
+  switch (event.status) {
+    case "attempted":
+      return "这个动作刚刚开始，TraceRoot 已经先把它记进审计时间线里。";
+    case "succeeded":
+      return "这个动作已经执行完成，TraceRoot 也已经把它记下来了。";
+    case "failed":
+      return "这次动作没有完成，不过 TraceRoot 已经把整个尝试过程记下来了。";
+    default:
+      return "TraceRoot 已经把这次动作记进审计时间线里。";
   }
 }
 
@@ -234,12 +276,21 @@ function renderEvent(event: AuditEvent): string[] {
     `${severityIcon(event.severity)} [${formatTimestamp(event.timestamp)}] ${headline}`
   ];
 
-  if (event.message && event.message !== headline) {
-    lines.push(`   📝 ${event.message}`);
+  const detail = eventDetail(event);
+  if (detail && detail !== headline) {
+    lines.push(`   📝 ${detail}`);
   }
 
   if (event.target) {
     lines.push(`   📍 发生在: ${displayUserPath(event.target)}`);
+  }
+
+  const feedPath =
+    typeof event.evidence?.feedPath === "string" && event.evidence.feedPath.trim().length > 0
+      ? displayUserPath(event.evidence.feedPath)
+      : undefined;
+  if (feedPath) {
+    lines.push(`   🧷 来源日志: ${feedPath}`);
   }
 
   if (event.recommendation) {
@@ -265,6 +316,7 @@ async function printLogs(
     today?: boolean;
     limit?: number;
     header?: boolean;
+    hostScope?: boolean;
   }
 ): Promise<AuditEvent[]> {
   const result = await readAuditEvents({
@@ -284,7 +336,9 @@ async function printLogs(
       `🗂 审计日志位置: ${displayUserPath(result.paths.eventsPath)}`
     ];
 
-    if (options.target) {
+    if (options.hostScope) {
+      lines.push("🖥 正在查看: 整机陪跑时间线");
+    } else if (options.target) {
       lines.push(`🎯 正在查看: ${displayUserPath(options.target)}`);
     }
 
@@ -307,8 +361,9 @@ async function printLogs(
     if (summary.latestAttention) {
       lines.push("👀 当前最值得注意的事情：");
       lines.push(`- ${eventHeadline(summary.latestAttention)}`);
-      if (summary.latestAttention.message && summary.latestAttention.message !== eventHeadline(summary.latestAttention)) {
-        lines.push(`- 说明：${summary.latestAttention.message}`);
+      const detail = eventDetail(summary.latestAttention);
+      if (detail && detail !== eventHeadline(summary.latestAttention)) {
+        lines.push(`- 说明：${detail}`);
       }
       if (summary.latestAttention.recommendation) {
         lines.push(`- 建议：${summary.latestAttention.recommendation}`);
@@ -378,13 +433,22 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
     )
     .action(async (targetArg: string | undefined, options: LogsOptions) => {
       let target = normalizeTargetFilter(options.target ?? targetArg);
+      let hostScope = false;
       if (!target && !options.all) {
-        const recentTarget = await loadRecentDoctorTarget();
-        if (recentTarget) {
-          target = normalizeTargetFilter(recentTarget);
-          runtime.io.stdout(
-            `🧠 TraceRoot 先帮你继续看上次陪跑的 target：${recentTargetLabel(recentTarget)}。\n\n`
-          );
+        const recentContext = await loadRecentDoctorContext();
+        if (recentContext?.scope === "host") {
+          hostScope = true;
+          runtime.io.stdout("🧠 TraceRoot 先帮你继续看上次整机陪跑的时间线。\n\n");
+        } else {
+          const recentTarget = recentContext?.scope === "target"
+            ? recentContext.targetPath
+            : await loadRecentDoctorTarget();
+          if (recentTarget) {
+            target = normalizeTargetFilter(recentTarget);
+            runtime.io.stdout(
+              `🧠 TraceRoot 先帮你继续看上次陪跑的 target：${recentTargetLabel(recentTarget)}。\n\n`
+            );
+          }
         }
       }
       const limit = Number.parseInt(options.limit, 10);
@@ -406,7 +470,8 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
         target,
         severity: options.severity,
         today: options.today,
-        limit
+        limit,
+        hostScope
       });
 
       if (!options.tail) {
