@@ -2953,7 +2953,7 @@ describe("CLI", () => {
       setTimeout(() => {
         void appendFile(
           gatewayLog,
-          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com\n`,
+          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com from Telegram @ops-room path=mailer.ts\n`,
           "utf8"
         );
       }, 200);
@@ -2982,6 +2982,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
+      expect(output).toContain("这一步是从 Telegram（@ops-room） 触发出来的");
       expect(output).toContain("openclaw-gateway.log");
 
       const logsCapture = createCapture();
@@ -2996,6 +2997,7 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("整机陪跑时间线");
       expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("openclaw-gateway.log");
     } finally {

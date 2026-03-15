@@ -712,13 +712,19 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
   const subsystem = pickString(parsed, ["subsystem", "logger", "scope"]);
   const runtimeName = pickString(parsed, ["runtime", "service"]) ?? "openclaw";
   const channel =
-    pickString(parsed, ["channel", "source", "provider", "chat", "account"]) ?? undefined;
+    pickString(parsed, ["channel", "source", "provider", "chat", "account"]) ??
+    inferChannelFromText(message) ??
+    undefined;
   const sender =
-    pickString(parsed, ["sender", "senderId", "user", "userId", "actor"]) ?? undefined;
+    pickString(parsed, ["sender", "senderId", "user", "userId", "actor"]) ??
+    inferSenderFromText(message) ??
+    undefined;
   const sessionKey =
     pickString(parsed, ["sessionKey", "sessionId", "threadId", "conversationId"]) ?? undefined;
   const targetValue = pickString(parsed, ["target", "path", "file"]);
-  const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
+  const target = targetValue
+    ? path.resolve(targetRoot, targetValue)
+    : inferTargetFromText(message, targetRoot);
 
   return {
     timestamp: pickString(parsed, ["timestamp", "time"]) ?? new Date().toISOString(),
@@ -768,13 +774,15 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
   }
 
   const severity = normalizeSeverity(levelValue) ?? severityFromAction(action);
+  const channel = inferChannelFromText(message);
+  const sender = inferSenderFromText(message);
 
   return {
     timestamp: timestampValue ?? new Date().toISOString(),
     severity,
     category: "action-event",
     source: "runtime-feed",
-    target: targetRoot,
+    target: inferTargetFromText(message, targetRoot),
     runtime: "openclaw",
     surfaceKind: "runtime",
     action,
@@ -784,6 +792,8 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
     evidence: {
       source: "openclaw-gateway-log",
       subsystem: scopeValue,
+      channel,
+      sender,
       rawLine: trimmed
     }
   };
