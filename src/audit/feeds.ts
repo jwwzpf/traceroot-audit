@@ -1004,6 +1004,74 @@ type CompanionFeed = {
   kind: RuntimeEventFeed["kind"];
 };
 
+function collectNestedLogPathCandidates(options: {
+  source: unknown;
+  candidates: Map<string, CompanionFeed>;
+  targetRoot: string;
+}): void {
+  const visit = (value: unknown, pathSegments: string[] = []): void => {
+    if (typeof value === "string") {
+      const currentKey = pathSegments[pathSegments.length - 1]?.toLowerCase() ?? "";
+      const parentSegments = pathSegments.slice(0, -1).map((segment) => segment.toLowerCase());
+      const looksLikeLogPath =
+        ["file", "files", "path"].includes(currentKey) &&
+        parentSegments.some((segment) =>
+          /(log|logs|event|events|audit|trace)/.test(segment)
+        );
+
+      if (looksLikeLogPath) {
+        addCompanionFeedCandidate({
+          candidates: options.candidates,
+          targetRoot: options.targetRoot,
+          value,
+          kind: classifyFeedKind(path.resolve(options.targetRoot, value))
+        });
+      }
+
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string") {
+          const currentKey = pathSegments[pathSegments.length - 1]?.toLowerCase() ?? "";
+          const parentSegments = pathSegments.slice(0, -1).map((segment) =>
+            segment.toLowerCase()
+          );
+          const looksLikeLogPath =
+            currentKey === "files" &&
+            parentSegments.some((segment) =>
+              /(log|logs|event|events|audit|trace)/.test(segment)
+            );
+
+          if (looksLikeLogPath) {
+            addCompanionFeedCandidate({
+              candidates: options.candidates,
+              targetRoot: options.targetRoot,
+              value: entry,
+              kind: classifyFeedKind(path.resolve(options.targetRoot, entry))
+            });
+          }
+        } else {
+          visit(entry, pathSegments);
+        }
+      }
+
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      visit(child, [...pathSegments, key]);
+    }
+  };
+
+  visit(options.source, []);
+}
+
 function addCompanionFeedCandidate(options: {
   candidates: Map<string, CompanionFeed>;
   targetRoot: string;
@@ -1166,6 +1234,77 @@ async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<Compa
   return [...candidates.values()];
 }
 
+async function discoverMcpCompanionFeeds(targetRoot: string): Promise<CompanionFeed[]> {
+  const rootName = path.basename(targetRoot).toLowerCase();
+  const looksLikeMcpRoot = rootName.startsWith(".mcp") || rootName.includes("mcp");
+  const candidates = new Map<string, CompanionFeed>();
+  const configCandidates = [
+    "mcp.json",
+    "mcp.yaml",
+    "mcp.yml",
+    "mcp.config.json",
+    "mcp.config.yaml",
+    "mcp.config.yml",
+    "mcp-config.json",
+    "mcp-config.yaml",
+    "mcp-config.yml",
+    "mcpServers.json",
+    "mcpServers.yaml",
+    "mcpServers.yml",
+    "mcp-servers.json",
+    "mcp-servers.yaml",
+    "mcp-servers.yml",
+    ...(looksLikeMcpRoot ? ["config.json", "config.yaml", "config.yml"] : [])
+  ];
+  let hasMcpConfig = false;
+
+  for (const configName of configCandidates) {
+    try {
+      const configRaw = await readFile(path.join(targetRoot, configName), "utf8");
+      const config =
+        configName.endsWith(".json")
+          ? (JSON.parse(configRaw) as Record<string, unknown>)
+          : (YAML.parse(configRaw) as Record<string, unknown>);
+
+      hasMcpConfig = true;
+      collectNestedLogPathCandidates({
+        source: config,
+        candidates,
+        targetRoot
+      });
+    } catch {
+      // ignore invalid or missing config and continue to the next supported format
+    }
+  }
+
+  if (looksLikeMcpRoot || hasMcpConfig) {
+    const defaultLogs = await fg(
+      [
+        path.join(targetRoot, "**", "*mcp*.log"),
+        path.join(targetRoot, "**", "*mcp*.jsonl"),
+        path.join(targetRoot, "**", "*events*.log"),
+        path.join(targetRoot, "**", "*events*.jsonl")
+      ],
+      {
+        absolute: true,
+        onlyFiles: true,
+        unique: true,
+        dot: true,
+        ignore: ["**/node_modules/**", "**/.git/**"]
+      }
+    );
+
+    for (const filePath of defaultLogs) {
+      candidates.set(filePath, {
+        absolutePath: filePath,
+        kind: classifyFeedKind(filePath)
+      });
+    }
+  }
+
+  return [...candidates.values()];
+}
+
 async function canonicalFeedPath(candidatePath: string): Promise<string> {
   try {
     return await realpath(candidatePath);
@@ -1226,6 +1365,17 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
 
   const companionFeeds = await discoverOpenClawCompanionFeeds(targetRoot);
   for (const companionFeed of companionFeeds) {
+    const absolutePath = await canonicalFeedPath(companionFeed.absolutePath);
+    feedMap.set(absolutePath, {
+      absolutePath,
+      displayPath: displayUserPath(absolutePath),
+      rootDir: targetRoot,
+      kind: companionFeed.kind ?? classifyFeedKind(absolutePath)
+    });
+  }
+
+  const mcpCompanionFeeds = await discoverMcpCompanionFeeds(targetRoot);
+  for (const companionFeed of mcpCompanionFeeds) {
     const absolutePath = await canonicalFeedPath(companionFeed.absolutePath);
     feedMap.set(absolutePath, {
       absolutePath,

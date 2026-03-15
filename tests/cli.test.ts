@@ -725,6 +725,93 @@ describe("CLI", () => {
     }
   });
 
+  it("can hear native MCP runtime events from ~/.mcp config homes without an obvious project folder", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-native-mcp-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const mcpDir = path.join(tempHome, ".mcp");
+      const logsDir = path.join(tempHome, "mcp-runtime-logs");
+      await mkdir(mcpDir, { recursive: true });
+      await mkdir(logsDir, { recursive: true });
+
+      const runtimeLog = path.join(logsDir, "gmail-mcp-events.jsonl");
+      await writeFile(
+        path.join(mcpDir, "mcp.yaml"),
+        `mcpServers:\n  mailer:\n    logging:\n      file: ${JSON.stringify(runtimeLog)}\n`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          runtimeLog,
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            runtime: "gmail-mcp",
+            channel: "telegram",
+            sender: "@ops-room",
+            method: "tools/call",
+            params: {
+              name: "send_email",
+              path: "mailer.ts"
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("gmail-mcp-events.jsonl");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
+      expect(logsOutput).toContain("gmail-mcp-events.jsonl");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can reuse a detected chat route from ~/.config/openclaw even when no project folder is obvious", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-config-notify-home-"));
     const previousHome = process.env.HOME;
