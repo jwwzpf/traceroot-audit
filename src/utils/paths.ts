@@ -46,5 +46,13 @@ function normalizeDisplayPath(value: string): string {
     return normalized.replace("/private/tmp/", "/tmp/");
   }
 
+  if (normalized === "/private/var") {
+    return "/var";
+  }
+
+  if (normalized.startsWith("/private/var/")) {
+    return normalized.replace("/private/var/", "/var/");
+  }
+
   return normalized;
 }

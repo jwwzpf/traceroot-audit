@@ -413,6 +413,13 @@ function summarizeEvents(events: AuditEvent[]): {
     severity: AuditSeverity;
     actions: string[];
   }>;
+  attentionTargets: Array<{
+    targetLabel: string;
+    targetPath: string;
+    count: number;
+    severity: AuditSeverity;
+    actions: string[];
+  }>;
 } {
   let critical = 0;
   let highRisk = 0;
@@ -433,6 +440,10 @@ function summarizeEvents(events: AuditEvent[]): {
   const attentionSources = new Map<
     string,
     { sourceLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
+  >();
+  const attentionTargets = new Map<
+    string,
+    { targetLabel: string; targetPath: string; count: number; severity: AuditSeverity; actions: Set<string> }
   >();
 
   const severityWeight = (severity: AuditSeverity): number => {
@@ -527,6 +538,25 @@ function summarizeEvents(events: AuditEvent[]): {
 
           attentionSources.set(sourceLabel, sourceEntry);
         }
+
+        if (event.target) {
+          const targetLabel = displayUserPath(event.target);
+          const targetEntry = attentionTargets.get(event.target) ?? {
+            targetLabel,
+            targetPath: event.target,
+            count: 0,
+            severity: event.severity,
+            actions: new Set<string>()
+          };
+
+          targetEntry.count += 1;
+          targetEntry.actions.add(label);
+          if (severityWeight(event.severity) > severityWeight(targetEntry.severity)) {
+            targetEntry.severity = event.severity;
+          }
+
+          attentionTargets.set(event.target, targetEntry);
+        }
       }
     }
 
@@ -603,6 +633,22 @@ function summarizeEvents(events: AuditEvent[]): {
       .slice(0, 3)
       .map((entry) => ({
         sourceLabel: entry.sourceLabel,
+        count: entry.count,
+        severity: entry.severity,
+        actions: [...entry.actions]
+      })),
+    attentionTargets: [...attentionTargets.values()]
+      .sort((left, right) => {
+        return (
+          severityWeight(right.severity) - severityWeight(left.severity) ||
+          right.count - left.count ||
+          right.actions.size - left.actions.size
+        );
+      })
+      .slice(0, 3)
+      .map((entry) => ({
+        targetLabel: entry.targetLabel,
+        targetPath: entry.targetPath,
         count: entry.count,
         severity: entry.severity,
         actions: [...entry.actions]
@@ -865,6 +911,18 @@ async function printLogs(
           `- ${prefix} ${actor.actorLabel}：出现了 ${actor.count} 次值得留意的动作（${actor.actions.slice(0, 2).join("、")}）`
         );
       }
+      lines.push("");
+    }
+
+    if (summary.attentionTargets.length > 0) {
+      lines.push("📍 今天最值得回头看的位置：");
+      for (const target of summary.attentionTargets) {
+        const prefix = severityIcon(target.severity);
+        lines.push(
+          `- ${prefix} ${target.targetLabel}：出现了 ${target.count} 次值得留意的动作（${target.actions.slice(0, 2).join("、")}）`
+        );
+      }
+      lines.push("   如果你之后只想回看某一个位置的完整轨迹，可以直接运行：traceroot-audit logs <那个路径>");
       lines.push("");
     }
 

@@ -631,6 +631,8 @@ describe("CLI", () => {
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("今天最值得留意的动作");
       expect(logsOutput).toContain("今天这些 agent 最值得你看一眼");
+      expect(logsOutput).toContain("今天最值得回头看的位置");
+      expect(logsOutput).toContain("~/.openclaw/mailer.ts");
       expect(logsOutput).toContain("OpenClaw 运行时");
       expect(logsOutput).toContain("这个动作刚刚开始，TraceRoot 已经先把它记进审计时间线里。");
       expect(logsOutput).not.toContain("Agent is attempting to send an external email.");
