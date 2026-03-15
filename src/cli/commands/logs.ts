@@ -76,6 +76,30 @@ function categoryLabel(event: AuditEvent): string {
   }
 }
 
+function actorLabel(event: AuditEvent): string {
+  const runtime = event.runtime?.trim();
+
+  if (runtime) {
+    const normalized = runtime.toLowerCase();
+
+    if (normalized === "openclaw") {
+      return "OpenClaw 运行时";
+    }
+
+    if (normalized === "mcp") {
+      return "MCP 服务";
+    }
+
+    return runtime;
+  }
+
+  if (event.target) {
+    return path.basename(event.target);
+  }
+
+  return "这个 agent";
+}
+
 function eventHeadline(event: AuditEvent): string {
   if (event.category === "action-event") {
     const label = actionLabel(event.action);
@@ -164,6 +188,12 @@ function summarizeEvents(events: AuditEvent[]): {
     failed: number;
     severity: AuditSeverity;
   }>;
+  attentionActors: Array<{
+    actorLabel: string;
+    count: number;
+    severity: AuditSeverity;
+    actions: string[];
+  }>;
 } {
   let critical = 0;
   let highRisk = 0;
@@ -177,6 +207,17 @@ function summarizeEvents(events: AuditEvent[]): {
     string,
     { actionLabel: string; count: number; failed: number; severity: AuditSeverity }
   >();
+  const attentionActors = new Map<
+    string,
+    { actorLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
+  >();
+
+  const severityWeight = (severity: AuditSeverity): number => {
+    if (severity === "critical") return 4;
+    if (severity === "high-risk") return 3;
+    if (severity === "risky") return 2;
+    return 1;
+  };
 
   for (const event of events) {
     if (event.severity === "critical") critical += 1;
@@ -209,6 +250,22 @@ function summarizeEvents(events: AuditEvent[]): {
         }
 
         attentionActions.set(label, existing);
+
+        const actor = actorLabel(event);
+        const actorEntry = attentionActors.get(actor) ?? {
+          actorLabel: actor,
+          count: 0,
+          severity: event.severity,
+          actions: new Set<string>()
+        };
+
+        actorEntry.count += 1;
+        actorEntry.actions.add(label);
+        if (severityWeight(event.severity) > severityWeight(actorEntry.severity)) {
+          actorEntry.severity = event.severity;
+        }
+
+        attentionActors.set(actor, actorEntry);
       }
     }
 
@@ -241,20 +298,28 @@ function summarizeEvents(events: AuditEvent[]): {
     latestAttention,
     attentionActions: [...attentionActions.values()]
       .sort((left, right) => {
-        const severityWeight = (severity: AuditSeverity): number => {
-          if (severity === "critical") return 4;
-          if (severity === "high-risk") return 3;
-          if (severity === "risky") return 2;
-          return 1;
-        };
-
         return (
           severityWeight(right.severity) - severityWeight(left.severity) ||
           right.count - left.count ||
           right.failed - left.failed
         );
       })
+      .slice(0, 3),
+    attentionActors: [...attentionActors.values()]
+      .sort((left, right) => {
+        return (
+          severityWeight(right.severity) - severityWeight(left.severity) ||
+          right.count - left.count ||
+          right.actions.size - left.actions.size
+        );
+      })
       .slice(0, 3)
+      .map((entry) => ({
+        actorLabel: entry.actorLabel,
+        count: entry.count,
+        severity: entry.severity,
+        actions: [...entry.actions]
+      }))
   };
 }
 
@@ -385,6 +450,17 @@ async function printLogs(
         "   TraceRoot 目前主要在盯边界有没有重新变宽，以及新的风险信号有没有冒出来。",
         ""
       );
+    }
+
+    if (summary.attentionActors.length > 0) {
+      lines.push("🧭 今天这些 agent 最值得你看一眼：");
+      for (const actor of summary.attentionActors) {
+        const prefix = severityIcon(actor.severity);
+        lines.push(
+          `- ${prefix} ${actor.actorLabel}：出现了 ${actor.count} 次值得留意的动作（${actor.actions.slice(0, 2).join("、")}）`
+        );
+      }
+      lines.push("");
     }
 
     lines.push("📘 最近发生的事：", "");
