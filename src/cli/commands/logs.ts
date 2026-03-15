@@ -24,6 +24,11 @@ interface LogsOptions {
   all?: boolean;
 }
 
+type TimelineEntry = {
+  primary: AuditEvent;
+  related: AuditEvent[];
+};
+
 function severityIcon(severity: AuditSeverity): string {
   switch (severity) {
     case "critical":
@@ -134,6 +139,60 @@ function eventHeadline(event: AuditEvent): string {
   }
 }
 
+function eventTimeMs(event: AuditEvent): number {
+  const value = new Date(event.timestamp).getTime();
+  return Number.isNaN(value) ? 0 : value;
+}
+
+function canFoldIntoOneIncident(first: AuditEvent, next: AuditEvent): boolean {
+  if (first.category !== "action-event" || next.category !== "action-event") {
+    return false;
+  }
+
+  if (first.status !== "attempted") {
+    return false;
+  }
+
+  if (!(next.status === "succeeded" || next.status === "failed")) {
+    return false;
+  }
+
+  if (
+    first.action !== next.action ||
+    first.runtime !== next.runtime ||
+    first.target !== next.target
+  ) {
+    return false;
+  }
+
+  return Math.abs(eventTimeMs(next) - eventTimeMs(first)) <= 2 * 60 * 1000;
+}
+
+function buildTimelineEntries(eventsAscending: AuditEvent[]): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+
+  for (let index = 0; index < eventsAscending.length; index += 1) {
+    const current = eventsAscending[index]!;
+    const next = eventsAscending[index + 1];
+
+    if (next && canFoldIntoOneIncident(current, next)) {
+      entries.push({
+        primary: next,
+        related: [current]
+      });
+      index += 1;
+      continue;
+    }
+
+    entries.push({
+      primary: current,
+      related: []
+    });
+  }
+
+  return entries;
+}
+
 function looksLikeGenericRuntimeNarration(message: string): boolean {
   const normalized = message.trim();
   return [
@@ -171,6 +230,41 @@ function eventDetail(event: AuditEvent): string | undefined {
     default:
       return "TraceRoot 已经把这次动作记进审计时间线里。";
   }
+}
+
+function timelineHeadline(entry: TimelineEntry): string {
+  if (entry.related.length === 0) {
+    return eventHeadline(entry.primary);
+  }
+
+  const actor = actorLabel(entry.primary);
+  const label = actionLabel(entry.primary.action);
+
+  if (entry.primary.status === "succeeded") {
+    return `${actor} 已完成：${label}`;
+  }
+
+  if (entry.primary.status === "failed") {
+    return `${actor} 没有完成：${label}`;
+  }
+
+  return eventHeadline(entry.primary);
+}
+
+function timelineDetail(entry: TimelineEntry): string | undefined {
+  if (entry.related.length === 0) {
+    return eventDetail(entry.primary);
+  }
+
+  if (entry.primary.status === "succeeded") {
+    return "TraceRoot 看到这个动作先被触发，随后已经执行完成。";
+  }
+
+  if (entry.primary.status === "failed") {
+    return "TraceRoot 看到这个动作先被触发，不过最后没有完成。";
+  }
+
+  return eventDetail(entry.primary);
 }
 
 function summarizeEvents(events: AuditEvent[]): {
@@ -335,31 +429,32 @@ function eventKey(event: AuditEvent): string {
   ].join("::");
 }
 
-function renderEvent(event: AuditEvent): string[] {
-  const headline = eventHeadline(event);
+function renderTimelineEntry(entry: TimelineEntry): string[] {
+  const headline = timelineHeadline(entry);
   const lines = [
-    `${severityIcon(event.severity)} [${formatTimestamp(event.timestamp)}] ${headline}`
+    `${severityIcon(entry.primary.severity)} [${formatTimestamp(entry.primary.timestamp)}] ${headline}`
   ];
 
-  const detail = eventDetail(event);
+  const detail = timelineDetail(entry);
   if (detail && detail !== headline) {
     lines.push(`   📝 ${detail}`);
   }
 
-  if (event.target) {
-    lines.push(`   📍 发生在: ${displayUserPath(event.target)}`);
+  if (entry.primary.target) {
+    lines.push(`   📍 发生在: ${displayUserPath(entry.primary.target)}`);
   }
 
   const feedPath =
-    typeof event.evidence?.feedPath === "string" && event.evidence.feedPath.trim().length > 0
-      ? displayUserPath(event.evidence.feedPath)
+    typeof entry.primary.evidence?.feedPath === "string" &&
+    entry.primary.evidence.feedPath.trim().length > 0
+      ? displayUserPath(entry.primary.evidence.feedPath)
       : undefined;
   if (feedPath) {
     lines.push(`   🧷 来源日志: ${feedPath}`);
   }
 
-  if (event.recommendation) {
-    lines.push(`   🔧 TraceRoot 建议先做: ${event.recommendation}`);
+  if (entry.primary.recommendation) {
+    lines.push(`   🔧 TraceRoot 建议先做: ${entry.primary.recommendation}`);
   }
 
   return lines;
@@ -391,6 +486,7 @@ async function printLogs(
     limit: options.limit
   });
   const eventsAscending = [...result.events].reverse();
+  const timelineEntries = buildTimelineEntries(eventsAscending);
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending);
@@ -417,6 +513,7 @@ async function printLogs(
 
     lines.push(
       `📚 本次显示 ${eventsAscending.length} 条审计记录`,
+      `🧾 对你来说更像 ${timelineEntries.length} 件完整的事`,
       `🧮 风险概览: 🚨 ${summary.critical} / 🛑 ${summary.highRisk} / ⚠️ ${summary.risky} / 🟢 ${summary.safe}`,
       `🎬 动作记录: ${summary.actionEvents} 条`,
       `🧱 边界与漂移: ${summary.boundaryEvents} 条边界漂移，${summary.driftEvents} 条整体变化`,
@@ -475,8 +572,8 @@ async function printLogs(
     return [];
   }
 
-  for (const event of eventsAscending) {
-    runtime.io.stdout(`${renderEvent(event).join("\n")}\n`);
+  for (const entry of timelineEntries) {
+    runtime.io.stdout(`${renderTimelineEntry(entry).join("\n")}\n`);
   }
 
   return eventsAscending;

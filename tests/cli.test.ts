@@ -1684,9 +1684,10 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsCapture.read().stdout).toContain("今天最值得留意的动作");
       expect(logsCapture.read().stdout).toContain("对外发邮件：出现了 1 次");
-      expect(logsCapture.read().stdout).toContain("Agent 开始尝试：对外发邮件");
-      expect(logsCapture.read().stdout).toContain("Agent 已完成：对外发邮件");
-      expect(logsCapture.read().stdout).toContain("TraceRoot 建议先做: Require confirmation before outbound email actions.");
+      expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
+      expect(logsCapture.read().stdout).toContain("TraceRoot 看到这个动作先被触发，随后已经执行完成。");
+      expect(logsCapture.read().stdout).toContain("建议：Require confirmation before outbound email actions.");
+      expect(logsCapture.read().stdout).toContain("对你来说更像 1 件完整的事");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
