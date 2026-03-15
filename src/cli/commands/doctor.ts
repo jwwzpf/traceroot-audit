@@ -38,6 +38,7 @@ import {
   runtimeActorLabel,
   summarizeActionLabels
 } from "../../audit/presentation";
+import { discoverRuntimeEventFeeds } from "../../audit/feeds";
 import { readAuditEvents } from "../../audit/store";
 import { loadWatchStatusSession } from "../../audit/status";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
@@ -49,6 +50,47 @@ import { discoverHost } from "../../core/discovery";
 import { runHostWatch } from "../watch";
 
 import type { CliRuntime } from "../index";
+
+function knownRuntimeHomes(homeDir: string): string[] {
+  return [
+    path.join(homeDir, ".openclaw"),
+    path.join(homeDir, ".mcp"),
+    path.join(homeDir, ".config", "openclaw"),
+    path.join(homeDir, ".config", "claw"),
+    path.join(homeDir, ".config", "mcp"),
+    path.join(homeDir, ".config", "mcp-servers"),
+    path.join(homeDir, ".local", "share", "openclaw"),
+    path.join(homeDir, ".local", "share", "claw"),
+    path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
+    path.join(homeDir, "AppData", "Roaming", "Claw"),
+    path.join(homeDir, "AppData", "Local", "OpenClaw"),
+    path.join(homeDir, "AppData", "Local", "Claw"),
+    ...(process.platform === "darwin"
+      ? [
+          path.join(homeDir, "Library", "Application Support", "OpenClaw"),
+          path.join(homeDir, "Library", "Application Support", "Claw"),
+          path.join(homeDir, "Library", "Application Support", "MCP")
+        ]
+      : [])
+  ];
+}
+
+async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]> {
+  const matchedRoots: string[] = [];
+
+  for (const root of knownRuntimeHomes(homeDir)) {
+    try {
+      const feeds = await discoverRuntimeEventFeeds(root);
+      if (feeds.length > 0) {
+        matchedRoots.push(root);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return matchedRoots;
+}
 
 async function loadLatestAttentionLine(options: {
   target?: string;
@@ -657,8 +699,9 @@ async function runMachineLevelDoctorWatch(options: {
   const hostDiscovery = await discoverHost({
     includeCwd: options.includeCwd
   });
+  const knownRuntimeFeedHomes = await discoverKnownRuntimeFeedHomes(hostDiscovery.homeDir);
 
-  if (hostDiscovery.candidates.length === 0) {
+  if (hostDiscovery.candidates.length === 0 && knownRuntimeFeedHomes.length === 0) {
     options.runtime.io.stdout(
       [
         "TraceRoot Audit Doctor",
@@ -695,7 +738,11 @@ async function runMachineLevelDoctorWatch(options: {
       };
     } else if (savedMachinePreferences?.mode !== "local-only") {
       const likelyChannels = await detectLikelyNotifyChannelsForTargets(
-        hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath)
+        (
+          hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath).length > 0
+            ? hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath)
+            : knownRuntimeFeedHomes.slice(0, 6)
+        )
       );
       const selection = await promptNotificationSelection(options.runtime, {
         likelyChannels,

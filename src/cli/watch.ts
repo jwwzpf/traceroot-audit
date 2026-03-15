@@ -1,3 +1,6 @@
+import { stat } from "node:fs/promises";
+import path from "node:path";
+
 import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
 import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
@@ -685,11 +688,83 @@ function hostActionBelongsToVisibleSurface(
 
 async function discoverHostRuntimeFeeds(options: {
   candidates: Array<{ absolutePath: string }>;
-}): Promise<RuntimeEventFeed[]> {
+  homeDir: string;
+}): Promise<{
+  feeds: RuntimeEventFeed[];
+  watchedRoots: Array<{ absolutePath: string; displayPath: string; kind: "candidate" | "known-runtime-home" }>;
+}> {
   const feedMap = new Map<string, RuntimeEventFeed>();
+  const watchedRoots = new Map<
+    string,
+    { absolutePath: string; displayPath: string; kind: "candidate" | "known-runtime-home" }
+  >();
+  const rootCandidates = new Map<
+    string,
+    { absolutePath: string; displayPath: string; kind: "candidate" | "known-runtime-home" }
+  >();
 
   for (const candidate of options.candidates) {
-    const feeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+    rootCandidates.set(candidate.absolutePath, {
+      absolutePath: candidate.absolutePath,
+      displayPath: displayUserPath(candidate.absolutePath),
+      kind: "candidate"
+    });
+  }
+
+  const wellKnownRuntimeRoots = [
+    path.join(options.homeDir, ".openclaw"),
+    path.join(options.homeDir, ".mcp"),
+    path.join(options.homeDir, ".config", "openclaw"),
+    path.join(options.homeDir, ".config", "claw"),
+    path.join(options.homeDir, ".config", "mcp"),
+    path.join(options.homeDir, ".config", "mcp-servers"),
+    path.join(options.homeDir, ".local", "share", "openclaw"),
+    path.join(options.homeDir, ".local", "share", "claw"),
+    path.join(options.homeDir, "AppData", "Roaming", "OpenClaw"),
+    path.join(options.homeDir, "AppData", "Roaming", "Claw"),
+    path.join(options.homeDir, "AppData", "Local", "OpenClaw"),
+    path.join(options.homeDir, "AppData", "Local", "Claw"),
+    ...(process.platform === "darwin"
+      ? [
+          path.join(options.homeDir, "Library", "Application Support", "OpenClaw"),
+          path.join(options.homeDir, "Library", "Application Support", "Claw"),
+          path.join(options.homeDir, "Library", "Application Support", "MCP")
+        ]
+      : [])
+  ];
+
+  for (const knownRoot of wellKnownRuntimeRoots) {
+    if (rootCandidates.has(knownRoot)) {
+      continue;
+    }
+
+    try {
+      if (!(await stat(knownRoot)).isDirectory()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    rootCandidates.set(knownRoot, {
+      absolutePath: knownRoot,
+      displayPath: displayUserPath(knownRoot),
+      kind: "known-runtime-home"
+    });
+  }
+
+  for (const candidate of rootCandidates.values()) {
+    let feeds: RuntimeEventFeed[] = [];
+
+    try {
+      feeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+    } catch {
+      continue;
+    }
+
+    if (feeds.length > 0) {
+      watchedRoots.set(candidate.absolutePath, candidate);
+    }
 
     for (const feed of feeds) {
       if (!feedMap.has(feed.absolutePath)) {
@@ -698,9 +773,14 @@ async function discoverHostRuntimeFeeds(options: {
     }
   }
 
-  return [...feedMap.values()].sort((left, right) =>
-    left.displayPath.localeCompare(right.displayPath)
-  );
+  return {
+    feeds: [...feedMap.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    ),
+    watchedRoots: [...watchedRoots.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    )
+  };
 }
 
 function syncRuntimeFeeds(options: {
@@ -776,9 +856,12 @@ export async function runHostWatch(options: {
   let currentDiscovery = initialDiscovery;
   let lastTopologyRefreshAt = Date.now();
   let lastFeedRefreshAt = Date.now();
-  const runtimeFeeds = await discoverHostRuntimeFeeds({
-    candidates: initialDiscovery.candidates
+  const initialRuntimeFeedDiscovery = await discoverHostRuntimeFeeds({
+    candidates: initialDiscovery.candidates,
+    homeDir: initialDiscovery.homeDir
   });
+  const runtimeFeeds = initialRuntimeFeedDiscovery.feeds;
+  let watchedFeedRoots = initialRuntimeFeedDiscovery.watchedRoots;
   const hostAuditCoverage = await loadAggregatedAuditCoverage(initialDiscovery.candidates);
   const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
     feeds: runtimeFeeds,
@@ -804,7 +887,7 @@ export async function runHostWatch(options: {
       !recentStartupKeys.has(actionEventKey(event)) &&
       event.category === "action-event" &&
       event.severity !== "safe" &&
-      hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates)
+      hostActionBelongsToVisibleSurface(event, watchedFeedRoots)
   );
   const freshStartupFeedEvents = startupFeedEvents.filter(
     (event) => !seenActionEvents.has(actionEventKey(event))
@@ -813,7 +896,7 @@ export async function runHostWatch(options: {
     ...initialAuditEvents.events
       .filter(isAlertWorthyActionEvent)
       .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
-      .filter((event) => hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates)),
+      .filter((event) => hostActionBelongsToVisibleSurface(event, watchedFeedRoots)),
     ...freshStartupFeedEvents.filter(isAlertWorthyActionEvent)
   ];
   const recentStartupAlerts = startupAttentionEvents
@@ -844,6 +927,16 @@ export async function runHostWatch(options: {
       "🪶 为了不打扰这台机器，TraceRoot 会一直盯住已接上的动作入口；整机入口变化会在后台轻量复查。",
       ""
     );
+
+    if (initialDiscovery.candidates.length === 0 && watchedFeedRoots.length > 0) {
+      initialLines.push(
+        `🎧 虽然还没锁定明显的项目目录，TraceRoot 已经先在这些运行位点上听到原生日志：${watchedFeedRoots
+          .slice(0, 3)
+          .map((root) => root.displayPath)
+          .join("、")}`,
+        ""
+      );
+    }
 
     if (notificationConfig.openclawChannel && notificationConfig.openclawTarget) {
       initialLines.push(
@@ -1013,14 +1106,17 @@ export async function runHostWatch(options: {
       cycle === 1 || now - lastFeedRefreshAt >= feedRefreshEveryMs;
 
     if (shouldRefreshFeeds) {
-      const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
-        candidates: currentDiscovery.candidates
+      const latestRuntimeFeedDiscovery = await discoverHostRuntimeFeeds({
+        candidates: currentDiscovery.candidates,
+        homeDir: currentDiscovery.homeDir
       });
+      const latestRuntimeFeeds = latestRuntimeFeedDiscovery.feeds;
       syncRuntimeFeeds({
         runtimeFeeds,
         latestRuntimeFeeds,
         runtimeFeedCursor
       });
+      watchedFeedRoots = latestRuntimeFeedDiscovery.watchedRoots;
       lastFeedRefreshAt = now;
     }
 
@@ -1094,14 +1190,17 @@ export async function runHostWatch(options: {
       includeCwd: includeCwd ?? false
     });
     currentDiscovery = latestDiscovery;
-    const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
-      candidates: currentDiscovery.candidates
+    const latestRuntimeFeedDiscovery = await discoverHostRuntimeFeeds({
+      candidates: currentDiscovery.candidates,
+      homeDir: currentDiscovery.homeDir
     });
+    const latestRuntimeFeeds = latestRuntimeFeedDiscovery.feeds;
     syncRuntimeFeeds({
       runtimeFeeds,
       latestRuntimeFeeds,
       runtimeFeedCursor
     });
+    watchedFeedRoots = latestRuntimeFeedDiscovery.watchedRoots;
     lastFeedRefreshAt = now;
 
     const currentSnapshot = createHostSnapshot(latestDiscovery);
@@ -1321,6 +1420,7 @@ export async function runTargetWatch(options: {
     .slice(0, 3);
   const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
   let previousBoundaryStatus: BoundaryStatus | null = null;
+  let lastFeedRefreshAt = Date.now();
 
   if (hardeningProfileResult.profile) {
     const initialBoundaryState = await buildCurrentHardeningState(
@@ -1558,20 +1658,28 @@ export async function runTargetWatch(options: {
   });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
+  const feedRefreshEveryMs = Math.max(intervalSeconds * 1000 * 5, 5_000);
 
   for (let cycle = 1; cycle <= totalCycles; cycle += 1) {
     if (cycle > 1) {
       await sleep(intervalSeconds * 1000);
     }
 
+    const now = Date.now();
+    const shouldRefreshFeeds =
+      cycle === 1 ||
+      runtimeFeeds.length === 0 ||
+      now - lastFeedRefreshAt >= feedRefreshEveryMs;
+
+    if (shouldRefreshFeeds) {
       const latestRuntimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
-      for (const feed of latestRuntimeFeeds) {
-        if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
-          runtimeFeeds.push(feed);
-          runtimeFeedCursor.byteOffsets.set(feed.absolutePath, 0);
-          runtimeFeedCursor.trailingFragments.set(feed.absolutePath, "");
-        }
-      }
+      syncRuntimeFeeds({
+        runtimeFeeds,
+        latestRuntimeFeeds,
+        runtimeFeedCursor
+      });
+      lastFeedRefreshAt = now;
+    }
 
     const feedEvents = await readNewRuntimeFeedEvents({
       feeds: runtimeFeeds,
@@ -1587,7 +1695,6 @@ export async function runTargetWatch(options: {
         attentionEvent: latestAttentionEvent(feedEvents)
       });
     }
-    const now = Date.now();
     const shouldRunDeepCheck =
       cycle === 1 || now - lastDeepCheckAt >= deepCheckIntervalMs;
     let latestScan = initialScan;

@@ -652,6 +652,165 @@ describe("CLI", () => {
     }
   });
 
+  it("can hear native runtime events from ~/.config/openclaw even when no project folder is obvious", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-config-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".config", "openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("虽然还没锁定明显的项目目录");
+      expect(output).toContain("~/.config/openclaw");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io
+      );
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("~/.config/openclaw/mailer.ts");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can reuse a detected chat route from ~/.config/openclaw even when no project folder is obvious", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-config-notify-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      const openClawDir = path.join(tempHome, ".config", "openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const messengerArgs = await messenger.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(messengerArgs).toContain("--channel");
+      expect(messengerArgs).toContain("telegram");
+      expect(messengerArgs).toContain("--target");
+      expect(messengerArgs).toContain("@ops-room");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("backfills today's earlier risky runtime actions into the audit timeline when doctor watch starts later", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-backfill-home-"));
     const previousHome = process.env.HOME;
