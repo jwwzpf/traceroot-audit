@@ -1,7 +1,7 @@
-import os from "node:os";
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
+import { resolveStateHomeDir } from "../utils/home";
 import { displayUserPath } from "../utils/paths";
 
 interface RecentDoctorTarget {
@@ -18,7 +18,7 @@ interface RecentDoctorContext {
 }
 
 function recentTargetPath(): string {
-  return path.join(os.homedir(), ".traceroot", "doctor-recent.json");
+  return path.join(resolveStateHomeDir(), ".traceroot", "doctor-recent.json");
 }
 
 export async function loadRecentDoctorTarget(): Promise<string | null> {

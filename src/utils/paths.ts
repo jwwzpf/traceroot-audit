@@ -1,5 +1,6 @@
-import os from "node:os";
 import path from "node:path";
+
+import { resolveUserHomeDir } from "./home";
 
 export function toPosixPath(value: string): string {
   return value.split(path.sep).join("/");
@@ -13,7 +14,7 @@ export function relativeToRoot(rootDir: string, absolutePath: string): string {
 export function displayUserPath(value: string, options?: { cwd?: string }): string {
   const resolved = normalizeDisplayPath(path.resolve(value));
   const cwd = options?.cwd ? path.resolve(options.cwd) : process.cwd();
-  const home = normalizeDisplayPath(path.resolve(os.homedir()));
+  const home = normalizeDisplayPath(path.resolve(resolveUserHomeDir()));
 
   if (resolved === cwd) {
     return ".";

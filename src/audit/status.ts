@@ -1,8 +1,8 @@
-import os from "node:os";
 import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import type { AuditCategory, AuditEvent, AuditSeverity } from "./types";
+import { resolveStateHomeDir } from "../utils/home";
 
 export interface WatchStatusAttention {
   timestamp: string;
@@ -33,7 +33,7 @@ interface WatchStatusFile {
   sessions: WatchStatusSession[];
 }
 
-export function resolveWatchStatusPath(homeDir = os.homedir()): {
+export function resolveWatchStatusPath(homeDir = resolveStateHomeDir()): {
   dirPath: string;
   filePath: string;
 } {
@@ -52,7 +52,7 @@ function sessionKey(scope: "host" | "target", target?: string | null): string {
   return `target:${path.resolve(target ?? ".")}`;
 }
 
-async function loadWatchStatusFile(homeDir = os.homedir()): Promise<WatchStatusFile> {
+async function loadWatchStatusFile(homeDir = resolveStateHomeDir()): Promise<WatchStatusFile> {
   const paths = resolveWatchStatusPath(homeDir);
 
   try {
@@ -79,7 +79,7 @@ async function loadWatchStatusFile(homeDir = os.homedir()): Promise<WatchStatusF
 
 async function saveWatchStatusFile(
   file: WatchStatusFile,
-  homeDir = os.homedir()
+  homeDir = resolveStateHomeDir()
 ): Promise<void> {
   const paths = resolveWatchStatusPath(homeDir);
   await mkdir(paths.dirPath, { recursive: true });
@@ -109,7 +109,7 @@ export async function updateWatchStatusSession(options: {
   attentionEvent?: AuditEvent | null;
   homeDir?: string;
 }): Promise<WatchStatusSession> {
-  const homeDir = options.homeDir ?? os.homedir();
+  const homeDir = options.homeDir ?? resolveStateHomeDir();
   const file = await loadWatchStatusFile(homeDir);
   const key = sessionKey(options.scope, options.target);
   const timestamp = options.heartbeatAt ?? new Date().toISOString();

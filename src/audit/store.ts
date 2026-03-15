@@ -1,8 +1,8 @@
-import os from "node:os";
 import path from "node:path";
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 
 import type { AuditEvent, AuditSeverity } from "./types";
+import { resolveStateHomeDir } from "../utils/home";
 
 export interface AuditPaths {
   dirPath: string;
@@ -31,7 +31,7 @@ const DEFAULT_RETENTION: Required<AuditRetentionOptions> = {
   trimToEvents: 8_000
 };
 
-export function resolveAuditPaths(homeDir = os.homedir()): AuditPaths {
+export function resolveAuditPaths(homeDir = resolveStateHomeDir()): AuditPaths {
   const dirPath = path.join(homeDir, ".traceroot", "audit");
   return {
     dirPath,
@@ -41,7 +41,7 @@ export function resolveAuditPaths(homeDir = os.homedir()): AuditPaths {
 
 export async function appendAuditEvents(
   events: AuditEvent[],
-  homeDir = os.homedir(),
+  homeDir = resolveStateHomeDir(),
   retention: AuditRetentionOptions = {}
 ): Promise<AuditPaths> {
   const paths = resolveAuditPaths(homeDir);

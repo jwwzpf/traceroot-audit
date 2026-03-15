@@ -1,5 +1,4 @@
 import { access, realpath, stat } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import fg from "fast-glob";
@@ -7,6 +6,7 @@ import fg from "fast-glob";
 import { loadManifest } from "../manifest/loader";
 import type { ScanTargetType } from "../rules/types";
 import { discoverFiles, resolveTarget } from "../utils/files";
+import { resolveUserHomeDir } from "../utils/home";
 import { displayUserPath } from "../utils/paths";
 import { analyzeSurface, type ScanSurfaceKind, type SuggestedScanTarget, type SurfaceConfidence, type SurfaceDetection } from "./surfaces";
 
@@ -532,7 +532,7 @@ export async function discoverTarget(targetInput: string): Promise<DiscoveryResu
 export async function discoverHost(
   options: DiscoverHostOptions = {}
 ): Promise<HostDiscoveryResult> {
-  const homeDir = await canonicalPath(options.homeDir ?? os.homedir());
+  const homeDir = await canonicalPath(options.homeDir ?? resolveUserHomeDir());
   const cwd = await canonicalPath(options.cwd ?? process.cwd());
   const includeCwd = options.includeCwd ?? false;
   const rootSpecs = hostSearchRoots(homeDir, cwd, includeCwd);

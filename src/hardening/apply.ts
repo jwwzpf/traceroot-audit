@@ -426,7 +426,7 @@ function actionLabel(action) {
 function displayUserPath(value) {
   const resolved = path.resolve(value);
   const cwd = process.cwd();
-  const home = path.resolve(os.homedir());
+  const home = path.resolve(process.env.HOME || process.env.USERPROFILE || os.homedir());
   if (resolved === cwd) return ".";
   if (resolved.startsWith(cwd + path.sep)) return "./" + path.relative(cwd, resolved).split(path.sep).join("/");
   if (resolved === home) return "~";
@@ -435,7 +435,7 @@ function displayUserPath(value) {
 }
 
 async function appendEvents(events) {
-  const auditDir = path.join(os.homedir(), ".traceroot", "audit");
+  const auditDir = path.join(process.env.TRACEROOT_HOME || process.env.HOME || process.env.USERPROFILE || os.homedir(), ".traceroot", "audit");
   const eventsPath = path.join(auditDir, "events.jsonl");
   await fs.mkdir(auditDir, { recursive: true });
   const content = events.map((event) => JSON.stringify(event)).join("\\n") + "\\n";

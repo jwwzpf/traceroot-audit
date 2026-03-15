@@ -1,10 +1,9 @@
-import { createServer } from "node:http";
 import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import fg from "fast-glob";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runCli, type CliChoice, type CliPrompter } from "../src/cli/index";
 
@@ -29,15 +28,16 @@ async function createWebhookReceiver() {
   const queue: Array<Record<string, unknown>> = [];
   let resolver: ((value: Record<string, unknown>) => void) | null = null;
   let totalCount = 0;
+  const previousFetch = globalThis.fetch;
 
-  const server = createServer((req, res) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-    req.on("end", () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const rawBody =
+        typeof init?.body === "string" ? init.body : init?.body ? String(init.body) : "";
       const payload =
-        body.trim().length > 0 ? (JSON.parse(body) as Record<string, unknown>) : {};
+        rawBody.trim().length > 0 ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
+
       totalCount += 1;
       if (resolver) {
         resolver(payload);
@@ -45,22 +45,13 @@ async function createWebhookReceiver() {
       } else {
         queue.push(payload);
       }
-      res.statusCode = 204;
-      res.end();
-    });
-  });
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Could not start webhook receiver");
-  }
+      return new Response(null, { status: 204 });
+    })
+  );
 
   return {
-    url: `http://127.0.0.1:${address.port}/notify`,
+    url: "https://traceroot.invalid/notify",
     async waitForRequest(timeoutMs = 5000): Promise<Record<string, unknown>> {
       if (queue.length > 0) {
         return queue.shift()!;
@@ -82,16 +73,11 @@ async function createWebhookReceiver() {
       return totalCount;
     },
     async close(): Promise<void> {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
+      if (previousFetch) {
+        vi.stubGlobal("fetch", previousFetch);
+      } else {
+        vi.unstubAllGlobals();
+      }
     }
   };
 }
@@ -228,6 +214,28 @@ function createStaticPrompter(answers: {
 }
 
 describe("CLI", () => {
+  let previousHome: string | undefined;
+  let testHome: string;
+
+  beforeEach(async () => {
+    previousHome = process.env.HOME;
+    testHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-test-home-"));
+    process.env.HOME = testHome;
+    delete process.env.TRACEROOT_HOME;
+  });
+
+  afterEach(async () => {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    await rm(testHome, { recursive: true, force: true });
+  });
+
   it("renders JSON output for scan", async () => {
     const capture = createCapture();
     const exitCode = await runCli(
@@ -2621,6 +2629,101 @@ describe("CLI", () => {
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("openclaw-gateway.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest OpenClaw gateway logs from openclaw.json even when the runtime folder has a generic name", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-generic-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const runtimeDir = path.join(tempHome, "agent-runtime");
+      await mkdir(runtimeDir, { recursive: true });
+      await writeFile(
+        path.join(runtimeDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(runtimeDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const gatewayLog = path.join(tempHome, "generic-openclaw.log");
+      await writeFile(
+        path.join(runtimeDir, "openclaw.json"),
+        JSON.stringify(
+          {
+            logging: {
+              file: gatewayLog
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+      await writeFile(
+        gatewayLog,
+        `${JSON.stringify({
+          timestamp: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+          level: "warn",
+          subsystem: "gateway",
+          message: "Attempting to send email to customer@example.com"
+        })}\n`,
+        "utf8"
+      );
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          runtimeDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only", "local-only"],
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("generic-openclaw.log");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", runtimeDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("generic-openclaw.log");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+
+import { resolveStateHomeDir } from "../utils/home";
 
 export interface StoredWatchPreferences {
   version: 1;
@@ -19,7 +20,7 @@ function preferencesPath(rootDir: string): string {
 }
 
 function machinePreferencesPath(): string {
-  return path.join(os.homedir(), ".traceroot", "doctor-watch-host.json");
+  return path.join(resolveStateHomeDir(), ".traceroot", "doctor-watch-host.json");
 }
 
 export async function loadWatchPreferences(

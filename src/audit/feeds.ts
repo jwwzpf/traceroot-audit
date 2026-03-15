@@ -824,41 +824,52 @@ function parseRuntimeFeedEvent(
   };
 }
 
-async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<string[]> {
+type CompanionFeed = {
+  absolutePath: string;
+  kind: RuntimeEventFeed["kind"];
+};
+
+async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<CompanionFeed[]> {
   const rootName = path.basename(targetRoot).toLowerCase();
   const looksLikeOpenClawRoot =
     rootName.startsWith(".openclaw") || rootName.includes("openclaw");
-
-  if (!looksLikeOpenClawRoot) {
-    return [];
-  }
-
-  const candidates = new Set<string>();
+  const candidates = new Map<string, CompanionFeed>();
+  let hasOpenClawConfig = false;
 
   try {
     const configRaw = await readFile(path.join(targetRoot, "openclaw.json"), "utf8");
     const config = JSON.parse(configRaw) as {
       logging?: { file?: unknown };
     };
+    hasOpenClawConfig = true;
 
     if (typeof config.logging?.file === "string" && config.logging.file.trim().length > 0) {
-      candidates.add(path.resolve(targetRoot, config.logging.file.trim()));
+      const absolutePath = path.resolve(targetRoot, config.logging.file.trim());
+      candidates.set(absolutePath, {
+        absolutePath,
+        kind: "openclaw-gateway-log"
+      });
     }
   } catch {
     // ignore invalid or missing config
   }
 
-  const defaultLogs = await fg("/tmp/openclaw/openclaw-*.log", {
-    absolute: true,
-    onlyFiles: true,
-    unique: true
-  });
+  if (looksLikeOpenClawRoot || hasOpenClawConfig) {
+    const defaultLogs = await fg("/tmp/openclaw/openclaw-*.log", {
+      absolute: true,
+      onlyFiles: true,
+      unique: true
+    });
 
-  for (const filePath of defaultLogs) {
-    candidates.add(filePath);
+    for (const filePath of defaultLogs) {
+      candidates.set(filePath, {
+        absolutePath: filePath,
+        kind: classifyFeedKind(filePath)
+      });
+    }
   }
 
-  return [...candidates];
+  return [...candidates.values()];
 }
 
 async function canonicalFeedPath(candidatePath: string): Promise<string> {
@@ -920,13 +931,13 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
   }
 
   const companionFeeds = await discoverOpenClawCompanionFeeds(targetRoot);
-  for (const candidatePath of companionFeeds) {
-    const absolutePath = await canonicalFeedPath(candidatePath);
+  for (const companionFeed of companionFeeds) {
+    const absolutePath = await canonicalFeedPath(companionFeed.absolutePath);
     feedMap.set(absolutePath, {
       absolutePath,
       displayPath: displayUserPath(absolutePath),
       rootDir: targetRoot,
-      kind: classifyFeedKind(absolutePath)
+      kind: companionFeed.kind ?? classifyFeedKind(absolutePath)
     });
   }
 
