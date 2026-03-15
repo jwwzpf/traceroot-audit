@@ -134,6 +134,102 @@ function renderAuditCoverageLines(options: {
   return lines;
 }
 
+async function loadHostAuditCoverage(candidates: Array<{ absolutePath: string }>): Promise<{
+  surfaceCount: number;
+  installedEntrypointCount: number;
+  coveredActions: string[];
+  pendingActions: string[];
+  installedEntrypointLabels: string[];
+}> {
+  const coveredActions = new Set<string>();
+  const pendingActions = new Set<string>();
+  const installedEntrypointLabels = new Set<string>();
+  let installedEntrypointCount = 0;
+  let surfaceCount = 0;
+
+  for (const candidate of candidates) {
+    const coverage = await loadAuditCoverageSnapshot(candidate.absolutePath);
+    if (!coverage.snapshot) {
+      continue;
+    }
+
+    surfaceCount += 1;
+    installedEntrypointCount += coverage.snapshot.installedEntrypointCount;
+
+    for (const action of coverage.snapshot.coveredActions) {
+      coveredActions.add(action);
+    }
+
+    for (const action of coverage.snapshot.pendingActions) {
+      pendingActions.add(action);
+    }
+
+    for (const label of coverage.snapshot.installedEntrypointLabels) {
+      installedEntrypointLabels.add(label);
+    }
+  }
+
+  return {
+    surfaceCount,
+    installedEntrypointCount,
+    coveredActions: [...coveredActions],
+    pendingActions: [...pendingActions],
+    installedEntrypointLabels: [...installedEntrypointLabels]
+  };
+}
+
+function renderHostAuditCoverageLines(options: {
+  surfaceCount: number;
+  installedEntrypointCount: number;
+  coveredActions: string[];
+  pendingActions: string[];
+  installedEntrypointLabels: string[];
+  runtimeFeedCount: number;
+}): string[] {
+  if (options.surfaceCount === 0) {
+    if (options.runtimeFeedCount > 0) {
+      return [
+        "🎬 动作审计覆盖：",
+        `- 这次先靠 ${options.runtimeFeedCount} 个运行时事件入口陪跑整机上的 agent。`,
+        "- 只要这些入口里开始吐出高风险动作，TraceRoot 就会立刻提醒并留下审计轨迹。",
+        ""
+      ];
+    }
+
+    return [];
+  }
+
+  const lines = [
+    "🎬 动作审计覆盖：",
+    `- 这台机器上已经有 ${options.surfaceCount} 个入口被接进了动作审计。`,
+    `- 目前已经盯住：${summarizeActionLabels(options.coveredActions)}。`,
+    `- 已经自动接好 ${options.installedEntrypointCount} 个常见动作入口。`
+  ];
+
+  if (options.installedEntrypointLabels.length > 0) {
+    lines.push(
+      `- 已接好的重点入口：${options.installedEntrypointLabels.slice(0, 3).join("、")}${
+        options.installedEntrypointLabels.length > 3
+          ? `，以及另外 ${options.installedEntrypointLabels.length - 3} 个入口`
+          : ""
+      }。`
+    );
+  }
+
+  if (options.pendingActions.length > 0) {
+    lines.push(
+      `- 还有 ${options.pendingActions.length} 类高风险动作暂时还没完全接上，TraceRoot 会继续通过运行时事件入口补上这层视角。`
+    );
+  }
+
+  if (options.runtimeFeedCount > 0) {
+    lines.push(`- 另外还在继续听 ${options.runtimeFeedCount} 个运行时事件入口。`);
+  }
+
+  lines.push("");
+  return lines;
+}
+
 function actionAlertFingerprint(event: AuditEvent): string {
   return [
     event.action ?? "",
@@ -679,6 +775,7 @@ export async function runHostWatch(options: {
   const runtimeFeeds = await discoverHostRuntimeFeeds({
     candidates: initialDiscovery.candidates
   });
+  const hostAuditCoverage = await loadHostAuditCoverage(initialDiscovery.candidates);
   const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
     feeds: runtimeFeeds,
     targetRoot: initialDiscovery.homeDir
@@ -813,6 +910,13 @@ export async function runHostWatch(options: {
       ""
     );
   }
+
+  initialLines.push(
+    ...renderHostAuditCoverageLines({
+      ...hostAuditCoverage,
+      runtimeFeedCount: runtimeFeeds.length
+    })
+  );
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
 

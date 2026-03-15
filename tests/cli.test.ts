@@ -607,6 +607,8 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口");
+      expect(output).toContain("动作审计覆盖：");
+      expect(output).toContain("运行时事件入口陪跑整机上的 agent");
       expect(output).toContain("Telegram（@ops-room）");
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
