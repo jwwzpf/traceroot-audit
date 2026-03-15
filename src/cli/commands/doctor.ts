@@ -32,7 +32,12 @@ import {
   resolveWizardTarget
 } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
-import { summarizeActionLabels } from "../../audit/presentation";
+import {
+  actionLabel,
+  runtimeActorLabel,
+  summarizeActionLabels
+} from "../../audit/presentation";
+import { readAuditEvents } from "../../audit/store";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
 import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-discovery";
 import { runTargetWatch } from "../watch";
@@ -42,6 +47,39 @@ import { discoverHost } from "../../core/discovery";
 import { runHostWatch } from "../watch";
 
 import type { CliRuntime } from "../index";
+
+async function loadLatestAttentionLine(options: {
+  target?: string;
+  hostScope?: boolean;
+}): Promise<string | null> {
+  const result = await readAuditEvents({
+    target: options.hostScope ? undefined : options.target,
+    today: true,
+    limit: 50
+  });
+
+  const event = result.events.find((item) => item.severity !== "safe");
+  if (!event) {
+    return null;
+  }
+
+  if (event.category === "action-event") {
+    const actor = runtimeActorLabel(event.runtime);
+    const label = actionLabel(event.action);
+
+    if (event.status === "succeeded") {
+      return `最近一次值得你看一眼的是：${actor} 已完成「${label}」`;
+    }
+
+    if (event.status === "failed") {
+      return `最近一次值得你看一眼的是：${actor} 没有完成「${label}」`;
+    }
+
+    return `最近一次值得你看一眼的是：${actor} 正在尝试「${label}」`;
+  }
+
+  return `最近一次值得你看一眼的是：${event.message}`;
+}
 
 function renderDoctorSummary(options: {
   target: string;
@@ -250,6 +288,7 @@ function renderDoctorResumeSummary(options: {
   profile: SavedHardeningProfile;
   reminder: string;
   boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
+  latestAttentionLine?: string | null;
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -303,6 +342,10 @@ function renderDoctorResumeSummary(options: {
       "",
       "💓 TraceRoot 这次不会重新生成整套 bundle，会先直接继续陪跑，并盯着这些边界变化。"
     );
+  }
+
+  if (options.latestAttentionLine) {
+    lines.push("", `👀 ${options.latestAttentionLine}`);
   }
 
   lines.push(
@@ -392,6 +435,7 @@ function renderHostDoctorWatchIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  latestAttentionLine?: string | null;
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -420,6 +464,10 @@ function renderHostDoctorWatchIntro(options: {
     ""
   );
 
+  if (options.latestAttentionLine) {
+    lines.splice(lines.length - 1, 0, `👀 ${options.latestAttentionLine}`, "");
+  }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -428,6 +476,7 @@ function renderHostDoctorWatchResumeIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  latestAttentionLine?: string | null;
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -455,6 +504,10 @@ function renderHostDoctorWatchResumeIntro(options: {
     "📚 想回看今天发生了什么，可以直接用：traceroot-audit logs --today",
     ""
   );
+
+  if (options.latestAttentionLine) {
+    lines.splice(lines.length - 1, 0, `👀 ${options.latestAttentionLine}`, "");
+  }
 
   return `${lines.join("\n")}\n`;
 }
@@ -622,6 +675,7 @@ async function runMachineLevelDoctorWatch(options: {
   const suggestedNames = hostDiscovery.candidates
     .slice(0, 3)
     .map((candidate) => candidate.displayPath);
+  const latestAttentionLine = await loadLatestAttentionLine({ hostScope: true });
 
   options.runtime.io.stdout(
     (options.reason === "smart-fallback" || options.reason === "remembered-host") &&
@@ -630,6 +684,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          latestAttentionLine,
           contextLine:
             options.reason === "remembered-host"
               ? "🧠 TraceRoot 记得你上次就是在整机陪跑，所以这次会直接回到同一条机器级时间线。"
@@ -639,6 +694,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          latestAttentionLine,
           contextLine:
             options.reason === "smart-fallback"
               ? "🧭 你这次没有指定路径，所以 TraceRoot 会直接在这台机器上开始陪跑。就算你还不知道 OpenClaw、MCP 或 skill 具体装在哪，也能先把高风险动作盯起来。"
@@ -953,7 +1009,10 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                 openclawChannel: savedPreferences!.notifications.openclawChannel,
                 openclawTarget: savedPreferences!.notifications.openclawTarget
               }),
-              boundaryStatus
+              boundaryStatus,
+              latestAttentionLine: await loadLatestAttentionLine({
+                target: effectiveTarget
+              })
             })
           );
         } else {

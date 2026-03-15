@@ -1041,6 +1041,31 @@ describe("CLI", () => {
         })
       );
 
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这封外部邮件是不是真的该发出去。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
       const capture = createCapture();
       const exitCode = await runCli(
         ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
@@ -1057,6 +1082,8 @@ describe("CLI", () => {
       expect(output).toContain("WhatsApp（+4917612345678）");
       expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
       expect(output).toContain("这次不会重新生成整套 bundle");
+      expect(output).toContain("最近一次值得你看一眼的是");
+      expect(output).toContain("对外发邮件");
       expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
       expect(output).not.toContain("权限收缩预览");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
