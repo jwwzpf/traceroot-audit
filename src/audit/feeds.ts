@@ -263,6 +263,145 @@ function inferStatusFromMessage(message: string): AuditEvent["status"] {
   return "observed";
 }
 
+function inferActionFromToolName(name?: string): string | undefined {
+  if (!name) {
+    return undefined;
+  }
+
+  const normalized = name.replace(/[_./]+/g, " ").replace(/-/g, " ").trim();
+  return inferActionFromText(normalized) ?? inferActionFromText(name);
+}
+
+function inferStructuredRuntimeFeedEvent(
+  parsed: Record<string, unknown>,
+  targetRoot: string
+): AuditEvent | null {
+  const method = pickString(parsed, [
+    "method",
+    ["event", "method"],
+    ["data", "method"],
+    ["payload", "method"]
+  ]);
+  const toolName = pickString(parsed, [
+    ["params", "name"],
+    ["params", "tool"],
+    ["event", "params", "name"],
+    ["event", "params", "tool"],
+    ["data", "params", "name"],
+    ["data", "params", "tool"],
+    ["payload", "params", "name"],
+    ["payload", "params", "tool"]
+  ]);
+
+  const looksLikeToolCall =
+    typeof method === "string" &&
+    /(tools\/call|tool.call|tool-call|mcp.tool.call)/i.test(method);
+
+  const action = inferActionFromToolName(toolName);
+  if (!looksLikeToolCall || !action) {
+    return null;
+  }
+
+  const hasError =
+    getNestedValue(parsed, ["error"]) !== undefined ||
+    getNestedValue(parsed, ["event", "error"]) !== undefined ||
+    getNestedValue(parsed, ["data", "error"]) !== undefined ||
+    getNestedValue(parsed, ["payload", "error"]) !== undefined;
+  const hasResult =
+    getNestedValue(parsed, ["result"]) !== undefined ||
+    getNestedValue(parsed, ["event", "result"]) !== undefined ||
+    getNestedValue(parsed, ["data", "result"]) !== undefined ||
+    getNestedValue(parsed, ["payload", "result"]) !== undefined;
+
+  const explicitStatus = pickString(parsed, [
+    "status",
+    "phase",
+    "outcome",
+    ["event", "status"],
+    ["data", "status"],
+    ["payload", "status"]
+  ]);
+  const status = explicitStatus
+    ? normalizeStatus(explicitStatus)
+    : hasError
+      ? "failed"
+      : hasResult
+        ? "succeeded"
+        : "attempted";
+
+  const runtimeName =
+    pickString(parsed, [
+      "runtime",
+      "agent",
+      "provider",
+      "service",
+      "server",
+      "mcpServer",
+      ["event", "runtime"],
+      ["event", "service"],
+      ["data", "runtime"],
+      ["data", "service"],
+      ["payload", "runtime"],
+      ["payload", "service"]
+    ]) ?? "mcp";
+
+  const targetValue = pickString(parsed, [
+    "target",
+    "path",
+    "file",
+    "resource",
+    ["params", "path"],
+    ["params", "file"],
+    ["data", "params", "path"],
+    ["data", "params", "file"],
+    ["payload", "params", "path"],
+    ["payload", "params", "file"]
+  ]);
+  const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
+  const toolLabel = toolName ?? action;
+  const humanAction = actionLabel(action);
+  const severity =
+    normalizeSeverity(
+      pickString(parsed, [
+        "severity",
+        "risk",
+        "level",
+        ["event", "severity"],
+        ["data", "severity"],
+        ["payload", "severity"]
+      ])
+    ) ?? severityFromAction(action);
+
+  return {
+    timestamp: pickString(parsed, [
+      "timestamp",
+      "time",
+      ["event", "timestamp"],
+      ["data", "timestamp"],
+      ["payload", "timestamp"]
+    ]) ?? new Date().toISOString(),
+    severity,
+    category: "action-event",
+    source: "runtime-feed",
+    target,
+    runtime: runtimeName,
+    surfaceKind: "runtime",
+    action,
+    status,
+    message:
+      toolName && toolName !== action
+        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
+    recommendation: inferRecommendation(action, severity),
+    evidence: {
+      source: "mcp-tool-call",
+      method,
+      toolName,
+      raw: parsed
+    }
+  };
+}
+
 function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEvent | null {
   let parsed: Record<string, unknown>;
 
@@ -443,6 +582,11 @@ function parseRuntimeFeedEvent(
     (getNestedValue(parsed, ["event"]) as Record<string, unknown> | undefined) ??
     (getNestedValue(parsed, ["data"]) as Record<string, unknown> | undefined) ??
     (getNestedValue(parsed, ["payload"]) as Record<string, unknown> | undefined);
+
+  const structuredEvent = inferStructuredRuntimeFeedEvent(parsed, targetRoot);
+  if (structuredEvent) {
+    return structuredEvent;
+  }
 
   const action = pickString(parsed, [
     "action",
