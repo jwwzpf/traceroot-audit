@@ -23,7 +23,9 @@ import {
   discoverRuntimeEventFeeds,
   readRecentRuntimeFeedEvents,
   readTodaysRuntimeFeedEvents,
-  readNewRuntimeFeedEvents
+  readNewRuntimeFeedEvents,
+  type RuntimeEventFeed,
+  type RuntimeFeedCursor
 } from "../audit/feeds";
 import {
   discoverHost,
@@ -409,6 +411,22 @@ function heartbeatIntervalMs(options: {
   return Math.max(options.intervalSeconds * 1000 * 5, 60_000);
 }
 
+function topologyRefreshIntervalMs(options: {
+  header?: string;
+  intervalSeconds: number;
+  hostScope?: boolean;
+}): number {
+  if (options.hostScope) {
+    if (options.header?.includes("Doctor")) {
+      return Math.max(options.intervalSeconds * 1000 * 20, 120_000);
+    }
+
+    return Math.max(options.intervalSeconds * 1000 * 10, 60_000);
+  }
+
+  return Math.max(options.intervalSeconds * 1000, 30_000);
+}
+
 function shouldEmitHeartbeat(options: {
   now: number;
   cycle: number;
@@ -685,6 +703,30 @@ async function discoverHostRuntimeFeeds(options: {
   );
 }
 
+function syncRuntimeFeeds(options: {
+  runtimeFeeds: RuntimeEventFeed[];
+  latestRuntimeFeeds: RuntimeEventFeed[];
+  runtimeFeedCursor: RuntimeFeedCursor;
+}): void {
+  const latestByPath = new Map(
+    options.latestRuntimeFeeds.map((feed) => [feed.absolutePath, feed] as const)
+  );
+
+  options.runtimeFeeds.splice(0, options.runtimeFeeds.length, ...options.latestRuntimeFeeds);
+
+  for (const feed of options.latestRuntimeFeeds) {
+    if (!options.runtimeFeedCursor.lineCounts.has(feed.absolutePath)) {
+      options.runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
+    }
+  }
+
+  for (const existingPath of [...options.runtimeFeedCursor.lineCounts.keys()]) {
+    if (!latestByPath.has(existingPath)) {
+      options.runtimeFeedCursor.lineCounts.delete(existingPath);
+    }
+  }
+}
+
 function summarizeHostCandidatesForHuman(
   candidates: Array<{ displayPath: string; categoryLabel: string; tier: "best-first" | "possible" }>
 ): string {
@@ -729,6 +771,9 @@ export async function runHostWatch(options: {
   });
   let lastHeartbeatAt = 0;
   let previousSnapshot = createHostSnapshot(initialDiscovery);
+  let currentDiscovery = initialDiscovery;
+  let lastTopologyRefreshAt = Date.now();
+  let lastFeedRefreshAt = Date.now();
   const runtimeFeeds = await discoverHostRuntimeFeeds({
     candidates: initialDiscovery.candidates
   });
@@ -794,6 +839,7 @@ export async function runHostWatch(options: {
       initialBestFirst.length > 0
         ? `🎯 现在最值得先盯住的是：${summarizeHostCandidatesForHuman(initialBestFirst)}`
         : `🧭 目前先从这些可能入口开始陪跑：${summarizeHostCandidatesForHuman(initialSuggested)}`,
+      "🪶 为了不打扰这台机器，TraceRoot 会一直盯住已接上的动作入口；整机入口变化会在后台轻量复查。",
       ""
     );
 
@@ -948,29 +994,38 @@ export async function runHostWatch(options: {
   });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
+  const topologyRefreshEveryMs = topologyRefreshIntervalMs({
+    header,
+    intervalSeconds,
+    hostScope: true
+  });
+  const feedRefreshEveryMs = Math.max(intervalSeconds * 1000, 1_000);
 
   for (let cycle = 1; cycle <= totalCycles; cycle += 1) {
     if (cycle > 1) {
       await sleep(intervalSeconds * 1000);
     }
 
-    const latestDiscovery = await discoverHost({
-      includeCwd: includeCwd ?? false
-    });
-    const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
-      candidates: latestDiscovery.candidates
-    });
-    for (const feed of latestRuntimeFeeds) {
-      if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
-        runtimeFeeds.push(feed);
-        runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
-      }
+    const now = Date.now();
+    const shouldRefreshFeeds =
+      cycle === 1 || now - lastFeedRefreshAt >= feedRefreshEveryMs;
+
+    if (shouldRefreshFeeds) {
+      const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
+        candidates: currentDiscovery.candidates
+      });
+      syncRuntimeFeeds({
+        runtimeFeeds,
+        latestRuntimeFeeds,
+        runtimeFeedCursor
+      });
+      lastFeedRefreshAt = now;
     }
 
     const feedEvents = await readNewRuntimeFeedEvents({
       feeds: runtimeFeeds,
       cursor: runtimeFeedCursor,
-      targetRoot: latestDiscovery.homeDir
+      targetRoot: currentDiscovery.homeDir
     });
     await writeAuditEvents(runtime, feedEvents, auditWriteState);
     if (feedEvents.length > 0) {
@@ -1004,9 +1059,52 @@ export async function runHostWatch(options: {
       }
     }
 
+    const shouldRefreshTopology =
+      cycle === 1 || now - lastTopologyRefreshAt >= topologyRefreshEveryMs;
+
+    if (!shouldRefreshTopology) {
+      if (
+        newActionAlerts.length === 0 &&
+        shouldEmitHeartbeat({
+          now,
+          cycle,
+          totalCycles,
+          lastHeartbeatAt,
+          heartbeatEveryMs,
+          isDoctorStyle
+        })
+      ) {
+        runtime.io.stdout(
+          isDoctorStyle
+            ? `💓 ${timestamp()} 这轮没有新的高风险动作。TraceRoot 还在安静陪跑，整机入口会在后台继续轻量复查。\n`
+            : `💓 ${timestamp()} No new risky action events right now. Machine-level surface review is continuing quietly in the background.\n`
+        );
+        lastHeartbeatAt = now;
+        await refreshWatchStatus({
+          scope: "host",
+          source: "host-watch"
+        });
+      }
+      continue;
+    }
+
+    const latestDiscovery = await discoverHost({
+      includeCwd: includeCwd ?? false
+    });
+    currentDiscovery = latestDiscovery;
+    const latestRuntimeFeeds = await discoverHostRuntimeFeeds({
+      candidates: currentDiscovery.candidates
+    });
+    syncRuntimeFeeds({
+      runtimeFeeds,
+      latestRuntimeFeeds,
+      runtimeFeedCursor
+    });
+    lastFeedRefreshAt = now;
+
     const currentSnapshot = createHostSnapshot(latestDiscovery);
     const diff = diffHostSnapshots(previousSnapshot, currentSnapshot);
-    const now = Date.now();
+    lastTopologyRefreshAt = now;
 
     if (!diff.changed) {
       if (newActionAlerts.length === 0 &&
