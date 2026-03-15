@@ -715,14 +715,16 @@ function syncRuntimeFeeds(options: {
   options.runtimeFeeds.splice(0, options.runtimeFeeds.length, ...options.latestRuntimeFeeds);
 
   for (const feed of options.latestRuntimeFeeds) {
-    if (!options.runtimeFeedCursor.lineCounts.has(feed.absolutePath)) {
-      options.runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
+    if (!options.runtimeFeedCursor.byteOffsets.has(feed.absolutePath)) {
+      options.runtimeFeedCursor.byteOffsets.set(feed.absolutePath, 0);
+      options.runtimeFeedCursor.trailingFragments.set(feed.absolutePath, "");
     }
   }
 
-  for (const existingPath of [...options.runtimeFeedCursor.lineCounts.keys()]) {
+  for (const existingPath of [...options.runtimeFeedCursor.byteOffsets.keys()]) {
     if (!latestByPath.has(existingPath)) {
-      options.runtimeFeedCursor.lineCounts.delete(existingPath);
+      options.runtimeFeedCursor.byteOffsets.delete(existingPath);
+      options.runtimeFeedCursor.trailingFragments.delete(existingPath);
     }
   }
 }
@@ -1562,13 +1564,14 @@ export async function runTargetWatch(options: {
       await sleep(intervalSeconds * 1000);
     }
 
-    const latestRuntimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
-    for (const feed of latestRuntimeFeeds) {
-      if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
-        runtimeFeeds.push(feed);
-        runtimeFeedCursor.lineCounts.set(feed.absolutePath, 0);
+      const latestRuntimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
+      for (const feed of latestRuntimeFeeds) {
+        if (!runtimeFeeds.some((existing) => existing.absolutePath === feed.absolutePath)) {
+          runtimeFeeds.push(feed);
+          runtimeFeedCursor.byteOffsets.set(feed.absolutePath, 0);
+          runtimeFeedCursor.trailingFragments.set(feed.absolutePath, "");
+        }
       }
-    }
 
     const feedEvents = await readNewRuntimeFeedEvents({
       feeds: runtimeFeeds,

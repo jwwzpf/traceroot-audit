@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile, realpath } from "node:fs/promises";
+import { open, readFile, realpath, stat } from "node:fs/promises";
 
 import fg from "fast-glob";
 
@@ -15,7 +15,8 @@ export interface RuntimeEventFeed {
 }
 
 export interface RuntimeFeedCursor {
-  lineCounts: Map<string, number>;
+  byteOffsets: Map<string, number>;
+  trailingFragments: Map<string, string>;
 }
 
 const candidateRelativePaths = [
@@ -1059,22 +1060,21 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
 }
 
 export async function createRuntimeFeedCursor(feeds: RuntimeEventFeed[]): Promise<RuntimeFeedCursor> {
-  const lineCounts = new Map<string, number>();
+  const byteOffsets = new Map<string, number>();
+  const trailingFragments = new Map<string, string>();
 
   for (const feed of feeds) {
     try {
-      const content = await readFile(feed.absolutePath, "utf8");
-      const lines = content
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      lineCounts.set(feed.absolutePath, lines.length);
+      const feedStats = await stat(feed.absolutePath);
+      byteOffsets.set(feed.absolutePath, feedStats.size);
+      trailingFragments.set(feed.absolutePath, "");
     } catch {
-      lineCounts.set(feed.absolutePath, 0);
+      byteOffsets.set(feed.absolutePath, 0);
+      trailingFragments.set(feed.absolutePath, "");
     }
   }
 
-  return { lineCounts };
+  return { byteOffsets, trailingFragments };
 }
 
 export async function readRecentRuntimeFeedEvents(options: {
@@ -1193,25 +1193,49 @@ export async function readNewRuntimeFeedEvents(options: {
   const events: AuditEvent[] = [];
 
   for (const feed of options.feeds) {
-    let content = "";
+    let feedSize = 0;
 
     try {
-      content = await readFile(feed.absolutePath, "utf8");
+      feedSize = (await stat(feed.absolutePath)).size;
     } catch {
-      options.cursor.lineCounts.set(feed.absolutePath, 0);
+      options.cursor.byteOffsets.set(feed.absolutePath, 0);
+      options.cursor.trailingFragments.set(feed.absolutePath, "");
       continue;
     }
 
-    const lines = content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    const previousCount = options.cursor.lineCounts.get(feed.absolutePath) ?? 0;
-    const startIndex = previousCount > lines.length ? 0 : previousCount;
-    const newLines = lines.slice(startIndex);
-    options.cursor.lineCounts.set(feed.absolutePath, lines.length);
+    let previousOffset = options.cursor.byteOffsets.get(feed.absolutePath) ?? 0;
+    let trailingFragment = options.cursor.trailingFragments.get(feed.absolutePath) ?? "";
 
-    for (const line of newLines) {
+    if (feedSize < previousOffset) {
+      previousOffset = 0;
+      trailingFragment = "";
+    }
+
+    if (feedSize === previousOffset) {
+      continue;
+    }
+
+    const byteLength = feedSize - previousOffset;
+    const fileHandle = await open(feed.absolutePath, "r");
+    let chunk = "";
+
+    try {
+      const buffer = Buffer.allocUnsafe(byteLength);
+      const { bytesRead } = await fileHandle.read(buffer, 0, byteLength, previousOffset);
+      chunk = buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await fileHandle.close();
+    }
+
+    const combined = `${trailingFragment}${chunk}`;
+    const endsWithLineBreak = /(?:\r?\n)$/.test(combined);
+    const rawLines = combined.split(/\r?\n/);
+    const nextTrailingFragment = endsWithLineBreak ? "" : rawLines.pop() ?? "";
+
+    options.cursor.byteOffsets.set(feed.absolutePath, feedSize);
+    options.cursor.trailingFragments.set(feed.absolutePath, nextTrailingFragment);
+
+    for (const line of rawLines.map((value) => value.trim()).filter((value) => value.length > 0)) {
       const event = parseRuntimeFeedEvent(
         line,
         feed.rootDir ?? options.targetRoot,
