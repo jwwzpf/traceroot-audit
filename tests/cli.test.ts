@@ -2131,7 +2131,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
-      expect(output).toContain("这一步是 来自 Telegram（@ops-room） 触发出来的");
+      expect(output).toContain("这一步是从 Telegram（@ops-room） 触发出来的");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -2146,7 +2146,9 @@ describe("CLI", () => {
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
       expect(logsOutput).toContain("TraceRoot 判断这一步相当于：对外发邮件");
-      expect(logsOutput).toContain("触发来源：来自 Telegram（@ops-room）");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+      expect(logsOutput).toContain("今天最值得留意的触发入口");
+      expect(logsOutput).toContain("Telegram（@ops-room）：触发了 1 次值得留意的动作");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("mcp-events.jsonl");
     } finally {

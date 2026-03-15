@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 
 import {
   actionLabel,
-  actionTriggerContext,
+  actionTriggerSourceLabel,
   runtimeActorLabel,
   whyThisMatters
 } from "./presentation";
@@ -81,7 +81,7 @@ function statusLabel(event: AuditEvent): string | undefined {
 
 function buildTextSummary(event: AuditEvent): string {
   const actor = runtimeActorLabel(event.runtime);
-  const triggerContext = actionTriggerContext(event);
+  const triggerContext = actionTriggerSourceLabel(event);
   const parts = [
     `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
@@ -112,7 +112,7 @@ function buildTextSummary(event: AuditEvent): string {
 
 function buildChatRelayText(event: AuditEvent): string {
   const actor = runtimeActorLabel(event.runtime);
-  const triggerContext = actionTriggerContext(event);
+  const triggerContext = actionTriggerSourceLabel(event);
   const lines = [
     `${event.severity === "critical" ? "🚨" : event.severity === "high-risk" ? "🛑" : "⚠️"} TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
@@ -231,7 +231,7 @@ export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> 
     text: buildTextSummary(event),
     action: event.action ?? null,
     actionLabel: actionLabel(event.action),
-    triggerContext: actionTriggerContext(event),
+    triggerContext: actionTriggerSourceLabel(event),
     runtime: event.runtime ?? null,
     status: event.status ?? null,
     target: event.target ? displayUserPath(event.target) : null,

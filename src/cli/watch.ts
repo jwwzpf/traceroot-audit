@@ -3,7 +3,7 @@ import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import {
   actionLabel,
-  actionTriggerContext,
+  actionTriggerSentence,
   runtimeActorLabel,
   whyThisMatters
 } from "../audit/presentation";
@@ -273,7 +273,7 @@ function shouldEmitHeartbeat(options: {
 function renderLiveActionAlert(event: AuditEvent): string[] {
   const icon = alertIconForSeverity(event.severity);
   const actor = runtimeActorLabel(event.runtime);
-  const triggerContext = actionTriggerContext(event);
+  const triggerContext = actionTriggerSentence(event);
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
     `- ${actor} 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`,
@@ -281,7 +281,7 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
   ];
 
   if (triggerContext) {
-    lines.push(`- 这一步是 ${triggerContext} 触发出来的`);
+    lines.push(`- ${triggerContext}`);
   }
 
   const feedPath =

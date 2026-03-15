@@ -11,9 +11,9 @@ export function relativeToRoot(rootDir: string, absolutePath: string): string {
 }
 
 export function displayUserPath(value: string, options?: { cwd?: string }): string {
-  const resolved = path.resolve(value);
+  const resolved = normalizeDisplayPath(path.resolve(value));
   const cwd = options?.cwd ? path.resolve(options.cwd) : process.cwd();
-  const home = path.resolve(os.homedir());
+  const home = normalizeDisplayPath(path.resolve(os.homedir()));
 
   if (resolved === cwd) {
     return ".";
@@ -32,4 +32,18 @@ export function displayUserPath(value: string, options?: { cwd?: string }): stri
   }
 
   return toPosixPath(resolved);
+}
+
+function normalizeDisplayPath(value: string): string {
+  const normalized = path.resolve(value);
+
+  if (normalized === "/private/tmp") {
+    return "/tmp";
+  }
+
+  if (normalized.startsWith("/private/tmp/")) {
+    return normalized.replace("/private/tmp/", "/tmp/");
+  }
+
+  return normalized;
 }

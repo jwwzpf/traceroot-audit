@@ -6,7 +6,10 @@ import { Command, Option } from "commander";
 import { readAuditEvents } from "../../audit/store";
 import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
-import { actionLabel, actionTriggerContext } from "../../audit/presentation";
+import {
+  actionLabel,
+  actionTriggerSourceLabel
+} from "../../audit/presentation";
 import {
   loadRecentDoctorContext,
   recentTargetLabel
@@ -141,7 +144,7 @@ async function renderWatchStatusSummary(options: {
     }
 
     lines.push(`- 最近一次值得你看一眼的是：${attentionLine}`);
-    const triggerContext = actionTriggerContext({
+    const triggerContext = actionTriggerSourceLabel({
       timestamp: session.lastAttention.timestamp,
       severity: session.lastAttention.severity,
       category: session.lastAttention.category,
@@ -396,6 +399,12 @@ function summarizeEvents(events: AuditEvent[]): {
     severity: AuditSeverity;
     actions: string[];
   }>;
+  attentionSources: Array<{
+    sourceLabel: string;
+    count: number;
+    severity: AuditSeverity;
+    actions: string[];
+  }>;
 } {
   let critical = 0;
   let highRisk = 0;
@@ -412,6 +421,10 @@ function summarizeEvents(events: AuditEvent[]): {
   const attentionActors = new Map<
     string,
     { actorLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
+  >();
+  const attentionSources = new Map<
+    string,
+    { sourceLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
   >();
 
   const severityWeight = (severity: AuditSeverity): number => {
@@ -468,6 +481,24 @@ function summarizeEvents(events: AuditEvent[]): {
         }
 
         attentionActors.set(actor, actorEntry);
+
+        const sourceLabel = actionTriggerSourceLabel(event);
+        if (sourceLabel) {
+          const sourceEntry = attentionSources.get(sourceLabel) ?? {
+            sourceLabel,
+            count: 0,
+            severity: event.severity,
+            actions: new Set<string>()
+          };
+
+          sourceEntry.count += 1;
+          sourceEntry.actions.add(label);
+          if (severityWeight(event.severity) > severityWeight(sourceEntry.severity)) {
+            sourceEntry.severity = event.severity;
+          }
+
+          attentionSources.set(sourceLabel, sourceEntry);
+        }
       }
     }
 
@@ -521,6 +552,21 @@ function summarizeEvents(events: AuditEvent[]): {
         count: entry.count,
         severity: entry.severity,
         actions: [...entry.actions]
+      })),
+    attentionSources: [...attentionSources.values()]
+      .sort((left, right) => {
+        return (
+          severityWeight(right.severity) - severityWeight(left.severity) ||
+          right.count - left.count ||
+          right.actions.size - left.actions.size
+        );
+      })
+      .slice(0, 3)
+      .map((entry) => ({
+        sourceLabel: entry.sourceLabel,
+        count: entry.count,
+        severity: entry.severity,
+        actions: [...entry.actions]
       }))
   };
 }
@@ -548,7 +594,7 @@ function renderTimelineEntry(entry: TimelineEntry): string[] {
     lines.push(`   📝 ${detail}`);
   }
 
-  const triggerContext = actionTriggerContext(entry.primary);
+  const triggerContext = actionTriggerSourceLabel(entry.primary);
   if (triggerContext) {
     lines.push(`   🗣️ 触发来源: ${triggerContext}`);
   }
@@ -644,7 +690,7 @@ async function printLogs(
     if (summary.latestAttention) {
       lines.push("👀 当前最值得注意的事情：");
       lines.push(`- ${eventHeadline(summary.latestAttention)}`);
-      const triggerContext = actionTriggerContext(summary.latestAttention);
+      const triggerContext = actionTriggerSourceLabel(summary.latestAttention);
       if (triggerContext) {
         lines.push(`- 触发来源：${triggerContext}`);
       }
@@ -680,6 +726,17 @@ async function printLogs(
         const prefix = severityIcon(actor.severity);
         lines.push(
           `- ${prefix} ${actor.actorLabel}：出现了 ${actor.count} 次值得留意的动作（${actor.actions.slice(0, 2).join("、")}）`
+        );
+      }
+      lines.push("");
+    }
+
+    if (summary.attentionSources.length > 0) {
+      lines.push("📬 今天最值得留意的触发入口：");
+      for (const source of summary.attentionSources) {
+        const prefix = severityIcon(source.severity);
+        lines.push(
+          `- ${prefix} ${source.sourceLabel}：触发了 ${source.count} 次值得留意的动作（${source.actions.slice(0, 2).join("、")}）`
         );
       }
       lines.push("");

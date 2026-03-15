@@ -147,7 +147,7 @@ function looksLikeNotifyChannel(value?: string): boolean {
   ].includes(normalized ?? "");
 }
 
-export function actionTriggerContext(event: AuditEvent): string | null {
+export function actionTriggerSourceLabel(event: AuditEvent): string | null {
   const evidence = event.evidence ?? {};
   const channelValue =
     typeof evidence.channel === "string" ? evidence.channel.trim() : "";
@@ -160,18 +160,38 @@ export function actionTriggerContext(event: AuditEvent): string | null {
   );
 
   if (channel && senderValue) {
-    return `来自 ${channel}（${senderValue}）`;
+    return `${channel}（${senderValue}）`;
   }
 
   if (channel) {
-    return `来自 ${channel}`;
+    return channel;
   }
 
   if (senderValue) {
-    return `由 ${senderValue} 触发`;
+    return senderValue;
   }
 
   return null;
+}
+
+export function actionTriggerContext(event: AuditEvent): string | null {
+  const sourceLabel = actionTriggerSourceLabel(event);
+
+  if (!sourceLabel) {
+    return null;
+  }
+
+  return `来自 ${sourceLabel}`;
+}
+
+export function actionTriggerSentence(event: AuditEvent): string | null {
+  const sourceLabel = actionTriggerSourceLabel(event);
+
+  if (!sourceLabel) {
+    return null;
+  }
+
+  return `这一步是从 ${sourceLabel} 触发出来的`;
 }
 
 export function whyThisMatters(

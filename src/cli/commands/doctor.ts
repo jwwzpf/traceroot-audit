@@ -34,7 +34,7 @@ import {
 import { recommendedManifestFormat } from "../../hardening/analysis";
 import {
   actionLabel,
-  actionTriggerContext,
+  actionTriggerSourceLabel,
   runtimeActorLabel,
   summarizeActionLabels
 } from "../../audit/presentation";
@@ -68,7 +68,7 @@ async function loadLatestAttentionLine(options: {
   if (event.category === "action-event") {
     const actor = runtimeActorLabel(event.runtime);
     const label = actionLabel(event.action);
-    const triggerContext = actionTriggerContext(event);
+    const triggerContext = actionTriggerSourceLabel(event);
     const suffix = triggerContext ? `（${triggerContext}）` : "";
 
     if (event.status === "succeeded") {
