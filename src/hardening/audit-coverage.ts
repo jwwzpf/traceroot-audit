@@ -10,6 +10,14 @@ export interface SavedAuditCoverageSnapshot {
   installedEntrypointLabels: string[];
 }
 
+export interface AggregatedAuditCoverageSnapshot {
+  surfaceCount: number;
+  installedEntrypointCount: number;
+  coveredActions: string[];
+  pendingActions: string[];
+  installedEntrypointLabels: string[];
+}
+
 export function resolveAuditCoveragePath(rootDir: string): string {
   return path.join(rootDir, ".traceroot", "audit-coverage.json");
 }
@@ -74,4 +82,44 @@ export async function loadAuditCoverageSnapshot(rootDir: string): Promise<{
       error: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+export async function loadAggregatedAuditCoverage(
+  roots: Array<{ absolutePath: string }>
+): Promise<AggregatedAuditCoverageSnapshot> {
+  const coveredActions = new Set<string>();
+  const pendingActions = new Set<string>();
+  const installedEntrypointLabels = new Set<string>();
+  let installedEntrypointCount = 0;
+  let surfaceCount = 0;
+
+  for (const root of roots) {
+    const coverage = await loadAuditCoverageSnapshot(root.absolutePath);
+    if (!coverage.snapshot) {
+      continue;
+    }
+
+    surfaceCount += 1;
+    installedEntrypointCount += coverage.snapshot.installedEntrypointCount;
+
+    for (const action of coverage.snapshot.coveredActions) {
+      coveredActions.add(action);
+    }
+
+    for (const action of coverage.snapshot.pendingActions) {
+      pendingActions.add(action);
+    }
+
+    for (const label of coverage.snapshot.installedEntrypointLabels) {
+      installedEntrypointLabels.add(label);
+    }
+  }
+
+  return {
+    surfaceCount,
+    installedEntrypointCount,
+    coveredActions: [...coveredActions],
+    pendingActions: [...pendingActions],
+    installedEntrypointLabels: [...installedEntrypointLabels]
+  };
 }

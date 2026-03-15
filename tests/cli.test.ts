@@ -625,6 +625,8 @@ describe("CLI", () => {
       const logsOutput = logsCapture.read().stdout;
 
       expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("当前整机动作审计覆盖");
+      expect(logsOutput).toContain("主要还是靠原生运行时事件入口继续陪跑");
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("今天最值得留意的动作");
       expect(logsOutput).toContain("今天这些 agent 最值得你看一眼");

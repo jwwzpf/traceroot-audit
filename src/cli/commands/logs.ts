@@ -4,6 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Command, Option } from "commander";
 
 import { readAuditEvents } from "../../audit/store";
+import { discoverRuntimeEventFeeds } from "../../audit/feeds";
 import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import {
@@ -11,7 +12,11 @@ import {
   summarizeActionLabels,
   actionTriggerSourceLabel
 } from "../../audit/presentation";
-import { loadAuditCoverageSnapshot } from "../../hardening/audit-coverage";
+import {
+  loadAggregatedAuditCoverage,
+  loadAuditCoverageSnapshot
+} from "../../hardening/audit-coverage";
+import { discoverHost } from "../../core/discovery";
 import {
   loadRecentDoctorContext,
   recentTargetLabel
@@ -697,6 +702,61 @@ async function renderAuditCoverageSummary(target?: string): Promise<string[] | n
   return lines;
 }
 
+async function renderHostAuditCoverageSummary(): Promise<string[] | null> {
+  const discovery = await discoverHost({ includeCwd: false });
+  const coverage = await loadAggregatedAuditCoverage(discovery.candidates);
+  const runtimeFeeds = new Map<string, true>();
+
+  for (const candidate of discovery.candidates) {
+    const feeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+    for (const feed of feeds) {
+      runtimeFeeds.set(feed.absolutePath, true);
+    }
+  }
+
+  if (coverage.surfaceCount === 0 && runtimeFeeds.size === 0) {
+    return null;
+  }
+
+  const lines = ["🎬 当前整机动作审计覆盖："];
+
+  if (coverage.surfaceCount > 0) {
+    lines.push(
+      `- 这台机器上已经有 ${coverage.surfaceCount} 个入口被接进了动作审计。`,
+      `- 现在已经盯住：${summarizeActionLabels(coverage.coveredActions)}。`,
+      `- 已经自动接好 ${coverage.installedEntrypointCount} 个常见动作入口。`
+    );
+
+    if (coverage.installedEntrypointLabels.length > 0) {
+      lines.push(
+        `- 已接好的重点入口：${coverage.installedEntrypointLabels.slice(0, 3).join("、")}${
+          coverage.installedEntrypointLabels.length > 3
+            ? `，以及另外 ${coverage.installedEntrypointLabels.length - 3} 个入口`
+            : ""
+        }。`
+      );
+    }
+
+    if (coverage.pendingActions.length > 0) {
+      lines.push(
+        `- 还有 ${coverage.pendingActions.length} 类高风险动作暂时还没完全接上，TraceRoot 也会继续通过原生运行时事件把这些动作记进时间线。`
+      );
+    }
+  } else {
+    lines.push(
+      "- 这台机器上暂时还没看到已经自动接好的动作入口。",
+      "- TraceRoot 这次主要还是靠原生运行时事件入口继续陪跑。"
+    );
+  }
+
+  if (runtimeFeeds.size > 0) {
+    lines.push(`- 另外还在继续听 ${runtimeFeeds.size} 个运行时事件入口。`);
+  }
+
+  lines.push("");
+  return lines;
+}
+
 async function printLogs(
   runtime: CliRuntime,
   options: {
@@ -723,7 +783,9 @@ async function printLogs(
       target: options.target,
       hostScope: options.hostScope
     });
-    const coverageLines = await renderAuditCoverageSummary(options.hostScope ? undefined : options.target);
+    const coverageLines = options.hostScope
+      ? await renderHostAuditCoverageSummary()
+      : await renderAuditCoverageSummary(options.target);
     const lines = [
       "TraceRoot Audit Logs",
       "====================",

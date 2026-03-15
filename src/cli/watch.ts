@@ -46,6 +46,7 @@ import {
 } from "../hardening/boundary";
 import { loadHardeningProfile } from "../hardening/profile";
 import {
+  loadAggregatedAuditCoverage,
   loadAuditCoverageSnapshot,
   type SavedAuditCoverageSnapshot
 } from "../hardening/audit-coverage";
@@ -132,50 +133,6 @@ function renderAuditCoverageLines(options: {
 
   lines.push("");
   return lines;
-}
-
-async function loadHostAuditCoverage(candidates: Array<{ absolutePath: string }>): Promise<{
-  surfaceCount: number;
-  installedEntrypointCount: number;
-  coveredActions: string[];
-  pendingActions: string[];
-  installedEntrypointLabels: string[];
-}> {
-  const coveredActions = new Set<string>();
-  const pendingActions = new Set<string>();
-  const installedEntrypointLabels = new Set<string>();
-  let installedEntrypointCount = 0;
-  let surfaceCount = 0;
-
-  for (const candidate of candidates) {
-    const coverage = await loadAuditCoverageSnapshot(candidate.absolutePath);
-    if (!coverage.snapshot) {
-      continue;
-    }
-
-    surfaceCount += 1;
-    installedEntrypointCount += coverage.snapshot.installedEntrypointCount;
-
-    for (const action of coverage.snapshot.coveredActions) {
-      coveredActions.add(action);
-    }
-
-    for (const action of coverage.snapshot.pendingActions) {
-      pendingActions.add(action);
-    }
-
-    for (const label of coverage.snapshot.installedEntrypointLabels) {
-      installedEntrypointLabels.add(label);
-    }
-  }
-
-  return {
-    surfaceCount,
-    installedEntrypointCount,
-    coveredActions: [...coveredActions],
-    pendingActions: [...pendingActions],
-    installedEntrypointLabels: [...installedEntrypointLabels]
-  };
 }
 
 function renderHostAuditCoverageLines(options: {
@@ -775,7 +732,7 @@ export async function runHostWatch(options: {
   const runtimeFeeds = await discoverHostRuntimeFeeds({
     candidates: initialDiscovery.candidates
   });
-  const hostAuditCoverage = await loadHostAuditCoverage(initialDiscovery.candidates);
+  const hostAuditCoverage = await loadAggregatedAuditCoverage(initialDiscovery.candidates);
   const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
     feeds: runtimeFeeds,
     targetRoot: initialDiscovery.homeDir
