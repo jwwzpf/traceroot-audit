@@ -2680,6 +2680,89 @@ describe("CLI", () => {
     }
   });
 
+  it("can ingest OpenClaw gateway logs when openclaw.json uses logging.files", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-logging-files-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const gatewayLog = path.join(tempHome, "openclaw-array-gateway.log");
+      await writeFile(
+        path.join(openClawDir, "openclaw.json"),
+        JSON.stringify(
+          {
+            logging: {
+              files: [gatewayLog]
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: "warn",
+            subsystem: "gateway",
+            message: "Attempting to send email to customer@example.com"
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("openclaw-array-gateway.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can ingest OpenClaw gateway logs from openclaw.json even when the runtime folder has a generic name", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-generic-home-"));
     const previousHome = process.env.HOME;

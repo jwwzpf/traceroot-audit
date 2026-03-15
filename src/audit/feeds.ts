@@ -829,6 +829,38 @@ type CompanionFeed = {
   kind: RuntimeEventFeed["kind"];
 };
 
+function addCompanionFeedCandidate(options: {
+  candidates: Map<string, CompanionFeed>;
+  targetRoot: string;
+  value: unknown;
+  kind?: RuntimeEventFeed["kind"];
+}): void {
+  const pushPath = (rawPath: string): void => {
+    if (!rawPath.trim()) {
+      return;
+    }
+
+    const absolutePath = path.resolve(options.targetRoot, rawPath.trim());
+    options.candidates.set(absolutePath, {
+      absolutePath,
+      kind: options.kind ?? classifyFeedKind(absolutePath)
+    });
+  };
+
+  if (typeof options.value === "string") {
+    pushPath(options.value);
+    return;
+  }
+
+  if (Array.isArray(options.value)) {
+    for (const entry of options.value) {
+      if (typeof entry === "string") {
+        pushPath(entry);
+      }
+    }
+  }
+}
+
 async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<CompanionFeed[]> {
   const rootName = path.basename(targetRoot).toLowerCase();
   const looksLikeOpenClawRoot =
@@ -838,18 +870,98 @@ async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<Compa
 
   try {
     const configRaw = await readFile(path.join(targetRoot, "openclaw.json"), "utf8");
-    const config = JSON.parse(configRaw) as {
-      logging?: { file?: unknown };
-    };
+    const config = JSON.parse(configRaw) as Record<string, unknown>;
     hasOpenClawConfig = true;
 
-    if (typeof config.logging?.file === "string" && config.logging.file.trim().length > 0) {
-      const absolutePath = path.resolve(targetRoot, config.logging.file.trim());
-      candidates.set(absolutePath, {
-        absolutePath,
-        kind: "openclaw-gateway-log"
-      });
-    }
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logging", "file"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logging", "files"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logging", "gateway", "file"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logging", "gateway", "files"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logging", "gateway", "path"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["gateway", "file"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["gateway", "files"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["gateway", "path"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logs", "file"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["logs", "files"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["runtimeLogs", "file"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["runtimeLogs", "files"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["paths", "logs"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["paths", "logs", "gateway"]),
+      kind: "openclaw-gateway-log"
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["paths", "logs", "runtime"])
+    });
+    addCompanionFeedCandidate({
+      candidates,
+      targetRoot,
+      value: getNestedValue(config, ["paths", "logs", "events"])
+    });
   } catch {
     // ignore invalid or missing config
   }
