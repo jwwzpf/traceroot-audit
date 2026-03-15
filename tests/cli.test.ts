@@ -735,6 +735,105 @@ describe("CLI", () => {
     }
   });
 
+  it("remembers a backfilled risky runtime action the next time machine-level doctor watch starts", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-backfill-memory-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      const earlierToday = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await writeFile(
+        path.join(logsDir, "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: earlierToday,
+          runtime: "openclaw",
+          channel: "telegram",
+          sender: "@ops-room",
+          event: {
+            type: "send-email",
+            status: "attempted",
+            target: "mailer.ts"
+          },
+          message: "Agent is attempting to send an external email."
+        })}\n`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        createCapture().io,
+        createStaticPrompter({})
+      );
+
+      const secondCapture = createCapture();
+      const secondExitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        secondCapture.io,
+        createStaticPrompter({})
+      );
+
+      const output = secondCapture.read().stdout;
+
+      expect(secondExitCode).toBe(0);
+      expect(output).toContain("最近一次值得你看一眼的是");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("starts machine-level doctor watch automatically when no path is given", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-smart-host-home-"));
     const previousHome = process.env.HOME;

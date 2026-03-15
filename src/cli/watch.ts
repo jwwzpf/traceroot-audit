@@ -407,13 +407,57 @@ async function writeAuditEvents(
 }
 
 function latestAttentionEvent(events: AuditEvent[]): AuditEvent | null {
-  for (const event of [...events].reverse()) {
-    if (event.severity !== "safe") {
-      return event;
+  const severityWeight = (severity: AuditSeverity): number => {
+    if (severity === "critical") {
+      return 4;
     }
-  }
 
-  return null;
+    if (severity === "high-risk") {
+      return 3;
+    }
+
+    if (severity === "risky") {
+      return 2;
+    }
+
+    return 1;
+  };
+
+  const categoryWeight = (event: AuditEvent): number => {
+    if (event.category === "action-event") {
+      return 4;
+    }
+
+    if (event.category === "boundary-drift") {
+      return 3;
+    }
+
+    if (event.category === "risk-change" || event.category === "finding-change") {
+      return 2;
+    }
+
+    if (event.category === "surface-change") {
+      return 1;
+    }
+
+    return 0;
+  };
+
+  return events
+    .filter((event) => event.severity !== "safe")
+    .sort((left, right) => {
+      const categoryDelta = categoryWeight(right) - categoryWeight(left);
+      if (categoryDelta !== 0) {
+        return categoryDelta;
+      }
+
+      const severityDelta = severityWeight(right.severity) - severityWeight(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      return right.timestamp.localeCompare(left.timestamp);
+    })[0] ?? null;
 }
 
 async function refreshWatchStatus(options: {
@@ -781,7 +825,10 @@ export async function runHostWatch(options: {
   await refreshWatchStatus({
     scope: "host",
     source: "host-watch",
-    attentionEvent: latestAttentionEvent(recentStartupAlerts)
+    attentionEvent: latestAttentionEvent([
+      ...historicalTodayFeedEvents,
+      ...recentStartupAlerts
+    ])
   });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
@@ -1272,7 +1319,11 @@ export async function runTargetWatch(options: {
     scope: "target",
     source,
     target: resolvedTarget.absolutePath,
-    attentionEvent: latestAttentionEvent([...startupEvents, ...recentStartupAlerts])
+    attentionEvent: latestAttentionEvent([
+      ...historicalTodayFeedEvents,
+      ...startupEvents,
+      ...recentStartupAlerts
+    ])
   });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;

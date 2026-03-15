@@ -60,7 +60,37 @@ async function loadLatestAttentionLine(options: {
     limit: 50
   });
 
-  const event = result.events.find((item) => item.severity !== "safe");
+  const severityWeight = (severity: "safe" | "risky" | "high-risk" | "critical"): number => {
+    if (severity === "critical") return 4;
+    if (severity === "high-risk") return 3;
+    if (severity === "risky") return 2;
+    return 1;
+  };
+
+  const categoryWeight = (item: AuditEvent): number => {
+    if (item.category === "action-event") return 4;
+    if (item.category === "boundary-drift") return 3;
+    if (item.category === "risk-change" || item.category === "finding-change") return 2;
+    if (item.category === "surface-change") return 1;
+    return 0;
+  };
+
+  const event =
+    result.events
+      .filter((item) => item.severity !== "safe")
+      .sort((left, right) => {
+        const categoryDelta = categoryWeight(right) - categoryWeight(left);
+        if (categoryDelta !== 0) {
+          return categoryDelta;
+        }
+
+        const severityDelta = severityWeight(right.severity) - severityWeight(left.severity);
+        if (severityDelta !== 0) {
+          return severityDelta;
+        }
+
+        return right.timestamp.localeCompare(left.timestamp);
+      })[0] ?? null;
   if (!event) {
     return null;
   }
