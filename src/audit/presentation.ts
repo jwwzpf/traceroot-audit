@@ -1,3 +1,5 @@
+import type { AuditSeverity } from "./types";
+
 export function actionLabel(action?: string): string {
   if (!action) {
     return "未知动作";
@@ -75,6 +77,77 @@ export function actionLabel(action?: string): string {
   }
 
   return action.replace(/^run-/, "运行 ").replace(/-/g, " ");
+}
+
+export function runtimeActorLabel(runtime?: string): string {
+  const normalized = runtime?.trim().toLowerCase();
+
+  if (!normalized) {
+    return "这个 agent";
+  }
+
+  if (normalized === "openclaw") {
+    return "OpenClaw 运行时";
+  }
+
+  if (normalized === "mcp") {
+    return "MCP 服务";
+  }
+
+  return runtime!.trim();
+}
+
+export function whyThisMatters(
+  action?: string,
+  severity: AuditSeverity = "risky"
+): string {
+  const normalized = (action ?? "").trim().toLowerCase();
+
+  if (normalized === "send-email") {
+    return "这类动作会真正把内容发到外部世界里，通常值得你马上看一眼。";
+  }
+
+  if (normalized === "public-post") {
+    return "这类动作一旦发出去，就是公开可见的内容，最好及时确认。";
+  }
+
+  if (normalized === "send-message") {
+    return "这类动作会主动联系别人，通常值得你立刻确认。";
+  }
+
+  if (normalized === "delete-files") {
+    return "这类动作会直接影响本地文件，最好在它继续之前先确认。";
+  }
+
+  if (normalized === "modify-files") {
+    return "这类动作会改变本地文件内容，最好先确认是不是你想要的结果。";
+  }
+
+  if (normalized === "purchase-or-payment") {
+    return "这类动作涉及付款或下单，通常应该始终由人来拍板。";
+  }
+
+  if (normalized === "bank-access") {
+    return "这类动作触及银行或支付账户，风险很高，值得马上留意。";
+  }
+
+  if (normalized === "sensitive-secret-access") {
+    return "这类动作可能接触敏感 secret，最好尽快确认是不是必要。";
+  }
+
+  if (normalized === "sensitive-data-access") {
+    return "这类动作可能接触敏感数据，最好尽快确认是不是必要。";
+  }
+
+  if (severity === "critical") {
+    return "这一步的风险很高，值得你马上看一眼。";
+  }
+
+  if (severity === "high-risk") {
+    return "这一步已经够敏感了，最好尽快确认一下。";
+  }
+
+  return "这一步值得你留意一下，确认它是不是你真的想让 agent 去做。";
 }
 
 export function summarizeActionLabels(actions: string[], maxItems = 3): string {

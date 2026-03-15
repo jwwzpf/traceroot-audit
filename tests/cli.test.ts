@@ -1773,7 +1773,8 @@ describe("CLI", () => {
       expect(tapExitCode).toBe(0);
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("TraceRoot 实时提醒");
-      expect(watchOutput).toContain("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("OpenClaw 运行时 刚刚触发了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("为什么现在值得你看一眼");
       expect(watchOutput).toContain("想查看完整来龙去脉，可以运行：traceroot-audit logs");
     } finally {
       if (previousHome === undefined) {
@@ -1848,7 +1849,8 @@ describe("CLI", () => {
 
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("TraceRoot 实时提醒");
-      expect(watchOutput).toContain("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("OpenClaw 运行时 刚刚触发了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("为什么现在值得你看一眼");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -2316,6 +2318,8 @@ describe("CLI", () => {
       expect(payload.severity).toBe("high-risk");
       expect(payload.actionLabel).toBe("对外发邮件");
       expect(payload.recommendation).toBe("先确认这封外部邮件是不是真的该发出去。");
+      expect(String(payload.text)).toContain("是谁：OpenClaw 运行时");
+      expect(String(payload.text)).toContain("为什么值得现在看一眼");
     } finally {
       await webhook.close();
       if (previousHome === undefined) {
@@ -2500,6 +2504,7 @@ describe("CLI", () => {
       expect(argv).toContain("+4917612345678");
       expect(argv.join(" ")).toContain("TraceRoot 刚盯到一个高风险动作");
       expect(argv.join(" ")).toContain("动作：对外发邮件");
+      expect(argv.join(" ")).toContain("是谁：OpenClaw 运行时");
     } finally {
       await messenger.close();
       if (previousHome === undefined) {

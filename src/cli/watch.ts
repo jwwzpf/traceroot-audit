@@ -1,6 +1,6 @@
 import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
-import { actionLabel } from "../audit/presentation";
+import { actionLabel, runtimeActorLabel, whyThisMatters } from "../audit/presentation";
 import {
   hasNotificationChannel,
   resolveNotificationConfig,
@@ -265,9 +265,11 @@ function shouldEmitHeartbeat(options: {
 
 function renderLiveActionAlert(event: AuditEvent): string[] {
   const icon = alertIconForSeverity(event.severity);
+  const actor = runtimeActorLabel(event.runtime);
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
-    `- Agent 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`
+    `- ${actor} 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`,
+    `- 为什么现在值得你看一眼：${whyThisMatters(event.action, event.severity)}`
   ];
 
   const feedPath =

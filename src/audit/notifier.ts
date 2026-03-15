@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { actionLabel } from "./presentation";
+import { actionLabel, runtimeActorLabel, whyThisMatters } from "./presentation";
 import type { AuditEvent, AuditSeverity } from "./types";
 import { displayUserPath } from "../utils/paths";
 
@@ -75,10 +75,14 @@ function statusLabel(event: AuditEvent): string | undefined {
 }
 
 function buildTextSummary(event: AuditEvent): string {
+  const actor = runtimeActorLabel(event.runtime);
   const parts = [
     `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
+    `是谁：${actor}`,
     `动作：${actionLabel(event.action)}`
   ];
+
+  parts.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
 
   if (event.target) {
     parts.push(`位置：${displayUserPath(event.target)}`);
@@ -97,10 +101,14 @@ function buildTextSummary(event: AuditEvent): string {
 }
 
 function buildChatRelayText(event: AuditEvent): string {
+  const actor = runtimeActorLabel(event.runtime);
   const lines = [
     `${event.severity === "critical" ? "🚨" : event.severity === "high-risk" ? "🛑" : "⚠️"} TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
+    `是谁：${actor}`,
     `动作：${actionLabel(event.action)}`
   ];
+
+  lines.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
 
   if (event.target) {
     lines.push(`位置：${displayUserPath(event.target)}`);
