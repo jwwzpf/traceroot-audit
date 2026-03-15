@@ -1,4 +1,4 @@
-import type { AuditSeverity } from "./types";
+import type { AuditEvent, AuditSeverity } from "./types";
 
 export function actionLabel(action?: string): string {
   if (!action) {
@@ -95,6 +95,83 @@ export function runtimeActorLabel(runtime?: string): string {
   }
 
   return runtime!.trim();
+}
+
+export function notifyChannelLabel(channel?: string): string | undefined {
+  const normalized = channel?.trim().toLowerCase();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  switch (normalized) {
+    case "telegram":
+      return "Telegram";
+    case "whatsapp":
+      return "WhatsApp";
+    case "slack":
+      return "Slack";
+    case "discord":
+      return "Discord";
+    case "signal":
+      return "Signal";
+    case "imessage":
+      return "iMessage";
+    case "googlechat":
+      return "Google Chat";
+    case "mattermost":
+      return "Mattermost";
+    case "msteams":
+      return "Microsoft Teams";
+    case "wechat":
+      return "WeChat";
+    default:
+      return channel?.trim();
+  }
+}
+
+function looksLikeNotifyChannel(value?: string): boolean {
+  const normalized = value?.trim().toLowerCase();
+
+  return [
+    "telegram",
+    "whatsapp",
+    "slack",
+    "discord",
+    "signal",
+    "imessage",
+    "googlechat",
+    "mattermost",
+    "msteams",
+    "wechat"
+  ].includes(normalized ?? "");
+}
+
+export function actionTriggerContext(event: AuditEvent): string | null {
+  const evidence = event.evidence ?? {};
+  const channelValue =
+    typeof evidence.channel === "string" ? evidence.channel.trim() : "";
+  const senderValue =
+    typeof evidence.sender === "string" ? evidence.sender.trim() : "";
+  const sourceValue =
+    typeof evidence.source === "string" ? evidence.source.trim() : "";
+  const channel = notifyChannelLabel(
+    channelValue || (looksLikeNotifyChannel(sourceValue) ? sourceValue : undefined)
+  );
+
+  if (channel && senderValue) {
+    return `来自 ${channel}（${senderValue}）`;
+  }
+
+  if (channel) {
+    return `来自 ${channel}`;
+  }
+
+  if (senderValue) {
+    return `由 ${senderValue} 触发`;
+  }
+
+  return null;
 }
 
 export function whyThisMatters(

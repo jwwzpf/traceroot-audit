@@ -1,7 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { actionLabel, runtimeActorLabel, whyThisMatters } from "./presentation";
+import {
+  actionLabel,
+  actionTriggerContext,
+  runtimeActorLabel,
+  whyThisMatters
+} from "./presentation";
 import type { AuditEvent, AuditSeverity } from "./types";
 import { displayUserPath } from "../utils/paths";
 
@@ -76,11 +81,16 @@ function statusLabel(event: AuditEvent): string | undefined {
 
 function buildTextSummary(event: AuditEvent): string {
   const actor = runtimeActorLabel(event.runtime);
+  const triggerContext = actionTriggerContext(event);
   const parts = [
     `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
     `动作：${actionLabel(event.action)}`
   ];
+
+  if (triggerContext) {
+    parts.push(`触发来源：${triggerContext}`);
+  }
 
   parts.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
 
@@ -102,11 +112,16 @@ function buildTextSummary(event: AuditEvent): string {
 
 function buildChatRelayText(event: AuditEvent): string {
   const actor = runtimeActorLabel(event.runtime);
+  const triggerContext = actionTriggerContext(event);
   const lines = [
     `${event.severity === "critical" ? "🚨" : event.severity === "high-risk" ? "🛑" : "⚠️"} TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
     `动作：${actionLabel(event.action)}`
   ];
+
+  if (triggerContext) {
+    lines.push(`触发来源：${triggerContext}`);
+  }
 
   lines.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
 
@@ -216,6 +231,7 @@ export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> 
     text: buildTextSummary(event),
     action: event.action ?? null,
     actionLabel: actionLabel(event.action),
+    triggerContext: actionTriggerContext(event),
     runtime: event.runtime ?? null,
     status: event.status ?? null,
     target: event.target ? displayUserPath(event.target) : null,

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 
 import fg from "fast-glob";
 
@@ -344,6 +344,50 @@ function inferStructuredRuntimeFeedEvent(
       ["payload", "runtime"],
       ["payload", "service"]
     ]) ?? "mcp";
+  const channel =
+    pickString(parsed, [
+      "channel",
+      "source",
+      ["event", "channel"],
+      ["event", "source"],
+      ["data", "channel"],
+      ["data", "source"],
+      ["payload", "channel"],
+      ["payload", "source"]
+    ]) ?? undefined;
+  const sender =
+    pickString(parsed, [
+      "sender",
+      "senderId",
+      "user",
+      "userId",
+      "actor",
+      ["event", "sender"],
+      ["event", "senderId"],
+      ["event", "user"],
+      ["event", "userId"],
+      ["data", "sender"],
+      ["data", "senderId"],
+      ["data", "user"],
+      ["data", "userId"],
+      ["payload", "sender"],
+      ["payload", "senderId"],
+      ["payload", "user"],
+      ["payload", "userId"]
+    ]) ?? undefined;
+  const sessionKey =
+    pickString(parsed, [
+      "sessionKey",
+      "sessionId",
+      "threadId",
+      "conversationId",
+      ["event", "sessionKey"],
+      ["event", "sessionId"],
+      ["data", "sessionKey"],
+      ["data", "sessionId"],
+      ["payload", "sessionKey"],
+      ["payload", "sessionId"]
+    ]) ?? undefined;
 
   const targetValue = pickString(parsed, [
     "target",
@@ -397,6 +441,9 @@ function inferStructuredRuntimeFeedEvent(
       source: "mcp-tool-call",
       method,
       toolName,
+      channel,
+      sender,
+      sessionKey,
       raw: parsed
     }
   };
@@ -449,6 +496,7 @@ function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEve
       source: "openclaw-command-logger",
       sessionKey,
       channel: sourceChannel,
+      sender,
       raw: parsed
     }
   };
@@ -484,6 +532,12 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
     severityFromAction(action);
   const subsystem = pickString(parsed, ["subsystem", "logger", "scope"]);
   const runtimeName = pickString(parsed, ["runtime", "service"]) ?? "openclaw";
+  const channel =
+    pickString(parsed, ["channel", "source", "provider", "chat", "account"]) ?? undefined;
+  const sender =
+    pickString(parsed, ["sender", "senderId", "user", "userId", "actor"]) ?? undefined;
+  const sessionKey =
+    pickString(parsed, ["sessionKey", "sessionId", "threadId", "conversationId"]) ?? undefined;
   const targetValue = pickString(parsed, ["target", "path", "file"]);
   const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
 
@@ -502,6 +556,9 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
     evidence: {
       source: "openclaw-gateway-log",
       subsystem,
+      channel,
+      sender,
+      sessionKey,
       raw: parsed
     }
   };
@@ -650,6 +707,51 @@ function parseRuntimeFeedEvent(
     ["payload", "runtime"],
     ["payload", "agent"]
   ]);
+  const channel =
+    pickString(parsed, [
+      "channel",
+      "sourceChannel",
+      "inputChannel",
+      "chatChannel",
+      "source",
+      ["event", "channel"],
+      ["event", "sourceChannel"],
+      ["data", "channel"],
+      ["data", "sourceChannel"],
+      ["payload", "channel"],
+      ["payload", "sourceChannel"]
+    ]) ?? undefined;
+  const sender =
+    pickString(parsed, [
+      "sender",
+      "senderId",
+      "user",
+      "userId",
+      "actor",
+      "from",
+      ["event", "sender"],
+      ["event", "senderId"],
+      ["event", "user"],
+      ["data", "sender"],
+      ["data", "senderId"],
+      ["data", "user"],
+      ["payload", "sender"],
+      ["payload", "senderId"],
+      ["payload", "user"]
+    ]) ?? undefined;
+  const sessionKey =
+    pickString(parsed, [
+      "sessionKey",
+      "sessionId",
+      "threadId",
+      "conversationId",
+      ["event", "sessionKey"],
+      ["event", "sessionId"],
+      ["data", "sessionKey"],
+      ["data", "sessionId"],
+      ["payload", "sessionKey"],
+      ["payload", "sessionId"]
+    ]) ?? undefined;
   const targetValue = pickString(parsed, [
     "target",
     "path",
@@ -710,6 +812,9 @@ function parseRuntimeFeedEvent(
         ["data", "source"],
         ["payload", "source"]
       ]) ?? "runtime-event-feed",
+      channel,
+      sender,
+      sessionKey,
       raw: payload ?? parsed
     }
   };
@@ -752,14 +857,23 @@ async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<strin
   return [...candidates];
 }
 
+async function canonicalFeedPath(candidatePath: string): Promise<string> {
+  try {
+    return await realpath(candidatePath);
+  } catch {
+    return path.resolve(candidatePath);
+  }
+}
+
 export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<RuntimeEventFeed[]> {
   const feedMap = new Map<string, RuntimeEventFeed>();
 
   for (const relativePath of candidateRelativePaths) {
-    const absolutePath = path.join(targetRoot, relativePath);
+    const candidatePath = path.join(targetRoot, relativePath);
 
     try {
-      const content = await readFile(absolutePath, "utf8");
+      const content = await readFile(candidatePath, "utf8");
+      const absolutePath = await canonicalFeedPath(candidatePath);
       if (content.trim().length === 0) {
         feedMap.set(absolutePath, {
           absolutePath,
@@ -791,7 +905,8 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
     ignore: ["**/node_modules/**", "**/.git/**"]
   });
 
-  for (const absolutePath of globMatches) {
+  for (const matchedPath of globMatches) {
+    const absolutePath = await canonicalFeedPath(matchedPath);
     feedMap.set(absolutePath, {
       absolutePath,
       displayPath: displayUserPath(absolutePath),
@@ -801,7 +916,8 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
   }
 
   const companionFeeds = await discoverOpenClawCompanionFeeds(targetRoot);
-  for (const absolutePath of companionFeeds) {
+  for (const candidatePath of companionFeeds) {
+    const absolutePath = await canonicalFeedPath(candidatePath);
     feedMap.set(absolutePath, {
       absolutePath,
       displayPath: displayUserPath(absolutePath),
@@ -832,6 +948,59 @@ export async function createRuntimeFeedCursor(feeds: RuntimeEventFeed[]): Promis
   }
 
   return { lineCounts };
+}
+
+export async function readRecentRuntimeFeedEvents(options: {
+  feeds: RuntimeEventFeed[];
+  targetRoot: string;
+  maxLinesPerFeed?: number;
+  maxAgeMs?: number;
+}): Promise<AuditEvent[]> {
+  const events: AuditEvent[] = [];
+  const maxLinesPerFeed = options.maxLinesPerFeed ?? 20;
+  const maxAgeMs = options.maxAgeMs ?? 5 * 60_000;
+  const now = Date.now();
+
+  for (const feed of options.feeds) {
+    let content = "";
+
+    try {
+      content = await readFile(feed.absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(-maxLinesPerFeed);
+
+    for (const line of lines) {
+      const event = parseRuntimeFeedEvent(
+        line,
+        feed.rootDir ?? options.targetRoot,
+        feed.kind
+      );
+
+      if (!event) {
+        continue;
+      }
+
+      const eventTime = new Date(event.timestamp).getTime();
+      if (!Number.isNaN(eventTime) && now - eventTime > maxAgeMs) {
+        continue;
+      }
+
+      event.evidence = {
+        ...(event.evidence ?? {}),
+        feedPath: feed.absolutePath
+      };
+      events.push(event);
+    }
+  }
+
+  return events;
 }
 
 export async function readNewRuntimeFeedEvents(options: {

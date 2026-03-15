@@ -4,8 +4,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Command, Option } from "commander";
 
 import { readAuditEvents } from "../../audit/store";
+import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
-import { actionLabel } from "../../audit/presentation";
+import { actionLabel, actionTriggerContext } from "../../audit/presentation";
 import {
   loadRecentDoctorContext,
   recentTargetLabel
@@ -58,6 +59,111 @@ function formatTimestamp(value: string): string {
     minute: "2-digit",
     second: "2-digit"
   });
+}
+
+function relativeTimeFromNow(value: string): string | null {
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+
+  const diffMs = Math.max(Date.now() - timestamp, 0);
+  const minute = 60_000;
+  const hour = 60 * minute;
+
+  if (diffMs < minute) {
+    return "刚刚";
+  }
+
+  if (diffMs < hour) {
+    return `约 ${Math.round(diffMs / minute)} 分钟前`;
+  }
+
+  if (diffMs < 24 * hour) {
+    return `约 ${Math.round(diffMs / hour)} 小时前`;
+  }
+
+  return `约 ${Math.round(diffMs / (24 * hour))} 天前`;
+}
+
+async function renderWatchStatusSummary(options: {
+  target?: string;
+  hostScope?: boolean;
+}): Promise<string[] | null> {
+  const session = await loadWatchStatusSession({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
+
+  if (!session) {
+    return null;
+  }
+
+  const relativeTime = relativeTimeFromNow(session.lastHeartbeatAt);
+  if (!relativeTime) {
+    return null;
+  }
+
+  const heartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
+  const stale = heartbeatAgeMs > 15 * 60_000;
+  const lines = [
+    "💓 陪跑状态：",
+    stale
+      ? `- 最近一次报平安：${relativeTime}（看起来这次陪跑可能已经停下来了）`
+      : `- 最近一次报平安：${relativeTime}（看起来它还在继续陪跑）`
+  ];
+
+  if (session.lastAttention) {
+    let attentionLine = session.lastAttention.message;
+
+    if (session.lastAttention.category === "action-event" && session.lastAttention.action) {
+      const actor = actorLabel({
+        timestamp: session.lastAttention.timestamp,
+        severity: session.lastAttention.severity,
+        category: session.lastAttention.category,
+        source: "runtime-feed",
+        target: session.lastAttention.target ?? null,
+        message: session.lastAttention.message,
+        runtime: session.lastAttention.runtime,
+        action: session.lastAttention.action,
+        status: session.lastAttention.status
+      });
+      const label = actionLabel(session.lastAttention.action);
+
+      if (session.lastAttention.status === "succeeded") {
+        attentionLine = `${actor} 已完成：${label}`;
+      } else if (session.lastAttention.status === "failed") {
+        attentionLine = `${actor} 没有完成：${label}`;
+      } else {
+        attentionLine = `${actor} 正在尝试：${label}`;
+      }
+    }
+
+    lines.push(`- 最近一次值得你看一眼的是：${attentionLine}`);
+    const triggerContext = actionTriggerContext({
+      timestamp: session.lastAttention.timestamp,
+      severity: session.lastAttention.severity,
+      category: session.lastAttention.category,
+      source: "runtime-feed",
+      target: session.lastAttention.target ?? null,
+      message: session.lastAttention.message,
+      runtime: session.lastAttention.runtime,
+      action: session.lastAttention.action,
+      status: session.lastAttention.status,
+      evidence: {
+        channel: session.lastAttention.channel,
+        sender: session.lastAttention.sender
+      }
+    });
+
+    if (triggerContext) {
+      lines.push(`- 触发来源：${triggerContext}`);
+    }
+  }
+
+  lines.push("");
+  return lines;
 }
 
 function categoryLabel(event: AuditEvent): string {
@@ -194,7 +300,9 @@ function buildTimelineEntries(eventsAscending: AuditEvent[]): TimelineEntry[] {
 }
 
 function looksLikeGenericRuntimeNarration(message: string): boolean {
-  const normalized = message.trim();
+  const normalized = message
+    .trim()
+    .replace(/^[^:：]+(?:刚提到|报告这个动作已经完成|报告这个动作没有成功|刚刚报告了一个动作)[:：]\s*/u, "");
   return [
     /^agent is attempting to /i,
     /^agent attempted to /i,
@@ -440,6 +548,11 @@ function renderTimelineEntry(entry: TimelineEntry): string[] {
     lines.push(`   📝 ${detail}`);
   }
 
+  const triggerContext = actionTriggerContext(entry.primary);
+  if (triggerContext) {
+    lines.push(`   🗣️ 触发来源: ${triggerContext}`);
+  }
+
   if (entry.primary.target) {
     lines.push(`   📍 发生在: ${displayUserPath(entry.primary.target)}`);
   }
@@ -490,6 +603,10 @@ async function printLogs(
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending);
+    const watchStatusLines = await renderWatchStatusSummary({
+      target: options.target,
+      hostScope: options.hostScope
+    });
     const lines = [
       "TraceRoot Audit Logs",
       "====================",
@@ -511,6 +628,10 @@ async function printLogs(
       lines.push("📅 时间范围: 今天");
     }
 
+    if (watchStatusLines) {
+      lines.push("", ...watchStatusLines);
+    }
+
     lines.push(
       `📚 本次显示 ${eventsAscending.length} 条审计记录`,
       `🧾 对你来说更像 ${timelineEntries.length} 件完整的事`,
@@ -523,6 +644,10 @@ async function printLogs(
     if (summary.latestAttention) {
       lines.push("👀 当前最值得注意的事情：");
       lines.push(`- ${eventHeadline(summary.latestAttention)}`);
+      const triggerContext = actionTriggerContext(summary.latestAttention);
+      if (triggerContext) {
+        lines.push(`- 触发来源：${triggerContext}`);
+      }
       const detail = eventDetail(summary.latestAttention);
       if (detail && detail !== eventHeadline(summary.latestAttention)) {
         lines.push(`- 说明：${detail}`);

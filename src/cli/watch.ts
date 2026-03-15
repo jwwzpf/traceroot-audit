@@ -1,6 +1,12 @@
 import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
+import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
-import { actionLabel, runtimeActorLabel, whyThisMatters } from "../audit/presentation";
+import {
+  actionLabel,
+  actionTriggerContext,
+  runtimeActorLabel,
+  whyThisMatters
+} from "../audit/presentation";
 import {
   hasNotificationChannel,
   resolveNotificationConfig,
@@ -13,6 +19,7 @@ import {
 import {
   createRuntimeFeedCursor,
   discoverRuntimeEventFeeds,
+  readRecentRuntimeFeedEvents,
   readNewRuntimeFeedEvents
 } from "../audit/feeds";
 import {
@@ -266,11 +273,16 @@ function shouldEmitHeartbeat(options: {
 function renderLiveActionAlert(event: AuditEvent): string[] {
   const icon = alertIconForSeverity(event.severity);
   const actor = runtimeActorLabel(event.runtime);
+  const triggerContext = actionTriggerContext(event);
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
     `- ${actor} 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`,
     `- 为什么现在值得你看一眼：${whyThisMatters(event.action, event.severity)}`
   ];
+
+  if (triggerContext) {
+    lines.push(`- 这一步是 ${triggerContext} 触发出来的`);
+  }
 
   const feedPath =
     typeof event.evidence?.feedPath === "string" && event.evidence.feedPath.trim().length > 0
@@ -338,6 +350,30 @@ async function writeAuditEvents(
       state.warned = true;
     }
   }
+}
+
+function latestAttentionEvent(events: AuditEvent[]): AuditEvent | null {
+  for (const event of [...events].reverse()) {
+    if (event.severity !== "safe") {
+      return event;
+    }
+  }
+
+  return null;
+}
+
+async function refreshWatchStatus(options: {
+  scope: "host" | "target";
+  source: "doctor-watch" | "guard-watch" | "host-watch";
+  target?: string | null;
+  attentionEvent?: AuditEvent | null;
+}): Promise<void> {
+  await updateWatchStatusSession({
+    scope: options.scope,
+    source: options.source,
+    target: options.target,
+    attentionEvent: options.attentionEvent ?? null
+  });
 }
 
 async function notifyActionEvent(
@@ -490,6 +526,10 @@ export async function runHostWatch(options: {
   const runtimeFeeds = await discoverHostRuntimeFeeds({
     candidates: initialDiscovery.candidates
   });
+  const startupFeedEvents = await readRecentRuntimeFeedEvents({
+    feeds: runtimeFeeds,
+    targetRoot: initialDiscovery.homeDir
+  });
   const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
   const initialAuditEvents = await readAuditEvents();
   const seenActionEvents = new Set(
@@ -497,10 +537,20 @@ export async function runHostWatch(options: {
       .filter((event) => event.category === "action-event")
       .map(actionEventKey)
   );
-  const recentStartupAlerts = initialAuditEvents.events
-    .filter(isAlertWorthyActionEvent)
-    .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
-    .filter((event) => hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates))
+  const freshStartupFeedEvents = startupFeedEvents.filter(
+    (event) => !seenActionEvents.has(actionEventKey(event))
+  );
+  const startupAttentionEvents = [
+    ...initialAuditEvents.events
+      .filter(isAlertWorthyActionEvent)
+      .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
+      .filter((event) => hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates)),
+    ...freshStartupFeedEvents.filter(isAlertWorthyActionEvent)
+  ];
+  const recentStartupAlerts = startupAttentionEvents
+    .filter((event, index, array) =>
+      array.findIndex((candidate) => actionEventKey(candidate) === actionEventKey(event)) === index
+    )
     .slice(0, 3);
   const initialBestFirst = initialDiscovery.candidates.filter(
     (candidate) => candidate.tier === "best-first"
@@ -587,6 +637,10 @@ export async function runHostWatch(options: {
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
 
+  if (freshStartupFeedEvents.length > 0) {
+    await writeAuditEvents(runtime, freshStartupFeedEvents, auditWriteState);
+  }
+
   if (recentStartupAlerts.length > 0) {
     await emitLiveActionAlerts({
       runtime,
@@ -637,6 +691,11 @@ export async function runHostWatch(options: {
     ],
     auditWriteState
   );
+  await refreshWatchStatus({
+    scope: "host",
+    source: "host-watch",
+    attentionEvent: latestAttentionEvent(recentStartupAlerts)
+  });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
 
@@ -664,6 +723,13 @@ export async function runHostWatch(options: {
       targetRoot: latestDiscovery.homeDir
     });
     await writeAuditEvents(runtime, feedEvents, auditWriteState);
+    if (feedEvents.length > 0) {
+      await refreshWatchStatus({
+        scope: "host",
+        source: "host-watch",
+        attentionEvent: latestAttentionEvent(feedEvents)
+      });
+    }
     const newActionAlerts = feedEvents
       .filter(isAlertWorthyActionEvent)
       .filter((event) => !seenActionEvents.has(actionEventKey(event)));
@@ -675,6 +741,13 @@ export async function runHostWatch(options: {
       notificationState,
       alertState
     });
+    if (newActionAlerts.length > 0) {
+      await refreshWatchStatus({
+        scope: "host",
+        source: "host-watch",
+        attentionEvent: latestAttentionEvent(newActionAlerts)
+      });
+    }
     for (const event of feedEvents) {
       if (event.category === "action-event") {
         seenActionEvents.add(actionEventKey(event));
@@ -701,6 +774,10 @@ export async function runHostWatch(options: {
             : `💓 ${timestamp()} No machine-level agent surface changes detected.\n`
         );
         lastHeartbeatAt = now;
+        await refreshWatchStatus({
+          scope: "host",
+          source: "host-watch"
+        });
       }
       previousSnapshot = currentSnapshot;
       continue;
@@ -806,6 +883,11 @@ export async function runHostWatch(options: {
 
     runtime.io.stdout(`${lines.join("\n")}\n`);
     await writeAuditEvents(runtime, events, auditWriteState);
+    await refreshWatchStatus({
+      scope: "host",
+      source: "host-watch",
+      attentionEvent: latestAttentionEvent(events)
+    });
     previousSnapshot = currentSnapshot;
   }
 }
@@ -853,12 +935,25 @@ export async function runTargetWatch(options: {
       .filter((event) => event.category === "action-event")
       .map(actionEventKey)
   );
-  const recentStartupAlerts = initialAuditEvents.events
-    .filter(isAlertWorthyActionEvent)
-    .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000)))
-    .slice(0, 3);
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
   const runtimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
+  const startupFeedEvents = await readRecentRuntimeFeedEvents({
+    feeds: runtimeFeeds,
+    targetRoot: resolvedTarget.rootDir
+  });
+  const freshStartupFeedEvents = startupFeedEvents.filter(
+    (event) => !seenActionEvents.has(actionEventKey(event))
+  );
+  const recentStartupAlerts = [
+    ...initialAuditEvents.events
+      .filter(isAlertWorthyActionEvent)
+      .filter((event) => happenedRecently(event.timestamp, Math.max(intervalSeconds * 2000, 30_000))),
+    ...freshStartupFeedEvents.filter(isAlertWorthyActionEvent)
+  ]
+    .filter((event, index, array) =>
+      array.findIndex((candidate) => actionEventKey(candidate) === actionEventKey(event)) === index
+    )
+    .slice(0, 3);
   const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
   let previousBoundaryStatus: BoundaryStatus | null = null;
 
@@ -979,6 +1074,10 @@ export async function runTargetWatch(options: {
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
 
+  if (freshStartupFeedEvents.length > 0) {
+    await writeAuditEvents(runtime, freshStartupFeedEvents, auditWriteState);
+  }
+
   if (recentStartupAlerts.length > 0) {
     await emitLiveActionAlerts({
       runtime,
@@ -1050,6 +1149,12 @@ export async function runTargetWatch(options: {
   }
 
   await writeAuditEvents(runtime, startupEvents, auditWriteState);
+  await refreshWatchStatus({
+    scope: "target",
+    source,
+    target: resolvedTarget.absolutePath,
+    attentionEvent: latestAttentionEvent([...startupEvents, ...recentStartupAlerts])
+  });
 
   const totalCycles = maxCycles ?? Number.POSITIVE_INFINITY;
 
@@ -1072,6 +1177,14 @@ export async function runTargetWatch(options: {
       targetRoot: resolvedTarget.rootDir
     });
     await writeAuditEvents(runtime, feedEvents, auditWriteState);
+    if (feedEvents.length > 0) {
+      await refreshWatchStatus({
+        scope: "target",
+        source,
+        target: resolvedTarget.absolutePath,
+        attentionEvent: latestAttentionEvent(feedEvents)
+      });
+    }
     const now = Date.now();
     const shouldRunDeepCheck =
       cycle === 1 || now - lastDeepCheckAt >= deepCheckIntervalMs;
@@ -1128,6 +1241,14 @@ export async function runTargetWatch(options: {
         notificationState,
         alertState
       });
+      if (newActionAlerts.length > 0) {
+        await refreshWatchStatus({
+          scope: "target",
+          source,
+          target: resolvedTarget.absolutePath,
+          attentionEvent: latestAttentionEvent(newActionAlerts)
+        });
+      }
 
       for (const event of latestAuditEvents.events) {
         if (event.category === "action-event") {
@@ -1166,6 +1287,11 @@ export async function runTargetWatch(options: {
 
         runtime.io.stdout(heartbeat);
         lastHeartbeatAt = now;
+        await refreshWatchStatus({
+          scope: "target",
+          source,
+          target: resolvedTarget.absolutePath
+        });
       }
       previousSnapshot = currentSnapshot;
       if (currentBoundaryStatus) {
@@ -1284,6 +1410,12 @@ export async function runTargetWatch(options: {
 
     runtime.io.stdout(`${lines.join("\n")}\n`);
     await writeAuditEvents(runtime, events, auditWriteState);
+    await refreshWatchStatus({
+      scope: "target",
+      source,
+      target: resolvedTarget.absolutePath,
+      attentionEvent: latestAttentionEvent(events)
+    });
 
     const latestAuditEvents = await readAuditEvents({
       target: resolvedTarget.absolutePath
@@ -1300,6 +1432,14 @@ export async function runTargetWatch(options: {
       notificationState,
       alertState
     });
+    if (newActionAlerts.length > 0) {
+      await refreshWatchStatus({
+        scope: "target",
+        source,
+        target: resolvedTarget.absolutePath,
+        attentionEvent: latestAttentionEvent(newActionAlerts)
+      });
+    }
 
     for (const event of latestAuditEvents.events) {
       if (event.category === "action-event") {

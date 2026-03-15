@@ -34,10 +34,12 @@ import {
 import { recommendedManifestFormat } from "../../hardening/analysis";
 import {
   actionLabel,
+  actionTriggerContext,
   runtimeActorLabel,
   summarizeActionLabels
 } from "../../audit/presentation";
 import { readAuditEvents } from "../../audit/store";
+import { loadWatchStatusSession } from "../../audit/status";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
 import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-discovery";
 import { runTargetWatch } from "../watch";
@@ -66,19 +68,75 @@ async function loadLatestAttentionLine(options: {
   if (event.category === "action-event") {
     const actor = runtimeActorLabel(event.runtime);
     const label = actionLabel(event.action);
+    const triggerContext = actionTriggerContext(event);
+    const suffix = triggerContext ? `（${triggerContext}）` : "";
 
     if (event.status === "succeeded") {
-      return `最近一次值得你看一眼的是：${actor} 已完成「${label}」`;
+      return `最近一次值得你看一眼的是：${actor} 已完成「${label}」${suffix}`;
     }
 
     if (event.status === "failed") {
-      return `最近一次值得你看一眼的是：${actor} 没有完成「${label}」`;
+      return `最近一次值得你看一眼的是：${actor} 没有完成「${label}」${suffix}`;
     }
 
-    return `最近一次值得你看一眼的是：${actor} 正在尝试「${label}」`;
+    return `最近一次值得你看一眼的是：${actor} 正在尝试「${label}」${suffix}`;
   }
 
   return `最近一次值得你看一眼的是：${event.message}`;
+}
+
+function relativeTimeFromNow(value: string): string | null {
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+
+  const diffMs = Math.max(Date.now() - timestamp, 0);
+  const minute = 60_000;
+  const hour = 60 * minute;
+
+  if (diffMs < minute) {
+    return "刚刚";
+  }
+
+  if (diffMs < hour) {
+    return `约 ${Math.round(diffMs / minute)} 分钟前`;
+  }
+
+  if (diffMs < 24 * hour) {
+    return `约 ${Math.round(diffMs / hour)} 小时前`;
+  }
+
+  return `约 ${Math.round(diffMs / (24 * hour))} 天前`;
+}
+
+async function loadWatchFreshnessLine(options: {
+  target?: string;
+  hostScope?: boolean;
+}): Promise<string | null> {
+  const session = await loadWatchStatusSession({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
+
+  if (!session) {
+    return null;
+  }
+
+  const relativeTime = relativeTimeFromNow(session.lastHeartbeatAt);
+  if (!relativeTime) {
+    return null;
+  }
+
+  const heartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
+  const stale = heartbeatAgeMs > 15 * 60_000;
+
+  if (stale) {
+    return `TraceRoot 最近一次报平安是在 ${relativeTime}，这次陪跑看起来可能已经停下来了。`;
+  }
+
+  return `TraceRoot 最近一次报平安是在 ${relativeTime}，看起来它还在继续陪跑。`;
 }
 
 function renderDoctorSummary(options: {
@@ -288,6 +346,7 @@ function renderDoctorResumeSummary(options: {
   profile: SavedHardeningProfile;
   reminder: string;
   boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
+  watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
   const lines = [
@@ -342,6 +401,10 @@ function renderDoctorResumeSummary(options: {
       "",
       "💓 TraceRoot 这次不会重新生成整套 bundle，会先直接继续陪跑，并盯着这些边界变化。"
     );
+  }
+
+  if (options.watchFreshnessLine) {
+    lines.push("", `💓 ${options.watchFreshnessLine}`);
   }
 
   if (options.latestAttentionLine) {
@@ -435,6 +498,7 @@ function renderHostDoctorWatchIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
   const lines = [
@@ -464,6 +528,10 @@ function renderHostDoctorWatchIntro(options: {
     ""
   );
 
+  if (options.watchFreshnessLine) {
+    lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
+  }
+
   if (options.latestAttentionLine) {
     lines.splice(lines.length - 1, 0, `👀 ${options.latestAttentionLine}`, "");
   }
@@ -476,6 +544,7 @@ function renderHostDoctorWatchResumeIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
   const lines = [
@@ -504,6 +573,10 @@ function renderHostDoctorWatchResumeIntro(options: {
     "📚 想回看今天发生了什么，可以直接用：traceroot-audit logs --today",
     ""
   );
+
+  if (options.watchFreshnessLine) {
+    lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
+  }
 
   if (options.latestAttentionLine) {
     lines.splice(lines.length - 1, 0, `👀 ${options.latestAttentionLine}`, "");
@@ -675,6 +748,7 @@ async function runMachineLevelDoctorWatch(options: {
   const suggestedNames = hostDiscovery.candidates
     .slice(0, 3)
     .map((candidate) => candidate.displayPath);
+  const watchFreshnessLine = await loadWatchFreshnessLine({ hostScope: true });
   const latestAttentionLine = await loadLatestAttentionLine({ hostScope: true });
 
   options.runtime.io.stdout(
@@ -684,6 +758,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          watchFreshnessLine,
           latestAttentionLine,
           contextLine:
             options.reason === "remembered-host"
@@ -694,6 +769,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          watchFreshnessLine,
           latestAttentionLine,
           contextLine:
             options.reason === "smart-fallback"
@@ -1010,6 +1086,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                 openclawTarget: savedPreferences!.notifications.openclawTarget
               }),
               boundaryStatus,
+              watchFreshnessLine: await loadWatchFreshnessLine({
+                target: effectiveTarget
+              }),
               latestAttentionLine: await loadLatestAttentionLine({
                 target: effectiveTarget
               })

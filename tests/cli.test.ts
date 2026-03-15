@@ -734,6 +734,84 @@ describe("CLI", () => {
     }
   });
 
+  it("can surface a high-risk runtime action that happened just before host watch started", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-startup-feed-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(logsDir, "runtime-events.jsonl"),
+        `${JSON.stringify({
+          event: {
+            type: "send-email",
+            status: "attempted",
+            runtime: "openclaw",
+            target: "mailer.ts",
+            timestamp: new Date().toISOString(),
+            message: "Agent is attempting to send an external email."
+          }
+        })}\n`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io
+      );
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("OpenClaw 运行时 正在尝试：对外发邮件");
+      expect(logsOutput).toContain("对外发邮件：出现了 1 次");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("remembers the reminder route for machine-level doctor watch", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-reminder-home-"));
     const previousHome = process.env.HOME;
@@ -1082,6 +1160,7 @@ describe("CLI", () => {
       expect(output).toContain("WhatsApp（+4917612345678）");
       expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
       expect(output).toContain("这次不会重新生成整套 bundle");
+      expect(output).toContain("最近一次报平安");
       expect(output).toContain("最近一次值得你看一眼的是");
       expect(output).toContain("对外发邮件");
       expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
@@ -1593,6 +1672,8 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("TraceRoot Audit Logs");
       expect(logsOutput).toContain("正在查看");
+      expect(logsOutput).toContain("陪跑状态");
+      expect(logsOutput).toContain("最近一次报平安");
       expect(logsOutput).toContain("当前运行态重新变宽了");
       expect(logsOutput).toContain("TraceRoot 已经开始陪跑这个 agent");
       expect(logsOutput).toContain("风险概览");
@@ -2013,6 +2094,8 @@ describe("CLI", () => {
           `${JSON.stringify({
             timestamp: new Date().toISOString(),
             runtime: "gmail-mcp",
+            channel: "telegram",
+            sender: "@ops-room",
             method: "tools/call",
             params: {
               name: "send_email",
@@ -2048,6 +2131,7 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
+      expect(output).toContain("这一步是 来自 Telegram（@ops-room） 触发出来的");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -2062,6 +2146,7 @@ describe("CLI", () => {
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
       expect(logsOutput).toContain("TraceRoot 判断这一步相当于：对外发邮件");
+      expect(logsOutput).toContain("触发来源：来自 Telegram（@ops-room）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("mcp-events.jsonl");
     } finally {
