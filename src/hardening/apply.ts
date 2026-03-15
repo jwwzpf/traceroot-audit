@@ -11,6 +11,7 @@ import type { SecretExposure } from "./analysis";
 import { discoverFiles, resolveTarget } from "../utils/files";
 import type { ScannableFile } from "../rules/types";
 import type { AuditSeverity } from "../audit/types";
+import { saveAuditCoverageSnapshot } from "./audit-coverage";
 
 const composePatterns = ["docker-compose.yml", "docker-compose.yaml"];
 
@@ -32,6 +33,7 @@ export interface ApplyBundleResult {
   tapPendingActionsCount: number;
   tapCoveredActions: string[];
   tapPendingActions: string[];
+  auditCoveragePath: string | null;
 }
 
 export interface TapWrapperFile {
@@ -65,6 +67,7 @@ export interface TapEntrypoint {
 export interface TapInstalledCommand {
   kind: "npm-script" | "bin" | "config-command";
   name: string;
+  displayLabel: string;
   beforeCommand: string;
   afterCommand: string;
 }
@@ -1286,6 +1289,7 @@ async function installTapEntrypoints(options: {
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
+          displayLabel: entrypoint.displayLabel,
           beforeCommand: currentValue,
           afterCommand: currentValue
         });
@@ -1305,6 +1309,7 @@ async function installTapEntrypoints(options: {
       installedCommands.push({
         kind: entrypoint.kind,
         name: entrypoint.name,
+        displayLabel: entrypoint.displayLabel,
         beforeCommand: entrypoint.currentCommand,
         afterCommand: entrypoint.suggestedCommand
       });
@@ -1431,6 +1436,7 @@ async function installTapEntrypoints(options: {
           installedCommands.push({
             kind: entrypoint.kind,
             name: entrypoint.name,
+            displayLabel: entrypoint.displayLabel,
             beforeCommand: Array.isArray(currentArgs)
               ? `${String(currentCommandValue)} ${currentArgs.join(" ")}`
               : String(currentCommandValue),
@@ -1470,6 +1476,7 @@ async function installTapEntrypoints(options: {
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
+          displayLabel: entrypoint.displayLabel,
           beforeCommand: Array.isArray(entrypoint.currentArgs)
             ? `${entrypoint.currentCommand} ${entrypoint.currentArgs.join(" ")}`
             : entrypoint.currentCommand,
@@ -1517,6 +1524,7 @@ async function installTapEntrypoints(options: {
         installedCommands.push({
           kind: entrypoint.kind,
           name: entrypoint.name,
+          displayLabel: entrypoint.displayLabel,
           beforeCommand: Array.isArray(currentArgs)
             ? `${String(currentCommandValue)} ${currentArgs.join(" ")}`
             : String(currentCommandValue),
@@ -1556,6 +1564,7 @@ async function installTapEntrypoints(options: {
       installedCommands.push({
         kind: entrypoint.kind,
         name: entrypoint.name,
+        displayLabel: entrypoint.displayLabel,
         beforeCommand: Array.isArray(entrypoint.currentArgs)
           ? `${entrypoint.currentCommand} ${entrypoint.currentArgs.join(" ")}`
           : entrypoint.currentCommand,
@@ -1907,6 +1916,19 @@ export async function writeApplyBundle(options: {
   }
 
   const tapBundle = await buildTapWrappers(options.rootDir, options.profile.surface);
+  const auditCoveragePath =
+    tapBundle.tapPlanPath && tapBundle.tapWrappers.length > 0
+      ? await saveAuditCoverageSnapshot(options.rootDir, {
+          version: 1,
+          updatedAt: new Date().toISOString(),
+          coveredActions: tapBundle.tapCoveredActions,
+          pendingActions: tapBundle.tapPendingActions,
+          installedEntrypointCount: tapBundle.tapInstalledCommands.length,
+          installedEntrypointLabels: tapBundle.tapInstalledCommands.map(
+            (entrypoint) => entrypoint.displayLabel
+          )
+        })
+      : null;
 
   await writeFile(
     planPath,
@@ -1948,6 +1970,7 @@ export async function writeApplyBundle(options: {
     tapCoveredActionsCount: tapBundle.tapCoveredActionsCount,
     tapPendingActionsCount: tapBundle.tapPendingActionsCount,
     tapCoveredActions: tapBundle.tapCoveredActions,
-    tapPendingActions: tapBundle.tapPendingActions
+    tapPendingActions: tapBundle.tapPendingActions,
+    auditCoveragePath
   };
 }

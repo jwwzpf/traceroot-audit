@@ -3,6 +3,7 @@ import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import {
   actionLabel,
+  summarizeActionLabels,
   actionTriggerSourceLabel,
   actionTriggerSentence,
   runtimeActorLabel,
@@ -45,6 +46,10 @@ import {
 } from "../hardening/boundary";
 import { loadHardeningProfile } from "../hardening/profile";
 import {
+  loadAuditCoverageSnapshot,
+  type SavedAuditCoverageSnapshot
+} from "../hardening/audit-coverage";
+import {
   getHardeningProfileById,
   type HardeningIntentId
 } from "../hardening/profiles";
@@ -77,6 +82,56 @@ function actionEventKey(event: AuditEvent): string {
     event.target ?? "",
     event.message
   ].join("::");
+}
+
+function renderAuditCoverageLines(options: {
+  snapshot: SavedAuditCoverageSnapshot | null;
+  runtimeFeedCount: number;
+}): string[] {
+  const { snapshot, runtimeFeedCount } = options;
+
+  if (!snapshot) {
+    if (runtimeFeedCount > 0) {
+      return [
+        "🎬 动作审计覆盖：",
+        "- 这次主要先靠运行时事件入口陪跑。",
+        `- 目前已经接上 ${runtimeFeedCount} 个运行时事件入口。`,
+        "- 常见高风险动作入口还没有自动接上时，TraceRoot 也会继续从这些入口里听高风险动作。",
+        ""
+      ];
+    }
+
+    return [];
+  }
+
+  const lines = [
+    "🎬 动作审计覆盖：",
+    `- 现在已经盯住：${summarizeActionLabels(snapshot.coveredActions)}。`,
+    `- 已经自动接好 ${snapshot.installedEntrypointCount} 个常见动作入口。`
+  ];
+
+  if (snapshot.installedEntrypointLabels.length > 0) {
+    lines.push(
+      `- 已接好的重点入口：${snapshot.installedEntrypointLabels.slice(0, 3).join("、")}${
+        snapshot.installedEntrypointLabels.length > 3
+          ? `，以及另外 ${snapshot.installedEntrypointLabels.length - 3} 个入口`
+          : ""
+      }。`
+    );
+  }
+
+  if (snapshot.pendingActions.length > 0) {
+    lines.push(
+      `- 还有 ${snapshot.pendingActions.length} 类高风险动作暂时还没完全接上，TraceRoot 会继续通过运行时事件入口补上这层视角。`
+    );
+  }
+
+  if (runtimeFeedCount > 0) {
+    lines.push(`- 另外还在继续听 ${runtimeFeedCount} 个运行时事件入口。`);
+  }
+
+  lines.push("");
+  return lines;
 }
 
 function actionAlertFingerprint(event: AuditEvent): string {
@@ -1070,6 +1125,7 @@ export async function runTargetWatch(options: {
       .map(actionEventKey)
   );
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
+  const auditCoverageResult = await loadAuditCoverageSnapshot(resolvedTarget.rootDir);
   const runtimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
   const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
     feeds: runtimeFeeds,
@@ -1160,6 +1216,13 @@ export async function runTargetWatch(options: {
         ""
       );
     }
+
+    initialLines.push(
+      ...renderAuditCoverageLines({
+        snapshot: auditCoverageResult.snapshot,
+        runtimeFeedCount: runtimeFeeds.length
+      })
+    );
   } else {
     initialLines.push(
       `🎯 Target: ${target}`,
@@ -1204,6 +1267,13 @@ export async function runTargetWatch(options: {
     initialLines.push("- 如果暂时没什么值得你注意的动作，TraceRoot 会安静地继续陪跑，不会反复刷屏");
 
     initialLines.push("");
+
+    initialLines.push(
+      ...renderAuditCoverageLines({
+        snapshot: auditCoverageResult.snapshot,
+        runtimeFeedCount: runtimeFeeds.length
+      })
+    );
   }
 
   if (notificationConfig.openclawChannel && notificationConfig.openclawTarget) {

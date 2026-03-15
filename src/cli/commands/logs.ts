@@ -8,8 +8,10 @@ import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import {
   actionLabel,
+  summarizeActionLabels,
   actionTriggerSourceLabel
 } from "../../audit/presentation";
+import { loadAuditCoverageSnapshot } from "../../hardening/audit-coverage";
 import {
   loadRecentDoctorContext,
   recentTargetLabel
@@ -659,6 +661,42 @@ function normalizeTargetFilter(target?: string): string | undefined {
   return path.resolve(target);
 }
 
+async function renderAuditCoverageSummary(target?: string): Promise<string[] | null> {
+  if (!target) {
+    return null;
+  }
+
+  const coverage = await loadAuditCoverageSnapshot(target);
+  if (!coverage.snapshot) {
+    return null;
+  }
+
+  const lines = [
+    "🎬 当前动作审计覆盖：",
+    `- 现在已经盯住：${summarizeActionLabels(coverage.snapshot.coveredActions)}。`,
+    `- 已经自动接好 ${coverage.snapshot.installedEntrypointCount} 个常见动作入口。`
+  ];
+
+  if (coverage.snapshot.installedEntrypointLabels.length > 0) {
+    lines.push(
+      `- 已接好的重点入口：${coverage.snapshot.installedEntrypointLabels.slice(0, 3).join("、")}${
+        coverage.snapshot.installedEntrypointLabels.length > 3
+          ? `，以及另外 ${coverage.snapshot.installedEntrypointLabels.length - 3} 个入口`
+          : ""
+      }。`
+    );
+  }
+
+  if (coverage.snapshot.pendingActions.length > 0) {
+    lines.push(
+      `- 还有 ${coverage.snapshot.pendingActions.length} 类高风险动作暂时还没完全接上，TraceRoot 会继续从运行时事件里补上这层视角。`
+    );
+  }
+
+  lines.push("");
+  return lines;
+}
+
 async function printLogs(
   runtime: CliRuntime,
   options: {
@@ -685,6 +723,7 @@ async function printLogs(
       target: options.target,
       hostScope: options.hostScope
     });
+    const coverageLines = await renderAuditCoverageSummary(options.hostScope ? undefined : options.target);
     const lines = [
       "TraceRoot Audit Logs",
       "====================",
@@ -708,6 +747,10 @@ async function printLogs(
 
     if (watchStatusLines) {
       lines.push("", ...watchStatusLines);
+    }
+
+    if (coverageLines) {
+      lines.push("", ...coverageLines);
     }
 
     lines.push(

@@ -1715,6 +1715,20 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "mail-runtime",
+            scripts: {
+              "send-email": "tsx mailer.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       process.env.HOME = tempHome;
 
       const capture = createCapture();
@@ -1735,6 +1749,9 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot Audit Doctor Watch");
       expect(output).toContain("Doctor Watch 现在会继续盯着");
       expect(output).toContain("TraceRoot 会安静地继续陪跑，不会反复刷屏");
+      expect(output).toContain("动作审计覆盖");
+      expect(output).toContain("现在已经盯住：对外发邮件");
+      expect(output).toContain("已经自动接好 1 个常见动作入口");
       expect(output).toContain("审计日志:");
       expect(output).not.toContain("TraceRoot Audit Guard");
     } finally {
@@ -1918,6 +1935,20 @@ describe("CLI", () => {
         "import fs from 'node:fs';\nimport nodemailer from 'nodemailer';\nfetch('https://api.example.com');\nfs.writeFileSync('out.txt', 'hello');\n",
         "utf8"
       );
+      await writeFile(
+        path.join(tempDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "mail-runtime",
+            scripts: {
+              "send-email": "tsx mailer.ts"
+            }
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       process.env.HOME = tempHome;
 
       const watchCapture = createCapture();
@@ -1960,6 +1991,9 @@ describe("CLI", () => {
       expect(logsOutput).toContain("TraceRoot Audit Logs");
       expect(logsOutput).toContain("正在查看");
       expect(logsOutput).toContain("陪跑状态");
+      expect(logsOutput).toContain("当前动作审计覆盖");
+      expect(logsOutput).toContain("现在已经盯住：对外发邮件");
+      expect(logsOutput).toContain("已经自动接好 1 个常见动作入口");
       expect(logsOutput).toContain("最近一次报平安");
       expect(logsOutput).toContain("当前运行态重新变宽了");
       expect(logsOutput).toContain("TraceRoot 已经开始陪跑这个 agent");
