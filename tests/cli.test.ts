@@ -709,8 +709,11 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
+      expect(output).toContain("~/.openclaw（OpenClaw 运行态）");
       expect(output).toContain("今天稍早已经出现过 1 个值得留意的动作");
       expect(output).toContain("对外发邮件");
+      expect(output).toContain("Telegram（@ops-room） 触发了「对外发邮件」");
+      expect(output).toContain("traceroot-audit logs --today");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(

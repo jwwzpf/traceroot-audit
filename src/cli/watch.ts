@@ -3,6 +3,7 @@ import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import {
   actionLabel,
+  actionTriggerSourceLabel,
   actionTriggerSentence,
   runtimeActorLabel,
   whyThisMatters
@@ -245,6 +246,48 @@ function summarizeRecoveredActionLabels(events: AuditEvent[]): string {
   }
 
   return labels.slice(0, 3).join("、");
+}
+
+function severityScore(severity: AuditSeverity): number {
+  if (severity === "critical") {
+    return 4;
+  }
+
+  if (severity === "high-risk") {
+    return 3;
+  }
+
+  if (severity === "risky") {
+    return 2;
+  }
+
+  return 1;
+}
+
+function mostImportantRecoveredAction(events: AuditEvent[]): AuditEvent | null {
+  if (events.length === 0) {
+    return null;
+  }
+
+  return [...events].sort((left, right) => {
+    const severityDelta = severityScore(right.severity) - severityScore(left.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+
+    return right.timestamp.localeCompare(left.timestamp);
+  })[0] ?? null;
+}
+
+function recoveredActionSummaryLine(event: AuditEvent): string {
+  const source = actionTriggerSourceLabel(event);
+  const action = actionLabel(event.action);
+
+  if (source) {
+    return `👀 今天目前最值得你马上看一眼的是：${source} 触发了「${action}」。`;
+  }
+
+  return `👀 今天目前最值得你马上看一眼的是：「${action}」。`;
 }
 
 function heartbeatIntervalMs(options: {
@@ -662,9 +705,12 @@ export async function runHostWatch(options: {
   }
 
   if (historicalTodayFeedEvents.length > 0) {
+    const topRecoveredAction = mostImportantRecoveredAction(historicalTodayFeedEvents);
     initialLines.push(
       `📚 今天稍早已经出现过 ${historicalTodayFeedEvents.length} 个值得留意的动作，TraceRoot 已经先帮你补进时间线。`,
       `   目前补回来的重点包括：${summarizeRecoveredActionLabels(historicalTodayFeedEvents)}。`,
+      ...(topRecoveredAction ? [recoveredActionSummaryLine(topRecoveredAction)] : []),
+      "   想立刻看完整轨迹，可以直接用：traceroot-audit logs --today",
       ""
     );
   }
@@ -1058,9 +1104,12 @@ export async function runTargetWatch(options: {
     );
 
     if (historicalTodayFeedEvents.length > 0) {
+      const topRecoveredAction = mostImportantRecoveredAction(historicalTodayFeedEvents);
       initialLines.push(
         `📚 今天稍早已经出现过 ${historicalTodayFeedEvents.length} 个值得留意的动作，TraceRoot 已经先帮你补进时间线。`,
         `   目前补回来的重点包括：${summarizeRecoveredActionLabels(historicalTodayFeedEvents)}。`,
+        ...(topRecoveredAction ? [recoveredActionSummaryLine(topRecoveredAction)] : []),
+        "   想立刻看完整轨迹，可以直接用：traceroot-audit logs --today",
         ""
       );
     }

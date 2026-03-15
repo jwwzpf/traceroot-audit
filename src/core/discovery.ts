@@ -71,10 +71,19 @@ export interface HostDiscoveryResult {
   candidates: HostDiscoveryCandidate[];
 }
 
-export function hostCandidateCategoryForHuman(candidate: Pick<HostDiscoveryCandidate, "categoryLabel">): string {
+export function hostCandidateCategoryForHuman(
+  candidate: Pick<HostDiscoveryCandidate, "categoryLabel"> & {
+    displayPath?: string;
+    absolutePath?: string;
+  }
+): string {
+  const pathHint = `${candidate.displayPath ?? ""} ${candidate.absolutePath ?? ""}`;
+
+  if (candidate.categoryLabel === "OpenClaw runtime" || openClawPathPattern.test(pathHint)) {
+    return "OpenClaw 运行态";
+  }
+
   switch (candidate.categoryLabel) {
-    case "OpenClaw runtime":
-      return "OpenClaw 运行态";
     case "skill / tool package":
       return "Skill / Tool 动作包";
     case "MCP / tool server":
