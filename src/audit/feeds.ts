@@ -23,17 +23,26 @@ export interface RuntimeFeedCursor {
 const candidateRelativePaths = [
   ".traceroot/runtime-events.jsonl",
   "runtime-events.jsonl",
+  "runtime-events.log",
   "openclaw-events.jsonl",
   "mcp-events.jsonl",
+  "mcp-events.log",
   "agent-events.jsonl",
+  "agent-events.log",
   "action-events.jsonl",
+  "action-events.log",
   path.join("logs", "runtime-events.jsonl"),
+  path.join("logs", "runtime-events.log"),
   path.join("logs", "openclaw-events.jsonl"),
   path.join("logs", "mcp-events.jsonl"),
+  path.join("logs", "mcp-events.log"),
   path.join("logs", "agent-events.jsonl"),
+  path.join("logs", "agent-events.log"),
   path.join("logs", "action-events.jsonl"),
+  path.join("logs", "action-events.log"),
   path.join(".openclaw", "events.jsonl"),
   path.join(".mcp", "events.jsonl"),
+  path.join(".mcp", "events.log"),
   path.join("logs", "commands.log"),
   path.join("logs", "gateway.log"),
   path.join("logs", "gateway.err.log")
@@ -41,11 +50,17 @@ const candidateRelativePaths = [
 
 const candidateGlobPatterns = [
   "logs/**/*events*.jsonl",
+  "logs/**/*events*.log",
   "logs/**/*actions*.jsonl",
+  "logs/**/*actions*.log",
   ".openclaw/**/*events*.jsonl",
   ".openclaw/**/*actions*.jsonl",
   ".mcp/**/*events*.jsonl",
+  ".mcp/**/*events*.log",
   ".mcp/**/*actions*.jsonl",
+  ".mcp/**/*actions*.log",
+  "logs/**/*mcp*.log",
+  ".mcp/**/*mcp*.log",
   "logs/**/*commands*.log",
   ".openclaw/**/*commands*.log"
 ];
@@ -272,6 +287,164 @@ function inferActionFromToolName(name?: string): string | undefined {
 
   const normalized = name.replace(/[_./]+/g, " ").replace(/-/g, " ").trim();
   return inferActionFromText(normalized) ?? inferActionFromText(name);
+}
+
+function inferChannelFromText(message: string): string | undefined {
+  const normalized = message.trim().toLowerCase();
+
+  if (/\btelegram\b/.test(normalized)) {
+    return "telegram";
+  }
+
+  if (/\bwhatsapp\b/.test(normalized)) {
+    return "whatsapp";
+  }
+
+  if (/\bslack\b/.test(normalized)) {
+    return "slack";
+  }
+
+  if (/\bdiscord\b/.test(normalized)) {
+    return "discord";
+  }
+
+  if (/\bsignal\b/.test(normalized)) {
+    return "signal";
+  }
+
+  if (/\bimessage\b/.test(normalized)) {
+    return "imessage";
+  }
+
+  if (/\bgoogle\s*chat\b/.test(normalized)) {
+    return "googlechat";
+  }
+
+  if (/\bmattermost\b/.test(normalized)) {
+    return "mattermost";
+  }
+
+  if (/\b(msteams|microsoft\s*teams)\b/.test(normalized)) {
+    return "msteams";
+  }
+
+  if (/\bwechat\b/.test(normalized)) {
+    return "wechat";
+  }
+
+  return undefined;
+}
+
+function inferSenderFromText(message: string): string | undefined {
+  const handleMatch = message.match(/(^|[\s(])(@[A-Za-z0-9_.-]+)/);
+  if (handleMatch?.[2]) {
+    return handleMatch[2];
+  }
+
+  const phoneMatch = message.match(/(\+\d[\d\s-]{6,}\d)/);
+  if (phoneMatch?.[1]) {
+    return phoneMatch[1].replace(/\s+/g, " ").trim();
+  }
+
+  const senderMatch = message.match(
+    /\b(?:sender|user|actor|from)\s*[:=]\s*("?)([A-Za-z0-9_.@+-]+)\1/i
+  );
+  if (senderMatch?.[2]) {
+    return senderMatch[2];
+  }
+
+  return undefined;
+}
+
+function inferTargetFromText(message: string, targetRoot: string): string {
+  const targetMatch = message.match(
+    /\b(?:path|file|target|resource)\s*[:=]\s*("?)([^"\s)]+)\1/i
+  );
+
+  if (!targetMatch?.[2]) {
+    return targetRoot;
+  }
+
+  return path.resolve(targetRoot, targetMatch[2]);
+}
+
+function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const textMatch =
+    trimmed.match(
+      /^(?<timestamp>\d{4}-\d{2}-\d{2}[T ][^ ]+)\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
+    ) ??
+    trimmed.match(
+      /^\[(?<timestamp>[^\]]+)\]\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
+    );
+
+  const timestampValue = textMatch?.groups?.timestamp?.trim();
+  const levelValue = textMatch?.groups?.level?.trim();
+  const scopeValue = textMatch?.groups?.scope?.trim();
+  const message = textMatch?.groups?.message?.trim() ?? trimmed;
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    !/(tools\/call|tool\s+call|tool-call|mcp\s+tool|calling\s+tool|invoking\s+tool)/i.test(
+      normalizedMessage
+    )
+  ) {
+    return null;
+  }
+
+  const toolName =
+    message.match(/\btools\/call(?:\s+name=|\s+tool=|\s+)([A-Za-z0-9_.:/-]+)/i)?.[1] ??
+    message.match(/\btool(?:\s+call|[-\s]call)?(?:\s+for|\s+to|\s*:)?\s*([A-Za-z0-9_.:/-]+)/i)
+      ?.[1] ??
+    message.match(/\bmcp\s+tool(?:\s+for|\s+to|\s*:)?\s*([A-Za-z0-9_.:/-]+)/i)?.[1] ??
+    message.match(/\b(?:calling|invoking)\s+tool\s+([A-Za-z0-9_.:/-]+)/i)?.[1] ??
+    message.match(/\btool\s*=\s*([A-Za-z0-9_.:/-]+)/i)?.[1];
+
+  const action = inferActionFromToolName(toolName) ?? inferActionFromText(message);
+  if (!action) {
+    return null;
+  }
+
+  const severity = normalizeSeverity(levelValue) ?? severityFromAction(action);
+  const runtimeName =
+    scopeValue && !["tool", "tools", "mcp", "gateway"].includes(scopeValue.toLowerCase())
+      ? scopeValue
+      : "mcp";
+  const channel = inferChannelFromText(message);
+  const sender = inferSenderFromText(message);
+  const humanAction = actionLabel(action);
+  const toolLabel = toolName ?? action;
+
+  return {
+    timestamp: timestampValue ?? new Date().toISOString(),
+    severity,
+    category: "action-event",
+    source: "runtime-feed",
+    target: inferTargetFromText(message, targetRoot),
+    runtime: runtimeName,
+    surfaceKind: "runtime",
+    action,
+    status: (() => {
+      const inferredStatus = inferStatusFromMessage(message);
+      return inferredStatus === "observed" ? "attempted" : inferredStatus;
+    })(),
+    message:
+      toolName && toolName !== action
+        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
+    recommendation: inferRecommendation(action, severity),
+    evidence: {
+      source: "mcp-tool-call-log",
+      toolName,
+      channel,
+      sender,
+      rawLine: trimmed
+    }
+  };
 }
 
 function inferStructuredRuntimeFeedEvent(
@@ -634,7 +807,7 @@ function parseRuntimeFeedEvent(
   try {
     parsed = JSON.parse(line) as Record<string, unknown> | unknown[];
   } catch {
-    return null;
+    return parsePlainTextMcpToolCallLine(line, targetRoot);
   }
 
   if (Array.isArray(parsed)) {
