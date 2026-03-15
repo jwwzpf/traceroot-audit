@@ -434,6 +434,26 @@ function summarizeEvents(events: AuditEvent[]): {
     return 1;
   };
 
+  const attentionCategoryWeight = (event: AuditEvent): number => {
+    if (event.category === "action-event") {
+      return 4;
+    }
+
+    if (event.category === "boundary-drift") {
+      return 3;
+    }
+
+    if (event.category === "risk-change" || event.category === "finding-change") {
+      return 2;
+    }
+
+    if (event.category === "surface-change") {
+      return 1;
+    }
+
+    return 0;
+  };
+
   for (const event of events) {
     if (event.severity === "critical") critical += 1;
     else if (event.severity === "high-risk") highRisk += 1;
@@ -516,7 +536,18 @@ function summarizeEvents(events: AuditEvent[]): {
     }
 
     if (event.severity !== "safe") {
-      latestAttention = event;
+      if (!latestAttention) {
+        latestAttention = event;
+      } else {
+        const nextScore =
+          severityWeight(event.severity) * 10 + attentionCategoryWeight(event);
+        const currentScore =
+          severityWeight(latestAttention.severity) * 10 + attentionCategoryWeight(latestAttention);
+
+        if (nextScore > currentScore || (nextScore === currentScore && event.timestamp >= latestAttention.timestamp)) {
+          latestAttention = event;
+        }
+      }
     }
   }
 

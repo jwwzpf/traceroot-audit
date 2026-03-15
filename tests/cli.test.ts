@@ -637,6 +637,101 @@ describe("CLI", () => {
     }
   });
 
+  it("backfills today's earlier risky runtime actions into the audit timeline when doctor watch starts later", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-backfill-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      const earlierToday = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await writeFile(
+        path.join(logsDir, "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: earlierToday,
+          runtime: "gmail-mcp",
+          channel: "telegram",
+          sender: "@ops-room",
+          event: {
+            type: "tools/call",
+            status: "attempted",
+            params: {
+              name: "send_email"
+            }
+          },
+          message: "tool call started"
+        })}\n`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("今天稍早已经出现过 1 个值得留意的动作");
+      expect(output).toContain("对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io
+      );
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("starts machine-level doctor watch automatically when no path is given", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-watch-smart-host-home-"));
     const previousHome = process.env.HOME;

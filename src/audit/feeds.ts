@@ -278,9 +278,13 @@ function inferStructuredRuntimeFeedEvent(
 ): AuditEvent | null {
   const method = pickString(parsed, [
     "method",
+    "type",
     ["event", "method"],
+    ["event", "type"],
     ["data", "method"],
-    ["payload", "method"]
+    ["data", "type"],
+    ["payload", "method"],
+    ["payload", "type"]
   ]);
   const toolName = pickString(parsed, [
     ["params", "name"],
@@ -989,6 +993,61 @@ export async function readRecentRuntimeFeedEvents(options: {
 
       const eventTime = new Date(event.timestamp).getTime();
       if (!Number.isNaN(eventTime) && now - eventTime > maxAgeMs) {
+        continue;
+      }
+
+      event.evidence = {
+        ...(event.evidence ?? {}),
+        feedPath: feed.absolutePath
+      };
+      events.push(event);
+    }
+  }
+
+  return events;
+}
+
+function isTodayTimestamp(timestampValue: string): boolean {
+  const timestamp = new Date(timestampValue);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return false;
+  }
+
+  return timestamp.toDateString() === new Date().toDateString();
+}
+
+export async function readTodaysRuntimeFeedEvents(options: {
+  feeds: RuntimeEventFeed[];
+  targetRoot: string;
+  maxLinesPerFeed?: number;
+}): Promise<AuditEvent[]> {
+  const events: AuditEvent[] = [];
+  const maxLinesPerFeed = options.maxLinesPerFeed ?? 200;
+
+  for (const feed of options.feeds) {
+    let content = "";
+
+    try {
+      content = await readFile(feed.absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(-maxLinesPerFeed);
+
+    for (const line of lines) {
+      const event = parseRuntimeFeedEvent(
+        line,
+        feed.rootDir ?? options.targetRoot,
+        feed.kind
+      );
+
+      if (!event || !isTodayTimestamp(event.timestamp)) {
         continue;
       }
 

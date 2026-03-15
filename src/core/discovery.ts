@@ -7,6 +7,7 @@ import fg from "fast-glob";
 import { loadManifest } from "../manifest/loader";
 import type { ScanTargetType } from "../rules/types";
 import { discoverFiles, resolveTarget } from "../utils/files";
+import { displayUserPath } from "../utils/paths";
 import { analyzeSurface, type ScanSurfaceKind, type SuggestedScanTarget, type SurfaceConfidence, type SurfaceDetection } from "./surfaces";
 
 export interface DiscoveryResult {
@@ -274,7 +275,7 @@ function shellQuote(value: string): string {
 }
 
 function hostDoctorCommandPath(absolutePath: string): string {
-  return `traceroot-audit doctor ${shellQuote(absolutePath)}`;
+  return `traceroot-audit doctor ${shellQuote(displayUserPath(absolutePath))}`;
 }
 
 function candidateStrength(relativePath: string): number {
@@ -668,5 +669,5 @@ export async function discoverHost(
 }
 
 export function hostScanCommandPath(absolutePath: string): string {
-  return `traceroot-audit scan ${shellQuote(absolutePath)}`;
+  return `traceroot-audit scan ${shellQuote(displayUserPath(absolutePath))}`;
 }

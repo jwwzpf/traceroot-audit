@@ -20,6 +20,7 @@ import {
   createRuntimeFeedCursor,
   discoverRuntimeEventFeeds,
   readRecentRuntimeFeedEvents,
+  readTodaysRuntimeFeedEvents,
   readNewRuntimeFeedEvents
 } from "../audit/feeds";
 import {
@@ -234,6 +235,16 @@ function alertIconForSeverity(severity: AuditSeverity): string {
   }
 
   return "🟢";
+}
+
+function summarizeRecoveredActionLabels(events: AuditEvent[]): string {
+  const labels = [...new Set(events.map((event) => actionLabel(event.action)).filter(Boolean))];
+
+  if (labels.length === 0) {
+    return "值得留意的动作";
+  }
+
+  return labels.slice(0, 3).join("、");
 }
 
 function heartbeatIntervalMs(options: {
@@ -526,6 +537,10 @@ export async function runHostWatch(options: {
   const runtimeFeeds = await discoverHostRuntimeFeeds({
     candidates: initialDiscovery.candidates
   });
+  const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
+    feeds: runtimeFeeds,
+    targetRoot: initialDiscovery.homeDir
+  });
   const startupFeedEvents = await readRecentRuntimeFeedEvents({
     feeds: runtimeFeeds,
     targetRoot: initialDiscovery.homeDir
@@ -536,6 +551,17 @@ export async function runHostWatch(options: {
     initialAuditEvents.events
       .filter((event) => event.category === "action-event")
       .map(actionEventKey)
+  );
+  const recentStartupKeys = new Set(
+    startupFeedEvents.map((event) => actionEventKey(event))
+  );
+  const historicalTodayFeedEvents = startupTodayFeedEvents.filter(
+    (event) =>
+      !seenActionEvents.has(actionEventKey(event)) &&
+      !recentStartupKeys.has(actionEventKey(event)) &&
+      event.category === "action-event" &&
+      event.severity !== "safe" &&
+      hostActionBelongsToVisibleSurface(event, initialDiscovery.candidates)
   );
   const freshStartupFeedEvents = startupFeedEvents.filter(
     (event) => !seenActionEvents.has(actionEventKey(event))
@@ -635,7 +661,22 @@ export async function runHostWatch(options: {
     initialLines.push("");
   }
 
+  if (historicalTodayFeedEvents.length > 0) {
+    initialLines.push(
+      `📚 今天稍早已经出现过 ${historicalTodayFeedEvents.length} 个值得留意的动作，TraceRoot 已经先帮你补进时间线。`,
+      `   目前补回来的重点包括：${summarizeRecoveredActionLabels(historicalTodayFeedEvents)}。`,
+      ""
+    );
+  }
+
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
+
+  if (historicalTodayFeedEvents.length > 0) {
+    await writeAuditEvents(runtime, historicalTodayFeedEvents, auditWriteState);
+    for (const event of historicalTodayFeedEvents) {
+      seenActionEvents.add(actionEventKey(event));
+    }
+  }
 
   if (freshStartupFeedEvents.length > 0) {
     await writeAuditEvents(runtime, freshStartupFeedEvents, auditWriteState);
@@ -937,10 +978,24 @@ export async function runTargetWatch(options: {
   );
   const hardeningProfileResult = await loadHardeningProfile(resolvedTarget.rootDir);
   const runtimeFeeds = await discoverRuntimeEventFeeds(resolvedTarget.rootDir);
+  const startupTodayFeedEvents = await readTodaysRuntimeFeedEvents({
+    feeds: runtimeFeeds,
+    targetRoot: resolvedTarget.rootDir
+  });
   const startupFeedEvents = await readRecentRuntimeFeedEvents({
     feeds: runtimeFeeds,
     targetRoot: resolvedTarget.rootDir
   });
+  const recentStartupKeys = new Set(
+    startupFeedEvents.map((event) => actionEventKey(event))
+  );
+  const historicalTodayFeedEvents = startupTodayFeedEvents.filter(
+    (event) =>
+      !seenActionEvents.has(actionEventKey(event)) &&
+      !recentStartupKeys.has(actionEventKey(event)) &&
+      event.category === "action-event" &&
+      event.severity !== "safe"
+  );
   const freshStartupFeedEvents = startupFeedEvents.filter(
     (event) => !seenActionEvents.has(actionEventKey(event))
   );
@@ -1001,6 +1056,14 @@ export async function runTargetWatch(options: {
       "- 如果暂时没什么值得你注意的动作，TraceRoot 会安静地继续陪跑，不会反复刷屏",
       ""
     );
+
+    if (historicalTodayFeedEvents.length > 0) {
+      initialLines.push(
+        `📚 今天稍早已经出现过 ${historicalTodayFeedEvents.length} 个值得留意的动作，TraceRoot 已经先帮你补进时间线。`,
+        `   目前补回来的重点包括：${summarizeRecoveredActionLabels(historicalTodayFeedEvents)}。`,
+        ""
+      );
+    }
   } else {
     initialLines.push(
       `🎯 Target: ${target}`,
@@ -1073,6 +1136,13 @@ export async function runTargetWatch(options: {
   }
 
   runtime.io.stdout(`${initialLines.join("\n")}\n`);
+
+  if (historicalTodayFeedEvents.length > 0) {
+    await writeAuditEvents(runtime, historicalTodayFeedEvents, auditWriteState);
+    for (const event of historicalTodayFeedEvents) {
+      seenActionEvents.add(actionEventKey(event));
+    }
+  }
 
   if (freshStartupFeedEvents.length > 0) {
     await writeAuditEvents(runtime, freshStartupFeedEvents, auditWriteState);
