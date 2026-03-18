@@ -457,9 +457,21 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
   const icon = alertIconForSeverity(event.severity);
   const actor = runtimeActorLabel(event.runtime);
   const triggerContext = actionTriggerSentence(event);
+  const riskLabel =
+    event.severity === "critical"
+      ? "极高风险"
+      : event.severity === "high-risk"
+        ? "高风险"
+        : "有风险";
+  const statusLine =
+    event.status === "succeeded"
+      ? `- ${actor} 刚刚已经完成了一个${riskLabel}动作：${actionLabel(event.action)}`
+      : event.status === "failed"
+        ? `- ${actor} 刚刚试过一个${riskLabel}动作：${actionLabel(event.action)}`
+        : `- ${actor} 刚刚触发了一个${riskLabel}动作：${actionLabel(event.action)}`;
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
-    `- ${actor} 刚刚触发了一个${event.severity === "critical" ? "极高风险" : event.severity === "high-risk" ? "高风险" : "有风险"}动作：${actionLabel(event.action)}`,
+    statusLine,
     `- 为什么现在值得你看一眼：${whyThisMatters(event.action, event.severity)}`
   ];
 
@@ -497,12 +509,19 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
 }
 
 function isAlertWorthyActionEvent(event: AuditEvent): boolean {
-  return (
-    event.category === "action-event" &&
-    event.severity !== "safe" &&
-    (event.status === "attempted" ||
-      event.status === "failed")
-  );
+  if (event.category !== "action-event" || event.severity === "safe") {
+    return false;
+  }
+
+  if (event.status === "attempted" || event.status === "failed") {
+    return true;
+  }
+
+  if (event.status === "succeeded") {
+    return event.severity === "high-risk" || event.severity === "critical";
+  }
+
+  return false;
 }
 
 function happenedRecently(timestampValue: string, windowMs: number): boolean {

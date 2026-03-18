@@ -2635,6 +2635,89 @@ describe("CLI", () => {
     }
   });
 
+  it("surfaces a live alert when doctor watch only sees a completed high-risk runtime action", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-feed-succeeded-alert-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-feed-succeeded-alert-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.jsonl"), "", "utf8");
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await appendFile(
+        path.join(tempDir, "logs", "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          action: "send-email",
+          severity: "high-risk",
+          status: "succeeded",
+          runtime: "openclaw",
+          message: "OpenClaw 刚刚已经把一封外部邮件发出去了。",
+          recommendation: "先确认这封外部邮件是不是这次真的该发出去。"
+        })}\n`,
+        "utf8"
+      );
+
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("TraceRoot 实时提醒");
+      expect(watchOutput).toContain("OpenClaw 运行时 刚刚已经完成了一个高风险动作：对外发邮件");
+      expect(watchOutput).toContain("状态：已经执行成功，并已记进审计时间线");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("OpenClaw 刚刚已经把一封外部邮件发出去了。");
+      expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("understands nested OpenClaw-style runtime events and shows human action labels", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-target-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-home-"));
