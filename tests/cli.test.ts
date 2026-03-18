@@ -297,6 +297,10 @@ describe("CLI", () => {
       );
 
       const output = capture.read().stdout;
+      const stderr = capture.read().stderr;
+      if (exitCode !== 0) {
+        throw new Error(`FAST_RESUME_DEBUG\nSTDOUT:\n${output}\nSTDERR:\n${stderr}`);
+      }
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot Audit Doctor");
@@ -756,7 +760,8 @@ describe("CLI", () => {
             method: "tools/call",
             params: {
               name: "send_email",
-              path: "mailer.ts"
+              path: "mailer.ts",
+              recipient: "customer@example.com"
             }
           })}\n`,
           "utf8"
@@ -1427,7 +1432,7 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 还记得你上次整机陪跑时的提醒方式：同一个 webhook 提醒入口");
       expect(output).toContain("TraceRoot 已经直接续上了你上次的整机陪跑方式");
       expect(output).toContain("TraceRoot 实时提醒");
-      expect(payload.summary).toBe("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(payload.summary).toBe("Agent 刚刚触发了一个高风险动作：对外发邮件（mailer.ts）");
     } finally {
       await webhook.close();
       if (previousHome === undefined) {
@@ -1905,7 +1910,9 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
       expect(output).toContain("这次不会重新生成整套 bundle");
       expect(output).toContain("最近一次报平安");
+      expect(output).toContain("你刚回来时最值得先看的是");
       expect(output).toContain("你上次离开以后，又出现了");
+      expect(output).toContain("其中 1 条看起来已经超出了你批准过的工作流");
       expect(output).toContain("最近一次值得你看一眼的是");
       expect(output).toContain("对外发邮件");
       expect(output).toContain("付款或下单");
@@ -2992,6 +2999,7 @@ describe("CLI", () => {
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("TraceRoot 实时提醒");
       expect(watchOutput).toContain("访问银行或支付账户");
+      expect(watchOutput).toContain("这一步看起来涉及：accounts/checking");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -3002,6 +3010,7 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsCapture.read().stdout).toContain("OpenClaw 正在读取一个银行账户概览。");
       expect(logsCapture.read().stdout).toContain("访问银行或支付账户：出现了 1 次");
+      expect(logsCapture.read().stdout).toContain("这一步看起来涉及：accounts/checking");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -3045,7 +3054,8 @@ describe("CLI", () => {
             method: "tools/call",
             params: {
               name: "send_email",
-              path: "mailer.ts"
+              path: "mailer.ts",
+              recipient: "customer@example.com"
             }
           })}\n`,
           "utf8"
@@ -3076,8 +3086,9 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 实时提醒");
-      expect(output).toContain("对外发邮件");
+      expect(output).toContain("对外发邮件（发给 customer@example.com）");
       expect(output).toContain("这一步是从 Telegram（@ops-room） 触发出来的");
+      expect(output).toContain("这一步看起来涉及：发给 customer@example.com");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -3089,10 +3100,11 @@ describe("CLI", () => {
       const logsOutput = logsCapture.read().stdout;
 
       expect(logsExitCode).toBe(0);
-      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("对外发邮件（发给 customer@example.com）");
       expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
       expect(logsOutput).toContain("TraceRoot 判断这一步相当于：对外发邮件");
       expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+      expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
       expect(logsOutput).toContain("今天最值得留意的触发入口");
       expect(logsOutput).toContain("Telegram（@ops-room）：触发了 1 次值得留意的动作");
       expect(logsOutput).toContain("来源日志");
@@ -3883,7 +3895,7 @@ describe("CLI", () => {
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("高风险动作一出现，TraceRoot 也会同步把提醒发到你接好的通知入口");
       expect(payload.title).toBe("TraceRoot 刚盯到一个高风险动作");
-      expect(payload.summary).toBe("Agent 刚刚触发了一个高风险动作：对外发邮件");
+      expect(String(payload.summary)).toContain("Agent 刚刚触发了一个高风险动作：对外发邮件");
       expect(payload.severity).toBe("high-risk");
       expect(payload.actionLabel).toBe("对外发邮件");
       expect(payload.recommendation).toBe("先确认这封外部邮件是不是真的该发出去。");

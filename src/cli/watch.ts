@@ -5,6 +5,8 @@ import { updateWatchStatusSession } from "../audit/status";
 import type { AuditEvent, AuditSeverity } from "../audit/types";
 import {
   actionLabel,
+  actionLabelWithSubject,
+  actionObjectSentence,
   summarizeActionLabels,
   actionTriggerSourceLabel,
   actionTriggerSentence,
@@ -467,12 +469,13 @@ function renderLiveActionAlert(
       : event.severity === "high-risk"
         ? "高风险"
         : "有风险";
+  const action = actionLabelWithSubject(event);
   const statusLine =
     event.status === "succeeded"
-      ? `- ${actor} 刚刚已经完成了一个${riskLabel}动作：${actionLabel(event.action)}`
+      ? `- ${actor} 刚刚已经完成了一个${riskLabel}动作：${action}`
       : event.status === "failed"
-        ? `- ${actor} 刚刚试过一个${riskLabel}动作：${actionLabel(event.action)}`
-        : `- ${actor} 刚刚触发了一个${riskLabel}动作：${actionLabel(event.action)}`;
+        ? `- ${actor} 刚刚试过一个${riskLabel}动作：${action}`
+        : `- ${actor} 刚刚触发了一个${riskLabel}动作：${action}`;
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
     statusLine,
@@ -481,6 +484,11 @@ function renderLiveActionAlert(
 
   if (triggerContext) {
     lines.push(`- ${triggerContext}`);
+  }
+
+  const actionObject = actionObjectSentence(event);
+  if (actionObject) {
+    lines.push(`- ${actionObject}`);
   }
 
   const feedPath =

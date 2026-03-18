@@ -360,16 +360,229 @@ function inferSenderFromText(message: string): string | undefined {
   return undefined;
 }
 
-function inferTargetFromText(message: string, targetRoot: string): string {
+function inferRecipientFromText(message: string): string | undefined {
+  const labeledMatch = message.match(
+    /\b(?:to|recipient|email|mail_to|mailto)\s*[:=]\s*("?)([A-Za-z0-9_.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\1/i
+  );
+  if (labeledMatch?.[2]) {
+    return labeledMatch[2];
+  }
+
+  const emailMatch = message.match(/\b([A-Za-z0-9_.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/);
+  if (emailMatch?.[1]) {
+    return emailMatch[1];
+  }
+
+  return undefined;
+}
+
+function inferUrlFromText(message: string): string | undefined {
+  const match = message.match(/\bhttps?:\/\/[^\s)"']+/i);
+  return match?.[0];
+}
+
+function inferSecretNameFromText(message: string): string | undefined {
+  const labeledMatch = message.match(
+    /\b(?:secret|token|credential|password|key)\s*[:=]\s*("?)([A-Z][A-Z0-9_]{2,})\1/
+  );
+  if (labeledMatch?.[2]) {
+    return labeledMatch[2];
+  }
+
+  const bareMatch = message.match(/\b([A-Z][A-Z0-9_]{2,}(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\b/);
+  if (bareMatch?.[1]) {
+    return bareMatch[1];
+  }
+
+  return undefined;
+}
+
+function inferAccountLabelFromText(message: string): string | undefined {
+  const invoiceMatch = message.match(/\b(invoice|order)\s+([A-Za-z0-9_-]+)/i);
+  if (invoiceMatch?.[0]) {
+    return invoiceMatch[0];
+  }
+
+  const accountMatch = message.match(
+    /\b(account|portfolio|wallet|card)\s*[:=]?\s*([A-Za-z0-9_.-]+)/i
+  );
+  if (accountMatch?.[0]) {
+    return accountMatch[0];
+  }
+
+  const bankingOverviewMatch = message.match(/\bbank(?:ing)?\s+account\s+[A-Za-z0-9_.-]+/i);
+  if (bankingOverviewMatch?.[0]) {
+    return bankingOverviewMatch[0];
+  }
+
+  return undefined;
+}
+
+function inferSpecificTargetPathFromText(
+  message: string,
+  targetRoot: string
+): string | undefined {
   const targetMatch = message.match(
     /\b(?:path|file|target|resource)\s*[:=]\s*("?)([^"\s)]+)\1/i
   );
 
   if (!targetMatch?.[2]) {
-    return targetRoot;
+    return undefined;
   }
 
   return path.resolve(targetRoot, targetMatch[2]);
+}
+
+function inferTargetFromText(message: string, targetRoot: string): string {
+  const specificTarget = inferSpecificTargetPathFromText(message, targetRoot);
+  if (!specificTarget) {
+    return targetRoot;
+  }
+
+  return specificTarget;
+}
+
+function isFileLikeAction(action?: string): boolean {
+  return /(delete|remove|modify|write|edit|copy|move|file)/i.test(action ?? "");
+}
+
+function buildActionEvidenceFromText(
+  message: string,
+  targetRoot: string,
+  baseEvidence: Record<string, unknown> = {},
+  action?: string
+): Record<string, unknown> {
+  const evidence: Record<string, unknown> = { ...baseEvidence };
+  const recipient = inferRecipientFromText(message);
+  const filePath = inferSpecificTargetPathFromText(message, targetRoot);
+  const url = inferUrlFromText(message);
+  const secretName = inferSecretNameFromText(message);
+  const accountLabel = inferAccountLabelFromText(message);
+
+  if (recipient) {
+    evidence.recipient = recipient;
+  }
+
+  if (filePath) {
+    if (isFileLikeAction(action)) {
+      evidence.filePath = filePath;
+    } else if (typeof evidence.resourceLabel !== "string") {
+      evidence.resourceLabel = filePath;
+    }
+  }
+
+  if (url) {
+    evidence.url = url;
+  }
+
+  if (secretName) {
+    evidence.secretName = secretName;
+  }
+
+  if (accountLabel) {
+    evidence.accountLabel = accountLabel;
+  }
+
+  return evidence;
+}
+
+function buildActionEvidenceFromStructuredPayload(options: {
+  parsed: Record<string, unknown>;
+  targetRoot: string;
+  message?: string;
+  targetValue?: string;
+  action?: string;
+  baseEvidence?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const serialized = JSON.stringify(options.parsed);
+  const evidence = buildActionEvidenceFromText(
+    options.message ?? "",
+    options.targetRoot,
+    options.baseEvidence,
+    options.action
+  );
+
+  const recipient =
+    pickString(options.parsed, [
+      "recipient",
+      "to",
+      "email",
+      ["params", "recipient"],
+      ["params", "to"],
+      ["data", "recipient"],
+      ["data", "to"],
+      ["payload", "recipient"],
+      ["payload", "to"]
+    ]) ??
+    inferRecipientFromText(serialized) ??
+    undefined;
+  const url =
+    pickString(options.parsed, [
+      "url",
+      "link",
+      ["params", "url"],
+      ["data", "url"],
+      ["payload", "url"]
+    ]) ??
+    inferUrlFromText(serialized) ??
+    undefined;
+  const secretName =
+    pickString(options.parsed, [
+      "secret",
+      "secretName",
+      "tokenName",
+      ["params", "secret"],
+      ["data", "secret"],
+      ["payload", "secret"]
+    ]) ??
+    inferSecretNameFromText(serialized) ??
+    undefined;
+  const accountLabel =
+    pickString(options.parsed, [
+      "account",
+      "accountId",
+      "invoice",
+      "orderId",
+      "merchant",
+      ["params", "account"],
+      ["params", "invoice"],
+      ["params", "orderId"],
+      ["data", "account"],
+      ["data", "invoice"],
+      ["data", "orderId"],
+      ["payload", "account"],
+      ["payload", "invoice"],
+      ["payload", "orderId"]
+    ]) ??
+    inferAccountLabelFromText(serialized) ??
+    undefined;
+
+  if (recipient) {
+    evidence.recipient = recipient;
+  }
+
+  if (options.targetValue) {
+    const resolvedTarget = path.resolve(options.targetRoot, options.targetValue);
+    if (isFileLikeAction(options.action)) {
+      evidence.filePath = resolvedTarget;
+    } else if (typeof evidence.resourceLabel !== "string") {
+      evidence.resourceLabel = options.targetValue;
+    }
+  }
+
+  if (url) {
+    evidence.url = url;
+  }
+
+  if (secretName) {
+    evidence.secretName = secretName;
+  }
+
+  if (accountLabel) {
+    evidence.accountLabel = accountLabel;
+  }
+
+  return evidence;
 }
 
 type ParsedPlainTextLogLine = {
@@ -459,13 +672,13 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
         ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
         : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
     recommendation: inferRecommendation(action, severity),
-    evidence: {
+    evidence: buildActionEvidenceFromText(message, targetRoot, {
       source: "mcp-tool-call-log",
       toolName,
       channel,
       sender,
       rawLine: trimmed
-    }
+    }, action)
   };
 }
 
@@ -505,13 +718,13 @@ function parseGenericPlainTextRuntimeActionLine(line: string, targetRoot: string
     status: inferStatusFromMessage(message),
     message: `${runtimeName} 刚记录到：${message}`,
     recommendation: inferRecommendation(action, severity),
-    evidence: {
+    evidence: buildActionEvidenceFromText(message, targetRoot, {
       source: "runtime-plain-text-log",
       scope: scopeValue,
       channel,
       sender,
       rawLine: trimmed
-    }
+    }, action)
   };
 }
 
@@ -649,6 +862,21 @@ function inferStructuredRuntimeFeedEvent(
     ["payload", "params", "file"]
   ]);
   const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
+  const serialized = JSON.stringify(parsed);
+  const directRecipient =
+    pickString(parsed, [
+      "recipient",
+      "to",
+      "email",
+      ["params", "recipient"],
+      ["params", "to"],
+      ["data", "recipient"],
+      ["data", "to"],
+      ["payload", "recipient"],
+      ["payload", "to"]
+    ]) ??
+    inferRecipientFromText(serialized) ??
+    undefined;
   const toolLabel = toolName ?? action;
   const humanAction = actionLabel(action);
   const severity =
@@ -684,15 +912,23 @@ function inferStructuredRuntimeFeedEvent(
         ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
         : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
     recommendation: inferRecommendation(action, severity),
-    evidence: {
-      source: "mcp-tool-call",
-      method,
-      toolName,
-      channel,
-      sender,
-      sessionKey,
-      raw: parsed
-    }
+    evidence: buildActionEvidenceFromStructuredPayload({
+      parsed,
+      targetRoot,
+      targetValue,
+      action,
+      baseEvidence: {
+        source: "mcp-tool-call",
+        method,
+        toolName,
+        channel,
+        sender,
+        sessionKey,
+        recipient: directRecipient,
+        resourceLabel: !isFileLikeAction(action) && targetValue ? targetValue : undefined,
+        raw: parsed
+      }
+    })
   };
 }
 
@@ -739,13 +975,19 @@ function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEve
     action: `openclaw-command-${normalized}`,
     status: "observed",
     message,
-    evidence: {
+    evidence: buildActionEvidenceFromStructuredPayload({
+      parsed,
+      targetRoot,
+      message,
+      action: `openclaw-command-${normalized}`,
+      baseEvidence: {
       source: "openclaw-command-logger",
       sessionKey,
       channel: sourceChannel,
       sender,
       raw: parsed
-    }
+      }
+    })
   };
 }
 
@@ -806,14 +1048,21 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
     status: inferStatusFromMessage(message),
     message: `${runtimeName} 刚提到：${message}`,
     recommendation: inferRecommendation(action, severity),
-    evidence: {
+    evidence: buildActionEvidenceFromStructuredPayload({
+      parsed,
+      targetRoot,
+      message,
+      targetValue,
+      action,
+      baseEvidence: {
       source: "openclaw-gateway-log",
       subsystem,
       channel,
       sender,
       sessionKey,
       raw: parsed
-    }
+      }
+    })
   };
 }
 
@@ -846,13 +1095,13 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
     status: inferStatusFromMessage(message),
     message: `openclaw 刚提到：${message}`,
     recommendation: inferRecommendation(action, severity),
-    evidence: {
+    evidence: buildActionEvidenceFromText(message, targetRoot, {
       source: "openclaw-gateway-log",
       subsystem: scopeValue,
       channel,
       sender,
       rawLine: trimmed
-    }
+    }, action)
   };
 }
 
@@ -1057,7 +1306,13 @@ function parseRuntimeFeedEvent(
     status,
     message: displayMessage,
     recommendation,
-    evidence: {
+    evidence: buildActionEvidenceFromStructuredPayload({
+      parsed,
+      targetRoot,
+      message: displayMessage,
+      targetValue,
+      action,
+      baseEvidence: {
       source: pickString(parsed, [
         "source",
         ["event", "source"],
@@ -1068,7 +1323,8 @@ function parseRuntimeFeedEvent(
       sender,
       sessionKey,
       raw: payload ?? parsed
-    }
+      }
+    })
   };
 }
 

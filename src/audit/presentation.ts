@@ -1,4 +1,5 @@
 import type { AuditEvent, AuditSeverity } from "./types";
+import { displayUserPath } from "../utils/paths";
 
 export function actionLabel(action?: string): string {
   if (!action) {
@@ -192,6 +193,222 @@ export function actionTriggerSentence(event: AuditEvent): string | null {
   }
 
   return `这一步是从 ${sourceLabel} 触发出来的`;
+}
+
+function normalizeDisplayText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function truncateDisplayText(value: string, maxLength = 60): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
+function getNestedValue(source: unknown, pathSegments: string[]): unknown {
+  let current = source;
+
+  for (const segment of pathSegments) {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current;
+}
+
+function pickEvidenceString(
+  source: unknown,
+  candidates: Array<string | string[]>
+): string | undefined {
+  if (!source || typeof source !== "object") {
+    return undefined;
+  }
+
+  for (const candidate of candidates) {
+    const value = Array.isArray(candidate)
+      ? getNestedValue(source, candidate)
+      : (source as Record<string, unknown>)[candidate];
+
+    const normalized = normalizeDisplayText(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
+function compactResourceLabel(target: string): string {
+  const normalized = target.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  }
+
+  return parts[0] ?? target;
+}
+
+function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
+  const raw =
+    typeof event.evidence?.raw === "object" && event.evidence?.raw
+      ? event.evidence.raw
+      : undefined;
+
+  const recipient =
+    pickEvidenceString(raw, [
+      "recipient",
+      "to",
+      "email",
+      ["params", "recipient"],
+      ["params", "to"],
+      ["params", "email"],
+      ["event", "recipient"],
+      ["event", "to"],
+      ["data", "recipient"],
+      ["payload", "recipient"]
+    ]) ??
+    undefined;
+  if (recipient) {
+    return `发给 ${truncateDisplayText(recipient)}`;
+  }
+
+  const account =
+    pickEvidenceString(raw, [
+      "account",
+      "accountId",
+      "invoice",
+      "orderId",
+      "merchant",
+      ["params", "account"],
+      ["params", "invoice"],
+      ["params", "orderId"],
+      ["event", "account"],
+      ["data", "account"],
+      ["payload", "account"]
+    ]) ?? undefined;
+  if (account) {
+    return truncateDisplayText(account);
+  }
+
+  const secret =
+    pickEvidenceString(raw, [
+      "secret",
+      "secretName",
+      "tokenName",
+      ["params", "secret"],
+      ["event", "secret"],
+      ["data", "secret"],
+      ["payload", "secret"]
+    ]) ?? undefined;
+  if (secret) {
+    return `secret ${truncateDisplayText(secret)}`;
+  }
+
+  const url =
+    pickEvidenceString(raw, [
+      "url",
+      "link",
+      ["params", "url"],
+      ["event", "url"],
+      ["data", "url"],
+      ["payload", "url"]
+    ]) ?? undefined;
+  if (url) {
+    return truncateDisplayText(url, 72);
+  }
+
+  const resource =
+    pickEvidenceString(raw, [
+      "target",
+      "path",
+      "resource",
+      "file",
+      ["params", "path"],
+      ["params", "target"],
+      ["event", "path"],
+      ["data", "path"],
+      ["payload", "path"]
+    ]) ?? undefined;
+  if (resource) {
+    return truncateDisplayText(resource);
+  }
+
+  if (event.target) {
+    if (/(delete|remove|modify|write|edit|copy|move|file)/i.test(event.action ?? "")) {
+      return displayUserPath(event.target);
+    }
+
+    return compactResourceLabel(event.target);
+  }
+
+  return null;
+}
+
+export function actionSubjectLabel(event: AuditEvent): string | null {
+  const evidence = event.evidence ?? {};
+  const normalizedAction = (event.action ?? "").trim().toLowerCase();
+  const recipient = normalizeDisplayText(evidence.recipient);
+  if (recipient) {
+    return `发给 ${truncateDisplayText(recipient)}`;
+  }
+
+  const filePath = normalizeDisplayText(evidence.filePath);
+  if (filePath) {
+    return displayUserPath(filePath);
+  }
+
+  const url = normalizeDisplayText(evidence.url);
+  if (url) {
+    return truncateDisplayText(url, 72);
+  }
+
+  const resourceLabel = normalizeDisplayText(evidence.resourceLabel);
+  const accountLabel = normalizeDisplayText(evidence.accountLabel);
+  const secretName = normalizeDisplayText(evidence.secretName);
+
+  if (
+    /(bank-access|purchase-or-payment|finance-access)/.test(normalizedAction) &&
+    resourceLabel
+  ) {
+    return truncateDisplayText(resourceLabel);
+  }
+
+  if (accountLabel) {
+    return truncateDisplayText(accountLabel);
+  }
+
+  if (secretName) {
+    return `secret ${truncateDisplayText(secretName)}`;
+  }
+
+  if (resourceLabel) {
+    return truncateDisplayText(resourceLabel);
+  }
+
+  return inferSubjectFromRawEvidence(event);
+}
+
+export function actionObjectSentence(event: AuditEvent): string | null {
+  const subject = actionSubjectLabel(event);
+  if (!subject) {
+    return null;
+  }
+
+  return `这一步看起来涉及：${subject}`;
+}
+
+export function actionLabelWithSubject(event: AuditEvent): string {
+  const label = actionLabel(event.action);
+  const subject = actionSubjectLabel(event);
+
+  return subject ? `${label}（${subject}）` : label;
 }
 
 export function whyThisMatters(

@@ -13,6 +13,8 @@ import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import {
   actionLabel,
+  actionLabelWithSubject,
+  actionObjectSentence,
   summarizeActionLabels,
   actionTriggerSourceLabel
 } from "../../audit/presentation";
@@ -236,7 +238,7 @@ function actorLabel(event: AuditEvent): string {
 
 function eventHeadline(event: AuditEvent): string {
   if (event.category === "action-event") {
-    const label = actionLabel(event.action);
+    const label = actionLabelWithSubject(event);
 
     switch (event.status) {
       case "attempted":
@@ -700,6 +702,11 @@ function renderTimelineEntry(
     lines.push(`   🗣️ 触发来源: ${triggerContext}`);
   }
 
+  const actionObject = actionObjectSentence(entry.primary);
+  if (actionObject) {
+    lines.push(`   🎯 ${actionObject}`);
+  }
+
   if (entry.primary.target) {
     lines.push(`   📍 发生在: ${displayUserPath(entry.primary.target)}`);
   }
@@ -918,11 +925,22 @@ async function printLogs(
 
     if (reviewState && freshSinceLastReview.length > 0) {
       const newSummary = summarizeEvents(freshSinceLastReview);
+      const outsideWorkflowCount =
+        approvedIntentIds.length > 0
+          ? freshSinceLastReview.filter((event) =>
+              Boolean(workflowScopeNoteForAction(event.action, approvedIntentIds))
+            ).length
+          : 0;
       lines.push("🆕 自从你上次回来看这条时间线以后：");
       lines.push(
         `- 又发生了 ${freshSinceLastReview.length} 条值得留意的记录`,
         `- 里面最值得先看的是：${newSummary.latestAttention ? eventHeadline(newSummary.latestAttention) : "有新的风险变化"}`
       );
+      if (outsideWorkflowCount > 0) {
+        lines.push(
+          `- 其中有 ${outsideWorkflowCount} 条看起来已经超出了你批准过的工作流`
+        );
+      }
 
       if (newSummary.attentionActions.length > 0) {
         lines.push(

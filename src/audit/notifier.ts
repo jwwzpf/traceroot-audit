@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 
 import {
   actionLabel,
+  actionLabelWithSubject,
+  actionObjectSentence,
   actionTriggerSourceLabel,
   runtimeActorLabel,
   whyThisMatters
@@ -92,6 +94,11 @@ function buildTextSummary(event: AuditEvent, workflowScopeNote?: string): string
     parts.push(`触发来源：${triggerContext}`);
   }
 
+  const actionObject = actionObjectSentence(event);
+  if (actionObject) {
+    parts.push(actionObject);
+  }
+
   parts.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
 
   if (event.target) {
@@ -125,6 +132,11 @@ function buildChatRelayText(event: AuditEvent, workflowScopeNote?: string): stri
 
   if (triggerContext) {
     lines.push(`触发来源：${triggerContext}`);
+  }
+
+  const actionObject = actionObjectSentence(event);
+  if (actionObject) {
+    lines.push(actionObject);
   }
 
   lines.push(`为什么值得现在看一眼：${whyThisMatters(event.action, event.severity)}`);
@@ -238,7 +250,7 @@ export function buildWebhookPayload(
     timestamp: event.timestamp,
     severity: event.severity,
     title: `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
-    summary: `Agent 刚刚触发了一个${severityLabel(event.severity)}动作：${actionLabel(event.action)}`,
+    summary: `Agent 刚刚触发了一个${severityLabel(event.severity)}动作：${actionLabelWithSubject(event)}`,
     text: buildTextSummary(event, workflowScopeNote),
     action: event.action ?? null,
     actionLabel: actionLabel(event.action),

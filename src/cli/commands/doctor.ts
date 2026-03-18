@@ -32,8 +32,9 @@ import {
   resolveWizardTarget
 } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
+import { workflowScopeNoteForAction, type HardeningIntentId } from "../../hardening/profiles";
 import {
-  actionLabel,
+  actionLabelWithSubject,
   actionTriggerSourceLabel,
   runtimeActorLabel,
   summarizeActionLabels
@@ -76,50 +77,14 @@ async function loadLatestAttentionLine(options: {
   target?: string;
   hostScope?: boolean;
 }): Promise<string | null> {
-  const result = await readAuditEvents({
-    target: options.hostScope ? undefined : options.target,
-    today: true,
-    limit: 50
-  });
-
-  const severityWeight = (severity: "safe" | "risky" | "high-risk" | "critical"): number => {
-    if (severity === "critical") return 4;
-    if (severity === "high-risk") return 3;
-    if (severity === "risky") return 2;
-    return 1;
-  };
-
-  const categoryWeight = (item: AuditEvent): number => {
-    if (item.category === "action-event") return 4;
-    if (item.category === "boundary-drift") return 3;
-    if (item.category === "risk-change" || item.category === "finding-change") return 2;
-    if (item.category === "surface-change") return 1;
-    return 0;
-  };
-
-  const event =
-    result.events
-      .filter((item) => item.severity !== "safe")
-      .sort((left, right) => {
-        const categoryDelta = categoryWeight(right) - categoryWeight(left);
-        if (categoryDelta !== 0) {
-          return categoryDelta;
-        }
-
-        const severityDelta = severityWeight(right.severity) - severityWeight(left.severity);
-        if (severityDelta !== 0) {
-          return severityDelta;
-        }
-
-        return right.timestamp.localeCompare(left.timestamp);
-      })[0] ?? null;
+  const event = (await loadRankedAttentionEvents(options))[0] ?? null;
   if (!event) {
     return null;
   }
 
   if (event.category === "action-event") {
     const actor = runtimeActorLabel(event.runtime);
-    const label = actionLabel(event.action);
+    const label = actionLabelWithSubject(event);
     const triggerContext = actionTriggerSourceLabel(event);
     const suffix = triggerContext ? `（${triggerContext}）` : "";
 
@@ -137,9 +102,86 @@ async function loadLatestAttentionLine(options: {
   return `最近一次值得你看一眼的是：${event.message}`;
 }
 
+function attentionSeverityWeight(
+  severity: "safe" | "risky" | "high-risk" | "critical"
+): number {
+  if (severity === "critical") return 4;
+  if (severity === "high-risk") return 3;
+  if (severity === "risky") return 2;
+  return 1;
+}
+
+function attentionCategoryWeight(item: AuditEvent): number {
+  if (item.category === "action-event") return 4;
+  if (item.category === "boundary-drift") return 3;
+  if (item.category === "risk-change" || item.category === "finding-change") return 2;
+  if (item.category === "surface-change") return 1;
+  return 0;
+}
+
+async function loadRankedAttentionEvents(options: {
+  target?: string;
+  hostScope?: boolean;
+  limit?: number;
+}): Promise<AuditEvent[]> {
+  const result = await readAuditEvents({
+    target: options.hostScope ? undefined : options.target,
+    today: true,
+    limit: 50
+  });
+
+  return result.events
+    .filter((item) => item.severity !== "safe")
+    .sort((left, right) => {
+      const categoryDelta = attentionCategoryWeight(right) - attentionCategoryWeight(left);
+      if (categoryDelta !== 0) {
+        return categoryDelta;
+      }
+
+      const severityDelta = attentionSeverityWeight(right.severity) - attentionSeverityWeight(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      return right.timestamp.localeCompare(left.timestamp);
+    })
+    .slice(0, options.limit ?? 3);
+}
+
+function describeAttentionEvent(event: AuditEvent): string {
+  if (event.category === "action-event") {
+    const actor = runtimeActorLabel(event.runtime);
+    const label = actionLabelWithSubject(event);
+    const triggerContext = actionTriggerSourceLabel(event);
+    const suffix = triggerContext ? `（${triggerContext}）` : "";
+
+    if (event.status === "succeeded") {
+      return `${actor} 已完成「${label}」${suffix}`;
+    }
+
+    if (event.status === "failed") {
+      return `${actor} 没有完成「${label}」${suffix}`;
+    }
+
+    return `${actor} 正在尝试「${label}」${suffix}`;
+  }
+
+  return event.message;
+}
+
+async function loadAttentionHighlights(options: {
+  target?: string;
+  hostScope?: boolean;
+  limit?: number;
+}): Promise<string[]> {
+  const events = await loadRankedAttentionEvents(options);
+  return events.slice(0, options.limit ?? 3).map(describeAttentionEvent);
+}
+
 async function loadCatchUpLine(options: {
   target?: string;
   hostScope?: boolean;
+  approvedIntentIds?: HardeningIntentId[];
 }): Promise<string | null> {
   const reviewState = await loadAuditReviewState({
     scope: options.hostScope ? "host" : "target",
@@ -165,13 +207,25 @@ async function loadCatchUpLine(options: {
     return null;
   }
 
+  const outsideWorkflowCount =
+    options.hostScope || !options.approvedIntentIds || options.approvedIntentIds.length === 0
+      ? 0
+      : freshEvents.filter((event) =>
+          Boolean(workflowScopeNoteForAction(event.action, options.approvedIntentIds!))
+        ).length;
+
+  const workflowSuffix =
+    outsideWorkflowCount > 0
+      ? `，其中 ${outsideWorkflowCount} 条看起来已经超出了你批准过的工作流`
+      : "";
+
   if (latest.category === "action-event") {
     const actor = runtimeActorLabel(latest.runtime);
-    const label = actionLabel(latest.action);
-    return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录；最新一条是：${actor}${latest.status === "succeeded" ? " 已完成" : latest.status === "failed" ? " 没有完成" : " 正在尝试"}「${label}」。`;
+    const label = actionLabelWithSubject(latest);
+    return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${actor}${latest.status === "succeeded" ? " 已完成" : latest.status === "failed" ? " 没有完成" : " 正在尝试"}「${label}」。`;
   }
 
-  return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录；最新一条是：${latest.message}`;
+  return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${latest.message}`;
 }
 
 function relativeTimeFromNow(value: string): string | null {
@@ -438,6 +492,7 @@ function renderDoctorResumeSummary(options: {
   catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
+  attentionHighlights?: string[];
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -499,6 +554,13 @@ function renderDoctorResumeSummary(options: {
 
   if (options.watchFreshnessLine) {
     lines.push("", `💓 ${options.watchFreshnessLine}`);
+  }
+
+  if (options.attentionHighlights && options.attentionHighlights.length > 0) {
+    lines.push("", "🧭 你刚回来时最值得先看的是：");
+    for (const item of options.attentionHighlights) {
+      lines.push(`- ${item}`);
+    }
   }
 
   if (options.latestAttentionLine) {
@@ -595,6 +657,7 @@ function renderHostDoctorWatchIntro(options: {
   catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
+  attentionHighlights?: string[];
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -631,6 +694,14 @@ function renderHostDoctorWatchIntro(options: {
     lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
   }
 
+  if (options.attentionHighlights && options.attentionHighlights.length > 0) {
+    lines.splice(lines.length - 1, 0, "🧭 你刚回来时最值得先看的是：");
+    for (const item of options.attentionHighlights) {
+      lines.splice(lines.length - 1, 0, `- ${item}`);
+    }
+    lines.splice(lines.length - 1, 0, "");
+  }
+
   if (options.latestAttentionLine) {
     lines.splice(lines.length - 1, 0, `👀 ${options.latestAttentionLine}`, "");
   }
@@ -646,6 +717,7 @@ function renderHostDoctorWatchResumeIntro(options: {
   catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
+  attentionHighlights?: string[];
 }): string {
   const lines = [
     "TraceRoot Audit Doctor",
@@ -680,6 +752,14 @@ function renderHostDoctorWatchResumeIntro(options: {
 
   if (options.watchFreshnessLine) {
     lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
+  }
+
+  if (options.attentionHighlights && options.attentionHighlights.length > 0) {
+    lines.splice(lines.length - 1, 0, "🧭 你刚回来时最值得先看的是：");
+    for (const item of options.attentionHighlights) {
+      lines.splice(lines.length - 1, 0, `- ${item}`);
+    }
+    lines.splice(lines.length - 1, 0, "");
   }
 
   if (options.latestAttentionLine) {
@@ -860,6 +940,7 @@ async function runMachineLevelDoctorWatch(options: {
   const watchFreshnessLine = await loadWatchFreshnessLine({ hostScope: true });
   const latestAttentionLine = await loadLatestAttentionLine({ hostScope: true });
   const catchUpLine = await loadCatchUpLine({ hostScope: true });
+  const attentionHighlights = await loadAttentionHighlights({ hostScope: true });
 
   options.runtime.io.stdout(
     (options.reason === "smart-fallback" || options.reason === "remembered-host") &&
@@ -871,6 +952,7 @@ async function runMachineLevelDoctorWatch(options: {
           catchUpLine,
           watchFreshnessLine,
           latestAttentionLine,
+          attentionHighlights,
           contextLine:
             options.reason === "remembered-host"
               ? "🧠 TraceRoot 记得你上次就是在整机陪跑，所以这次会直接回到同一条机器级时间线。"
@@ -883,6 +965,7 @@ async function runMachineLevelDoctorWatch(options: {
           catchUpLine,
           watchFreshnessLine,
           latestAttentionLine,
+          attentionHighlights,
           contextLine:
             options.reason === "smart-fallback"
               ? "🧭 你这次没有指定路径，所以 TraceRoot 会直接在这台机器上开始陪跑。就算你还不知道 OpenClaw、MCP 或 skill 具体装在哪，也能先把高风险动作盯起来。"
@@ -1203,12 +1286,16 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               }),
               boundaryStatus,
               catchUpLine: await loadCatchUpLine({
-                target: effectiveTarget
+                target: effectiveTarget,
+                approvedIntentIds: selections.intentIds
               }),
               watchFreshnessLine: await loadWatchFreshnessLine({
                 target: effectiveTarget
               }),
               latestAttentionLine: await loadLatestAttentionLine({
+                target: effectiveTarget
+              }),
+              attentionHighlights: await loadAttentionHighlights({
                 target: effectiveTarget
               })
             })
