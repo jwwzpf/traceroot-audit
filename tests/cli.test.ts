@@ -700,8 +700,9 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
-      expect(output).toContain("虽然还没锁定明显的项目目录");
+      expect(output).toContain("这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口");
       expect(output).toContain("~/.config/openclaw");
+      expect(output).toContain("OpenClaw 运行态");
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
 
@@ -802,6 +803,85 @@ describe("CLI", () => {
       expect(logsOutput).toContain("对外发邮件");
       expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
       expect(logsOutput).toContain("gmail-mcp-events.jsonl");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can hear native runtime events from ~/.claude without an obvious project folder", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-native-claude-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const claudeDir = path.join(tempHome, ".claude");
+      const logsDir = path.join(claudeDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            event: {
+              type: "sensitive-data-access",
+              status: "attempted",
+              runtime: "claude-runtime",
+              target: "records/private-customers.csv",
+              message: "Claude runtime is trying to read a sensitive customer export."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("读取敏感数据");
+      expect(output).toContain("runtime-events.jsonl");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("读取敏感数据");
+      expect(logsOutput).toContain("claude-runtime");
+      expect(logsOutput).toContain("runtime-events.jsonl");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -3983,6 +4063,44 @@ describe("CLI", () => {
       } else {
         process.env.HOME = previousHome;
       }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can discover ~/.claude as a local agent runtime when native runtime feeds are already present", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-claude-"));
+    const tempCwd = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-claude-cwd-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+
+    try {
+      const claudeLogsDir = path.join(tempHome, ".claude", "logs");
+      await mkdir(claudeLogsDir, { recursive: true });
+      await writeFile(path.join(claudeLogsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.chdir(tempCwd);
+
+      const capture = createCapture();
+      const exitCode = await runCli(["node", "traceroot-audit", "discover", "--host"], capture.io);
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot Audit Host Discovery");
+      expect(output).toContain("Best first checks");
+      expect(output).toContain("~/.claude");
+      expect(output).toContain("本地 agent 运行态");
+      expect(output).toContain("原生运行时活动日志");
+      expect(output).toContain("runtime-events.jsonl");
+      expect(output).toContain("traceroot-audit doctor");
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempCwd, { recursive: true, force: true });
       await rm(tempHome, { recursive: true, force: true });
     }
   });

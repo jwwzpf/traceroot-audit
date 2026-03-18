@@ -405,6 +405,8 @@ and suggest the most useful paths to scan next.
 
 - `~/.openclaw`
 - `~/.mcp`
+- `~/.claude`
+- `~/.cursor`
 - `~/.config`
 - `~/Code`
 - `~/Projects`
@@ -413,7 +415,7 @@ and suggest the most useful paths to scan next.
 
 By default it excludes the current working directory subtree, so host discovery behaves like a machine-level search instead of simply rediscovering the repo you launched it from. If you want both behaviors, add `--include-cwd`.
 
-It does **not** do a blind full-disk crawl. The goal is to help non-expert users find likely agent action surfaces without first understanding where OpenClaw or skill packages are installed.
+It does **not** do a blind full-disk crawl. The goal is to help non-expert users find likely agent action surfaces without first understanding where OpenClaw, Claude/Cursor-style local runtimes, or skill packages are installed.
 
 Host discovery now also recommends the next best action for each candidate:
 

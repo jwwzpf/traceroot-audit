@@ -46,39 +46,15 @@ import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-dis
 import { runTargetWatch } from "../watch";
 import { displayUserPath } from "../../utils/paths";
 import { resolveTarget } from "../../utils/files";
-import { discoverHost } from "../../core/discovery";
+import { discoverHost, knownLocalAgentHomes } from "../../core/discovery";
 import { runHostWatch } from "../watch";
 
 import type { CliRuntime } from "../index";
 
-function knownRuntimeHomes(homeDir: string): string[] {
-  return [
-    path.join(homeDir, ".openclaw"),
-    path.join(homeDir, ".mcp"),
-    path.join(homeDir, ".config", "openclaw"),
-    path.join(homeDir, ".config", "claw"),
-    path.join(homeDir, ".config", "mcp"),
-    path.join(homeDir, ".config", "mcp-servers"),
-    path.join(homeDir, ".local", "share", "openclaw"),
-    path.join(homeDir, ".local", "share", "claw"),
-    path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
-    path.join(homeDir, "AppData", "Roaming", "Claw"),
-    path.join(homeDir, "AppData", "Local", "OpenClaw"),
-    path.join(homeDir, "AppData", "Local", "Claw"),
-    ...(process.platform === "darwin"
-      ? [
-          path.join(homeDir, "Library", "Application Support", "OpenClaw"),
-          path.join(homeDir, "Library", "Application Support", "Claw"),
-          path.join(homeDir, "Library", "Application Support", "MCP")
-        ]
-      : [])
-  ];
-}
-
 async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]> {
   const matchedRoots: string[] = [];
 
-  for (const root of knownRuntimeHomes(homeDir)) {
+  for (const root of knownLocalAgentHomes(homeDir)) {
     try {
       const feeds = await discoverRuntimeEventFeeds(root);
       if (feeds.length > 0) {

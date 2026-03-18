@@ -405,6 +405,8 @@ node dist/cli/index.js discover --host
 
 - `~/.openclaw`
 - `~/.mcp`
+- `~/.claude`
+- `~/.cursor`
 - `~/.config`
 - `~/Code`
 - `~/Projects`
@@ -413,7 +415,7 @@ node dist/cli/index.js discover --host
 
 默认情况下，它会排除你当前所在的工作目录子树，避免“主机级发现”又把你刚刚打开的仓库重新识别一遍。如果你想同时包含当前工作区，可以加上 `--include-cwd`。
 
-目标是让不熟悉命令行和目录结构的用户，也能先找到值得扫描的本地 agent action surface。
+目标是让不熟悉命令行和目录结构的用户，也能先找到值得扫描的本地 agent action surface，而不用先知道 OpenClaw、Claude/Cursor 这类本地 runtime 到底装在什么位置。
 
 现在 host discovery 还会直接给每个候选面推荐下一步动作：
 

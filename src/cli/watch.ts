@@ -1,5 +1,4 @@
 import { stat } from "node:fs/promises";
-import path from "node:path";
 
 import { appendAuditEvents, readAuditEvents, resolveAuditPaths } from "../audit/store";
 import { updateWatchStatusSession } from "../audit/status";
@@ -32,6 +31,7 @@ import {
 } from "../audit/feeds";
 import {
   discoverHost,
+  knownLocalAgentHomes,
   hostCandidateCategoryForHuman,
   hostCandidateRecommendedStepForHuman
 } from "../core/discovery";
@@ -711,27 +711,7 @@ async function discoverHostRuntimeFeeds(options: {
     });
   }
 
-  const wellKnownRuntimeRoots = [
-    path.join(options.homeDir, ".openclaw"),
-    path.join(options.homeDir, ".mcp"),
-    path.join(options.homeDir, ".config", "openclaw"),
-    path.join(options.homeDir, ".config", "claw"),
-    path.join(options.homeDir, ".config", "mcp"),
-    path.join(options.homeDir, ".config", "mcp-servers"),
-    path.join(options.homeDir, ".local", "share", "openclaw"),
-    path.join(options.homeDir, ".local", "share", "claw"),
-    path.join(options.homeDir, "AppData", "Roaming", "OpenClaw"),
-    path.join(options.homeDir, "AppData", "Roaming", "Claw"),
-    path.join(options.homeDir, "AppData", "Local", "OpenClaw"),
-    path.join(options.homeDir, "AppData", "Local", "Claw"),
-    ...(process.platform === "darwin"
-      ? [
-          path.join(options.homeDir, "Library", "Application Support", "OpenClaw"),
-          path.join(options.homeDir, "Library", "Application Support", "Claw"),
-          path.join(options.homeDir, "Library", "Application Support", "MCP")
-        ]
-      : [])
-  ];
+  const wellKnownRuntimeRoots = knownLocalAgentHomes(options.homeDir);
 
   for (const knownRoot of wellKnownRuntimeRoots) {
     if (rootCandidates.has(knownRoot)) {

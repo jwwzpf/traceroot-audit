@@ -3,6 +3,7 @@ import path from "node:path";
 
 import fg from "fast-glob";
 
+import { discoverRuntimeEventFeeds } from "../audit/feeds";
 import { loadManifest } from "../manifest/loader";
 import type { ScanTargetType } from "../rules/types";
 import { discoverFiles, resolveTarget } from "../utils/files";
@@ -83,6 +84,10 @@ export function hostCandidateCategoryForHuman(
     return "OpenClaw 运行态";
   }
 
+  if (candidate.categoryLabel === "local agent runtime" || localAgentPathPattern.test(pathHint)) {
+    return "本地 agent 运行态";
+  }
+
   switch (candidate.categoryLabel) {
     case "skill / tool package":
       return "Skill / Tool 动作包";
@@ -100,6 +105,10 @@ export function hostCandidateAttentionForHuman(
 ): string {
   if (candidate.categoryLabel === "OpenClaw runtime") {
     return "这里已经很像真正的运行入口，优先看一眼最容易发现暴露面和越界能力。";
+  }
+
+  if (candidate.categoryLabel === "local agent runtime") {
+    return "这里已经像本地 agent 正在真正跑起来的地方，优先看一眼最容易发现敏感动作和越界行为。";
   }
 
   if (candidate.categoryLabel === "skill / tool package") {
@@ -133,6 +142,10 @@ export function hostCandidateRecommendedStepForHuman(
       return "直接让 TraceRoot Doctor 带你检查这个工具服务的边界";
     }
 
+    if (candidate.categoryLabel === "local agent runtime") {
+      return "直接让 TraceRoot Doctor 带你检查并守住这个本地 agent 运行态";
+    }
+
     return "直接让 TraceRoot Doctor 带你把这里先看清楚、再收紧";
   }
 
@@ -143,6 +156,10 @@ export function hostCandidateRecommendedStepForHuman(
 
     if (candidate.categoryLabel === "MCP / tool server") {
       return "先让 TraceRoot 帮你把这个工具服务的边界收紧";
+    }
+
+    if (candidate.categoryLabel === "local agent runtime") {
+      return "先让 TraceRoot 帮你把这个本地 agent 运行态收紧一遍";
     }
 
     return "先让 TraceRoot 帮你把这里的动作边界收紧";
@@ -210,9 +227,47 @@ const manifestFilePattern = /^traceroot\.manifest\.(json|ya?ml)$/i;
 const dockerComposeFilePattern = /^docker-compose[^/]*\.ya?ml$/i;
 const envFilePattern = /^\.env(?:\..+)?$/i;
 const openClawPathPattern = /(^|\/)(?:\.openclaw|openclaw|claw)(\/|$)/i;
+const localAgentPathPattern =
+  /(^|\/)(?:\.openclaw|openclaw|claw|\.claude|claude|\.cursor|cursor)(\/|$)/i;
 const mcpPathPattern = /(^|\/)(?:\.mcp|mcp(?:-servers?)?)(\/|$)|\.mcp\.(json|ya?ml)$/i;
 const skillPathLikePattern = /(^|\/)(?:skills?|tools?|plugins?)(\/|$)/i;
 const genericAppPathPattern = /(^|\/)(?:frontend|backend|mobile|apps?|web)(\/|$)/i;
+
+export function knownLocalAgentHomes(homeDir: string): string[] {
+  return [
+    path.join(homeDir, ".openclaw"),
+    path.join(homeDir, ".mcp"),
+    path.join(homeDir, ".claude"),
+    path.join(homeDir, ".cursor"),
+    path.join(homeDir, ".config", "openclaw"),
+    path.join(homeDir, ".config", "claw"),
+    path.join(homeDir, ".config", "mcp"),
+    path.join(homeDir, ".config", "mcp-servers"),
+    path.join(homeDir, ".config", "claude"),
+    path.join(homeDir, ".config", "cursor"),
+    path.join(homeDir, ".local", "share", "openclaw"),
+    path.join(homeDir, ".local", "share", "claw"),
+    path.join(homeDir, ".local", "share", "claude"),
+    path.join(homeDir, ".local", "share", "cursor"),
+    path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
+    path.join(homeDir, "AppData", "Roaming", "Claw"),
+    path.join(homeDir, "AppData", "Roaming", "Claude"),
+    path.join(homeDir, "AppData", "Roaming", "Cursor"),
+    path.join(homeDir, "AppData", "Local", "OpenClaw"),
+    path.join(homeDir, "AppData", "Local", "Claw"),
+    path.join(homeDir, "AppData", "Local", "Claude"),
+    path.join(homeDir, "AppData", "Local", "Cursor"),
+    ...(process.platform === "darwin"
+      ? [
+          path.join(homeDir, "Library", "Application Support", "OpenClaw"),
+          path.join(homeDir, "Library", "Application Support", "Claw"),
+          path.join(homeDir, "Library", "Application Support", "MCP"),
+          path.join(homeDir, "Library", "Application Support", "Claude"),
+          path.join(homeDir, "Library", "Application Support", "Cursor")
+        ]
+      : [])
+  ];
+}
 
 function hostSearchRoots(
   homeDir: string,
@@ -221,8 +276,6 @@ function hostSearchRoots(
 ): HostSearchRootSpec[] {
   const roots = [
     { absolutePath: homeDir, deep: 4 },
-    { absolutePath: path.join(homeDir, ".openclaw"), deep: 4 },
-    { absolutePath: path.join(homeDir, ".mcp"), deep: 4 },
     { absolutePath: path.join(homeDir, ".config"), deep: 4 },
     { absolutePath: path.join(homeDir, "Code"), deep: 4 },
     { absolutePath: path.join(homeDir, "Projects"), deep: 4 },
@@ -233,18 +286,23 @@ function hostSearchRoots(
     { absolutePath: path.join(homeDir, "Downloads"), deep: 3 }
   ];
 
-  if (process.platform === "darwin") {
-    roots.push({
-      absolutePath: path.join(homeDir, "Library", "Application Support"),
-      deep: 4
-    });
+  for (const runtimeHome of knownLocalAgentHomes(homeDir)) {
+    roots.push({ absolutePath: runtimeHome, deep: 4 });
   }
 
   if (includeCwd) {
     roots.unshift({ absolutePath: cwd, deep: 3 });
   }
 
-  return roots;
+  const seen = new Set<string>();
+  return roots.filter((root) => {
+    const key = path.resolve(root.absolutePath);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -351,7 +409,8 @@ function summarizeStrongSignals(discovery: DiscoveryResult): string[] {
 
 function candidateMetadata(
   discovery: DiscoveryResult,
-  candidatePath: string
+  candidatePath: string,
+  hasRuntimeFeeds: boolean
 ): Pick<
   HostDiscoveryCandidate,
   | "score"
@@ -378,6 +437,9 @@ function candidateMetadata(
   const hasOpenClawMarker =
     openClawPathPattern.test(normalizedCandidatePath) ||
     normalizedSignals.some((value) => openClawPathPattern.test(value));
+  const hasLocalAgentMarker =
+    localAgentPathPattern.test(normalizedCandidatePath) ||
+    normalizedSignals.some((value) => localAgentPathPattern.test(value));
   const hasMcpMarker =
     mcpPathPattern.test(normalizedCandidatePath) ||
     normalizedSignals.some((value) => mcpPathPattern.test(value));
@@ -424,6 +486,14 @@ function candidateMetadata(
     score += 6;
   }
 
+  if (hasRuntimeFeeds) {
+    score += 14;
+  }
+
+  if (hasLocalAgentMarker && hasRuntimeFeeds) {
+    score += 10;
+  }
+
   if (discovery.surface.confidence === "high") {
     score += 4;
   } else if (discovery.surface.confidence === "medium") {
@@ -458,6 +528,12 @@ function candidateMetadata(
     recommendedAction = "doctor";
     recommendedActionLabel = "open TraceRoot Doctor here first";
     recommendedCommand = hostDoctorCommandPath(candidatePath);
+  } else if (hasLocalAgentMarker && hasRuntimeFeeds) {
+    categoryLabel = "local agent runtime";
+    attention = "worth checking first: native runtime activity was detected here";
+    recommendedAction = "doctor";
+    recommendedActionLabel = "open TraceRoot Doctor here first";
+    recommendedCommand = hostDoctorCommandPath(candidatePath);
   } else if (hasDockerCompose || hasEnv) {
     categoryLabel = "runtime config";
     attention = "worth checking if this runtime is broader or more exposed than you intended";
@@ -486,7 +562,7 @@ function pathHasActionSegment(absolutePath: string): boolean {
       (segment) =>
         skillKeywordPattern.test(segment) ||
         runtimeKeywordPattern.test(segment) ||
-        /^(openclaw|claw|agents?|mcp)$/i.test(segment)
+        /^(openclaw|claw|claude|cursor|agents?|mcp)$/i.test(segment)
     );
 }
 
@@ -537,6 +613,9 @@ export async function discoverHost(
   const includeCwd = options.includeCwd ?? false;
   const rootSpecs = hostSearchRoots(homeDir, cwd, includeCwd);
   const searchableRoots = [];
+  const knownRuntimeHomeSet = new Set(
+    knownLocalAgentHomes(homeDir).map((runtimeHome) => path.resolve(runtimeHome))
+  );
 
   for (const rootSpec of rootSpecs) {
     if (await pathExists(rootSpec.absolutePath)) {
@@ -584,6 +663,29 @@ export async function discoverHost(
     }
   }
 
+  for (const rootSpec of searchableRoots) {
+    if (!knownRuntimeHomeSet.has(path.resolve(rootSpec.absolutePath))) {
+      continue;
+    }
+
+    try {
+      const feeds = await discoverRuntimeEventFeeds(rootSpec.absolutePath);
+      if (feeds.length === 0) {
+        continue;
+      }
+
+      const existing = candidateMap.get(rootSpec.absolutePath);
+      if (!existing || existing.score < 8) {
+        candidateMap.set(rootSpec.absolutePath, {
+          absolutePath: rootSpec.absolutePath,
+          score: 8
+        });
+      }
+    } catch {
+      continue;
+    }
+  }
+
   const discoveredCandidates = [];
   const rankedCandidatePaths = [...candidateMap.values()]
     .sort((left, right) => {
@@ -608,22 +710,40 @@ export async function discoverHost(
 
     try {
       const discovery = await discoverTarget(candidate.absolutePath);
-      const strongSignals = summarizeStrongSignals(discovery);
+      const runtimeFeeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+      const strongSignals = [
+        ...summarizeStrongSignals(discovery),
+        ...runtimeFeeds
+          .slice(0, 3)
+          .map((feed) => path.relative(candidate.absolutePath, feed.absolutePath).replace(/\\/g, "/"))
+      ].slice(0, 5);
+      const surfaceReasons =
+        runtimeFeeds.length > 0
+          ? ["found native runtime activity logs under this local agent home", ...discovery.surface.reasons]
+          : discovery.surface.reasons;
       const keepCandidate =
         strongSignals.length > 0 ||
         discovery.surface.confidence === "high" ||
-        pathHasActionSegment(candidate.absolutePath);
+        pathHasActionSegment(candidate.absolutePath) ||
+        runtimeFeeds.length > 0;
 
       if (!keepCandidate) {
         continue;
       }
 
-      const metadata = candidateMetadata(discovery, candidate.absolutePath);
+      const metadata = candidateMetadata(discovery, candidate.absolutePath, runtimeFeeds.length > 0);
 
       discoveredCandidates.push({
         absolutePath: candidate.absolutePath,
         displayPath: displayPathForHuman(candidate.absolutePath, homeDir),
-        surface: discovery.surface,
+        surface: {
+          ...discovery.surface,
+          confidence:
+            runtimeFeeds.length > 0 && discovery.surface.confidence === "low"
+              ? "medium"
+              : discovery.surface.confidence,
+          reasons: surfaceReasons
+        },
         filesDiscovered: discovery.filesDiscovered,
         manifestPath: discovery.manifestPath,
         strongSignals,

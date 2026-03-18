@@ -147,6 +147,8 @@ function surfaceReasonForHuman(reason: string): string {
       return "目录名本身就很像一个 skill / tool 包。";
     case "directory name suggests a runtime/config surface":
       return "目录名本身就很像运行态或配置入口。";
+    case "found native runtime activity logs under this local agent home":
+      return "这里已经出现了原生运行时活动日志，说明本地 agent 很可能真的在这里跑起来了。";
     case "found only a small amount of scanable material, so this is a best-effort guess":
       return "目前线索不多，TraceRoot 先按最像入口的位置帮你猜了一次。";
     default:
