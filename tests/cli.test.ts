@@ -2923,6 +2923,8 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("当前最值得注意的事情：");
+      expect(logsCapture.read().stdout).toContain("Agent 开始尝试：付款或下单");
       expect(logsCapture.read().stdout).not.toContain("付款或下单（");
       expect(logsCapture.read().stdout).toContain("这一步看起来不是你刚才让 agent 做的事");
       expect(logsCapture.read().stdout).toContain("邮件整理与回复");

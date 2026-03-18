@@ -80,6 +80,7 @@ async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]>
 async function loadLatestAttentionLine(options: {
   target?: string;
   hostScope?: boolean;
+  approvedIntentIds?: HardeningIntentId[];
 }): Promise<string | null> {
   const event = (await loadRankedAttentionEvents(options))[0] ?? null;
   if (!event) {
@@ -123,10 +124,41 @@ function attentionCategoryWeight(item: AuditEvent): number {
   return 0;
 }
 
+function attentionPrimaryPriority(
+  item: AuditEvent,
+  approvedIntentIds: HardeningIntentId[] = []
+): number {
+  if (
+    item.category === "action-event" &&
+    workflowScopeNoteForAction(item.action, approvedIntentIds)
+  ) {
+    return 60;
+  }
+
+  if (item.category === "action-event") {
+    return 50;
+  }
+
+  if (item.category === "boundary-drift") {
+    return 30;
+  }
+
+  if (item.category === "risk-change" || item.category === "finding-change") {
+    return 20;
+  }
+
+  if (item.category === "surface-change") {
+    return 10;
+  }
+
+  return 0;
+}
+
 async function loadRankedAttentionEvents(options: {
   target?: string;
   hostScope?: boolean;
   limit?: number;
+  approvedIntentIds?: HardeningIntentId[];
 }): Promise<AuditEvent[]> {
   const result = await readAuditEvents({
     target: options.hostScope ? undefined : options.target,
@@ -137,6 +169,13 @@ async function loadRankedAttentionEvents(options: {
   return result.events
     .filter((item) => item.severity !== "safe")
     .sort((left, right) => {
+      const primaryDelta =
+        attentionPrimaryPriority(right, options.approvedIntentIds ?? []) -
+        attentionPrimaryPriority(left, options.approvedIntentIds ?? []);
+      if (primaryDelta !== 0) {
+        return primaryDelta;
+      }
+
       const categoryDelta = attentionCategoryWeight(right) - attentionCategoryWeight(left);
       if (categoryDelta !== 0) {
         return categoryDelta;
@@ -177,6 +216,7 @@ async function loadAttentionHighlights(options: {
   target?: string;
   hostScope?: boolean;
   limit?: number;
+  approvedIntentIds?: HardeningIntentId[];
 }): Promise<string[]> {
   const events = await loadRankedAttentionEvents(options);
   return events.slice(0, options.limit ?? 3).map(describeAttentionEvent);
@@ -1300,10 +1340,12 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                 target: effectiveTarget
               }),
               latestAttentionLine: await loadLatestAttentionLine({
-                target: effectiveTarget
+                target: effectiveTarget,
+                approvedIntentIds: selections.intentIds
               }),
               attentionHighlights: await loadAttentionHighlights({
-                target: effectiveTarget
+                target: effectiveTarget,
+                approvedIntentIds: selections.intentIds
               })
             })
           );

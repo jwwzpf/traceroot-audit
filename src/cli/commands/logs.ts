@@ -402,7 +402,10 @@ function timelineDetail(entry: TimelineEntry): string | undefined {
   return eventDetail(entry.primary);
 }
 
-function summarizeEvents(events: AuditEvent[]): {
+function summarizeEvents(
+  events: AuditEvent[],
+  approvedIntentIds: HardeningIntentId[] = []
+): {
   critical: number;
   highRisk: number;
   risky: number;
@@ -484,6 +487,33 @@ function summarizeEvents(events: AuditEvent[]): {
 
     if (event.category === "surface-change") {
       return 1;
+    }
+
+    return 0;
+  };
+
+  const attentionPrimaryPriority = (event: AuditEvent): number => {
+    if (
+      event.category === "action-event" &&
+      workflowScopeNoteForAction(event.action, approvedIntentIds)
+    ) {
+      return 60;
+    }
+
+    if (event.category === "action-event") {
+      return 50;
+    }
+
+    if (event.category === "boundary-drift") {
+      return 30;
+    }
+
+    if (event.category === "risk-change" || event.category === "finding-change") {
+      return 20;
+    }
+
+    if (event.category === "surface-change") {
+      return 10;
     }
 
     return 0;
@@ -593,6 +623,17 @@ function summarizeEvents(events: AuditEvent[]): {
       if (!latestAttention) {
         latestAttention = event;
       } else {
+        const primaryDelta =
+          attentionPrimaryPriority(event) - attentionPrimaryPriority(latestAttention);
+        if (primaryDelta > 0) {
+          latestAttention = event;
+          continue;
+        }
+
+        if (primaryDelta < 0) {
+          continue;
+        }
+
         const nextScore =
           severityWeight(event.severity) * 10 + attentionCategoryWeight(event);
         const currentScore =
@@ -874,7 +915,7 @@ async function printLogs(
       : 0;
 
   if (options.header !== false) {
-    const summary = summarizeEvents(eventsAscending);
+    const summary = summarizeEvents(eventsAscending, approvedIntentIds);
     const freshSinceLastReview = reviewState
       ? (
           await readAuditEvents({
@@ -939,7 +980,7 @@ async function printLogs(
     }
 
     if (reviewState && freshSinceLastReview.length > 0) {
-      const newSummary = summarizeEvents(freshSinceLastReview);
+      const newSummary = summarizeEvents(freshSinceLastReview, approvedIntentIds);
       const outsideWorkflowCount =
         approvedIntentIds.length > 0
           ? freshSinceLastReview.filter((event) =>
