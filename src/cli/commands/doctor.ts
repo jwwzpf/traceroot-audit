@@ -32,7 +32,11 @@ import {
   resolveWizardTarget
 } from "../../hardening/wizard";
 import { recommendedManifestFormat } from "../../hardening/analysis";
-import { workflowScopeNoteForAction, type HardeningIntentId } from "../../hardening/profiles";
+import {
+  workflowScopeNoteForAction,
+  workflowScopeUserWarningForAction,
+  type HardeningIntentId
+} from "../../hardening/profiles";
 import {
   actionLabelWithSubject,
   actionTriggerSourceLabel,
@@ -216,13 +220,16 @@ async function loadCatchUpLine(options: {
 
   const workflowSuffix =
     outsideWorkflowCount > 0
-      ? `，其中 ${outsideWorkflowCount} 条看起来已经超出了你批准过的工作流`
+      ? `，其中 ${outsideWorkflowCount} 条看起来已经不是你让 agent 做的事`
       : "";
 
   if (latest.category === "action-event") {
     const actor = runtimeActorLabel(latest.runtime);
     const label = actionLabelWithSubject(latest);
-    return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${actor}${latest.status === "succeeded" ? " 已完成" : latest.status === "failed" ? " 没有完成" : " 正在尝试"}「${label}」。`;
+    const workflowWarning =
+      workflowScopeUserWarningForAction(latest.action, options.approvedIntentIds ?? []) ?? "";
+    const suffix = workflowWarning ? ` ${workflowWarning}` : "";
+    return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${actor}${latest.status === "succeeded" ? " 已完成" : latest.status === "failed" ? " 没有完成" : " 正在尝试"}「${label}」。${suffix}`.trim();
   }
 
   return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${latest.message}`;

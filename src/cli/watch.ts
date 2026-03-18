@@ -60,6 +60,7 @@ import {
 import {
   getHardeningProfileById,
   workflowScopeNoteForAction,
+  workflowScopeUserWarningForAction,
   type HardeningIntentId
 } from "../hardening/profiles";
 import { displayNotifyChannel } from "../hardening/notify-discovery";
@@ -512,9 +513,17 @@ function renderLiveActionAlert(
     lines.push("- 状态：已经执行成功，并已记进审计时间线");
   }
 
-  const workflowScopeNote = workflowScopeNoteForAction(event.action, approvedIntentIds);
-  if (workflowScopeNote) {
-    lines.push(`- 工作流边界：${workflowScopeNote}`);
+  const workflowScopeWarning = workflowScopeUserWarningForAction(
+    event.action,
+    approvedIntentIds
+  );
+  if (workflowScopeWarning) {
+    lines.push(`- 🚧 ${workflowScopeWarning}`);
+  } else {
+    const workflowScopeNote = workflowScopeNoteForAction(event.action, approvedIntentIds);
+    if (workflowScopeNote) {
+      lines.push(`- 工作流边界：${workflowScopeNote}`);
+    }
   }
 
   if (event.recommendation) {

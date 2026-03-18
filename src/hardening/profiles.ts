@@ -250,3 +250,34 @@ export function workflowScopeNoteForAction(
     .map((profile) => profile.title)
     .join("、")}。`;
 }
+
+export function workflowScopeUserWarningForAction(
+  action: string | undefined,
+  intentIds: HardeningIntentId[]
+): string | null {
+  if (!action || intentIds.length === 0) {
+    return null;
+  }
+
+  const normalizedAction = normalizeActionForWorkflowScope(action);
+  if (!normalizedAction || normalizedAction.startsWith("openclaw-command-")) {
+    return null;
+  }
+
+  const selectedProfiles = intentIds.map((intentId) => getHardeningProfileById(intentId));
+  const matchingProfiles = selectedProfiles.filter((profile) =>
+    profile.expectedActions.includes(normalizedAction)
+  );
+
+  if (matchingProfiles.length > 0) {
+    return null;
+  }
+
+  if (selectedProfiles.length === 1) {
+    return `这一步看起来不是你刚才让 agent 做的事，已经超出了「${selectedProfiles[0]!.title}」这类工作流。`;
+  }
+
+  return `这一步看起来不是你刚才让 agent 做的事，也不在你批准过的这些工作流里：${selectedProfiles
+    .map((profile) => profile.title)
+    .join("、")}。`;
+}

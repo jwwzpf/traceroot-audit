@@ -111,7 +111,7 @@ function buildTextSummary(event: AuditEvent, workflowScopeNote?: string): string
   }
 
   if (workflowScopeNote) {
-    parts.push(`工作流边界：${workflowScopeNote}`);
+    parts.push(`这一步看起来不是你刚才让 agent 做的事：${workflowScopeNote}`);
   }
 
   if (event.recommendation) {
@@ -151,7 +151,7 @@ function buildChatRelayText(event: AuditEvent, workflowScopeNote?: string): stri
   }
 
   if (workflowScopeNote) {
-    lines.push(`工作流边界：${workflowScopeNote}`);
+    lines.push(`🚧 这一步看起来不是你刚才让 agent 做的事：${workflowScopeNote}`);
   }
 
   if (event.recommendation) {

@@ -341,17 +341,20 @@ export async function promptNotificationSelection(
       !likelyChannels.some((item) => item.channel === choice.value) &&
       !["telegram", "whatsapp", "slack", "discord"].includes(choice.value)
   );
-  const quickChoices = [
-    ...likelyChoices,
-    ...(["telegram", "whatsapp", "slack", "discord"] as const)
-      .filter((channel) => !likelyChannels.some((item) => item.channel === channel))
-      .map((channel) => ({
-        value: channel,
-        label: `${channel === "whatsapp" ? "📱" : channel === "telegram" ? "💬" : channel === "slack" ? "🧵" : "🎮"} 发到 ${displayNotifyChannel(channel)}`,
-        hint: "适合你已经在 OpenClaw 里接好这个聊天入口的情况"
-      })),
-    ...staticChoices
-  ];
+  const directDetectedChoices = likelyChoices.filter((choice) =>
+    likelyChannels.some((item) => item.channel === choice.value && Boolean(item.target))
+  );
+  const quickChannelChoices = (["telegram", "whatsapp", "slack", "discord"] as const)
+    .filter((channel) => !likelyChannels.some((item) => item.channel === channel))
+    .map((channel) => ({
+      value: channel,
+      label: `${channel === "whatsapp" ? "📱" : channel === "telegram" ? "💬" : channel === "slack" ? "🧵" : "🎮"} 发到 ${displayNotifyChannel(channel)}`,
+      hint: "适合你已经在 OpenClaw 里接好这个聊天入口的情况"
+    }));
+  const quickChoices =
+    directDetectedChoices.length > 0
+      ? [...directDetectedChoices, ...quickChannelChoices, ...staticChoices]
+      : [...staticChoices, ...quickChannelChoices, ...likelyChoices];
 
   if (likelyChannels.length > 0 && !options.quiet) {
     runtime.io.stdout(
@@ -367,7 +370,9 @@ export async function promptNotificationSelection(
     runtime.io.stdout(
       "💡 TraceRoot 暂时还没认出你已经接好的聊天入口，所以这次会先只保留本地审计时间线。\n"
     );
-  } else if (likelyChannels.length === 0) {
+  }
+
+  if (likelyChannels.length === 0) {
     return { mode: "local-only" };
   }
 
@@ -390,12 +395,18 @@ export async function promptNotificationSelection(
   }
 
   const defaultNotificationChoice =
-    likelyChannels[0]?.channel ?? "local-only";
+    likelyChannels.find((item) => item.target)?.channel ?? "local-only";
 
   if (!options.quiet) {
-    runtime.io.stdout(
-      "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
-    );
+    if (likelyChannels.some((item) => item.target)) {
+      runtime.io.stdout(
+        "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
+      );
+    } else {
+      runtime.io.stdout(
+        "💡 如果你现在还没接好聊天提醒入口也没关系，TraceRoot 会先继续保留本地审计时间线，等你以后想加提醒时再接上就行。\n"
+      );
+    }
   }
 
   const choice = await runtime.prompter.chooseOne(

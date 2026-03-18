@@ -1912,7 +1912,7 @@ describe("CLI", () => {
       expect(output).toContain("最近一次报平安");
       expect(output).toContain("你刚回来时最值得先看的是");
       expect(output).toContain("你上次离开以后，又出现了");
-      expect(output).toContain("其中 1 条看起来已经超出了你批准过的工作流");
+      expect(output).toContain("其中 1 条看起来已经不是你让 agent 做的事");
       expect(output).toContain("最近一次值得你看一眼的是");
       expect(output).toContain("对外发邮件");
       expect(output).toContain("付款或下单");
@@ -2912,7 +2912,9 @@ describe("CLI", () => {
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("TraceRoot 实时提醒");
       expect(watchOutput).toContain("付款或下单");
-      expect(watchOutput).toContain("工作流边界：这一步看起来超出了你批准过的工作流「邮件整理与回复」。");
+      expect(watchOutput).not.toContain("付款或下单（");
+      expect(watchOutput).toContain("这一步看起来不是你刚才让 agent 做的事");
+      expect(watchOutput).toContain("邮件整理与回复");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -2921,7 +2923,80 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
-      expect(logsCapture.read().stdout).toContain("工作流边界：这一步看起来超出了你批准过的工作流「邮件整理与回复」。");
+      expect(logsCapture.read().stdout).not.toContain("付款或下单（");
+      expect(logsCapture.read().stdout).toContain("这一步看起来不是你刚才让 agent 做的事");
+      expect(logsCapture.read().stdout).toContain("邮件整理与回复");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps doctor watch on local audit when no chat reminder route is detected", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-local-audit-watch-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-local-audit-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.jsonl"), "", "utf8");
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await appendFile(
+        path.join(tempDir, "logs", "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          action: "send-email",
+          severity: "high-risk",
+          status: "attempted",
+          runtime: "openclaw",
+          message: "OpenClaw 正在尝试发出一封外部邮件。"
+        })}\n`,
+        "utf8"
+      );
+
+      const exitCode = await watchPromise;
+
+      expect(exitCode).toBe(0);
+      expect(capture.read().stdout).toContain("这次会先只保留本地审计时间线");
+      expect(capture.read().stdout).toContain("TraceRoot 实时提醒");
+      expect(capture.read().stderr).not.toContain("请同时提供 `--notify-target`");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

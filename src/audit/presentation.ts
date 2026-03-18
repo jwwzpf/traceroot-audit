@@ -244,17 +244,6 @@ function pickEvidenceString(
   return undefined;
 }
 
-function compactResourceLabel(target: string): string {
-  const normalized = target.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-
-  if (parts.length >= 2) {
-    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-  }
-
-  return parts[0] ?? target;
-}
-
 function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
   const raw =
     typeof event.evidence?.raw === "object" && event.evidence?.raw
@@ -340,12 +329,11 @@ function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
     return truncateDisplayText(resource);
   }
 
-  if (event.target) {
-    if (/(delete|remove|modify|write|edit|copy|move|file)/i.test(event.action ?? "")) {
-      return displayUserPath(event.target);
-    }
-
-    return compactResourceLabel(event.target);
+  if (
+    event.target &&
+    /(delete|remove|modify|write|edit|copy|move|file)/i.test(event.action ?? "")
+  ) {
+    return displayUserPath(event.target);
   }
 
   return null;

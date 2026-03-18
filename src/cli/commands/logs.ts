@@ -25,6 +25,7 @@ import {
 import { loadHardeningProfile } from "../../hardening/profile";
 import {
   workflowScopeNoteForAction,
+  workflowScopeUserWarningForAction,
   type HardeningIntentId
 } from "../../hardening/profiles";
 import { discoverHost } from "../../core/discovery";
@@ -729,7 +730,7 @@ function renderTimelineEntry(
     approvedIntentIds
   );
   if (workflowScopeNote) {
-    lines.push(`   🧭 工作流边界：${workflowScopeNote}`);
+    lines.push(`   🚧 ${workflowScopeUserWarningForAction(entry.primary.action, approvedIntentIds) ?? workflowScopeNote}`);
   }
 
   return lines;
@@ -865,6 +866,12 @@ async function printLogs(
     hardeningProfileResult.profile?.selectedIntents.map(
       (intent) => intent.id as HardeningIntentId
     ) ?? [];
+  const outsideWorkflowTodayCount =
+    approvedIntentIds.length > 0
+      ? eventsAscending.filter((event) =>
+          Boolean(workflowScopeNoteForAction(event.action, approvedIntentIds))
+        ).length
+      : 0;
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending);
@@ -923,6 +930,14 @@ async function printLogs(
       ""
     );
 
+    if (outsideWorkflowTodayCount > 0) {
+      lines.push(
+        "🚧 这条时间线里还有一些动作看起来不是你刚才让 agent 做的事：",
+        `- 今天已经出现了 ${outsideWorkflowTodayCount} 条这类记录`,
+        ""
+      );
+    }
+
     if (reviewState && freshSinceLastReview.length > 0) {
       const newSummary = summarizeEvents(freshSinceLastReview);
       const outsideWorkflowCount =
@@ -937,9 +952,7 @@ async function printLogs(
         `- 里面最值得先看的是：${newSummary.latestAttention ? eventHeadline(newSummary.latestAttention) : "有新的风险变化"}`
       );
       if (outsideWorkflowCount > 0) {
-        lines.push(
-          `- 其中有 ${outsideWorkflowCount} 条看起来已经超出了你批准过的工作流`
-        );
+        lines.push(`- 其中有 ${outsideWorkflowCount} 条看起来已经不是你让 agent 做的事`);
       }
 
       if (newSummary.attentionActions.length > 0) {
@@ -970,7 +983,9 @@ async function printLogs(
         approvedIntentIds
       );
       if (workflowScopeNote) {
-        lines.push(`- 工作流边界：${workflowScopeNote}`);
+        lines.push(
+          `- 🚧 ${workflowScopeUserWarningForAction(summary.latestAttention.action, approvedIntentIds) ?? workflowScopeNote}`
+        );
       }
       if (summary.latestAttention.recommendation) {
         lines.push(`- 建议：${summary.latestAttention.recommendation}`);
