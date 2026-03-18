@@ -4,6 +4,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Command, Option } from "commander";
 
 import { readAuditEvents } from "../../audit/store";
+import {
+  loadAuditReviewState,
+  saveAuditReviewState
+} from "../../audit/review-state";
 import { discoverRuntimeEventFeeds } from "../../audit/feeds";
 import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
@@ -38,6 +42,10 @@ interface LogsOptions {
   tail?: boolean;
   interval: string;
   all?: boolean;
+}
+
+function isWorthReview(event: AuditEvent): boolean {
+  return event.severity !== "safe";
 }
 
 type TimelineEntry = {
@@ -830,6 +838,10 @@ async function printLogs(
     hostScope?: boolean;
   }
 ): Promise<AuditEvent[]> {
+  const reviewState = await loadAuditReviewState({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
   const result = await readAuditEvents({
     target: options.target,
     severity: options.severity,
@@ -849,6 +861,16 @@ async function printLogs(
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending);
+    const freshSinceLastReview = reviewState
+      ? (
+          await readAuditEvents({
+            target: options.target,
+            severity: options.severity,
+            today: options.today,
+            since: reviewState.lastReviewedAt
+          })
+        ).events.filter(isWorthReview)
+      : [];
     const watchStatusLines = await renderWatchStatusSummary({
       target: options.target,
       hostScope: options.hostScope
@@ -893,6 +915,26 @@ async function printLogs(
       `🧱 边界与漂移: ${summary.boundaryEvents} 条边界漂移，${summary.driftEvents} 条整体变化`,
       ""
     );
+
+    if (reviewState && freshSinceLastReview.length > 0) {
+      const newSummary = summarizeEvents(freshSinceLastReview);
+      lines.push("🆕 自从你上次回来看这条时间线以后：");
+      lines.push(
+        `- 又发生了 ${freshSinceLastReview.length} 条值得留意的记录`,
+        `- 里面最值得先看的是：${newSummary.latestAttention ? eventHeadline(newSummary.latestAttention) : "有新的风险变化"}`
+      );
+
+      if (newSummary.attentionActions.length > 0) {
+        lines.push(
+          `- 最常冒出来的是：${newSummary.attentionActions
+            .slice(0, 2)
+            .map((item) => item.actionLabel)
+            .join("、")}`
+        );
+      }
+
+      lines.push("");
+    }
 
     if (summary.latestAttention) {
       lines.push("👀 当前最值得注意的事情：");
@@ -983,6 +1025,11 @@ async function printLogs(
   for (const entry of timelineEntries) {
     runtime.io.stdout(`${renderTimelineEntry(entry, approvedIntentIds).join("\n")}\n`);
   }
+
+  await saveAuditReviewState({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
 
   return eventsAscending;
 }

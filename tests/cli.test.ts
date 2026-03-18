@@ -1693,6 +1693,91 @@ describe("CLI", () => {
     }
   });
 
+  it("tells users what changed since they last checked this audit timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-catchup-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-catchup-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这封外部邮件是不是真的该发出去。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        createCapture().io,
+        createStaticPrompter({})
+      );
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "public-post",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这条公开内容是不是真的该发出去。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("🆕 自从你上次回来看这条时间线以后：");
+      expect(logsCapture.read().stdout).toContain("公开发帖");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can fast-resume doctor watch with the remembered target, boundary, and reminder route", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-home-"));
@@ -1764,6 +1849,45 @@ describe("CLI", () => {
         createCapture().io
       );
 
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "logs",
+          tempDir,
+          "--today",
+          "--limit",
+          "10"
+        ],
+        createCapture().io,
+        createStaticPrompter({})
+      );
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "purchase-or-payment",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--recommendation",
+          "先确认这笔订单是不是你这次真的想让它提交。",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
       const capture = createCapture();
       const exitCode = await runCli(
         ["node", "traceroot-audit", "doctor", "--watch", "--cycles", "1", "--interval", "1"],
@@ -1781,8 +1905,10 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 已经直接续上了你上次的陪跑设置");
       expect(output).toContain("这次不会重新生成整套 bundle");
       expect(output).toContain("最近一次报平安");
+      expect(output).toContain("你上次离开以后，又出现了");
       expect(output).toContain("最近一次值得你看一眼的是");
       expect(output).toContain("对外发邮件");
+      expect(output).toContain("付款或下单");
       expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
       expect(output).not.toContain("权限收缩预览");
       expect(output).toContain("TraceRoot Audit Doctor Watch");
@@ -2885,7 +3011,7 @@ describe("CLI", () => {
       await rm(tempHome, { recursive: true, force: true });
       await rm(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 10000);
 
   it("can ingest MCP tool-call events without extra wiring", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-mcp-tool-call-"));

@@ -40,6 +40,10 @@ import {
 } from "../../audit/presentation";
 import { discoverRuntimeEventFeeds } from "../../audit/feeds";
 import { readAuditEvents } from "../../audit/store";
+import {
+  loadAuditReviewState,
+  saveAuditReviewState
+} from "../../audit/review-state";
 import { loadWatchStatusSession } from "../../audit/status";
 import { displayNotifyChannel } from "../../hardening/notify-discovery";
 import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-discovery";
@@ -131,6 +135,43 @@ async function loadLatestAttentionLine(options: {
   }
 
   return `最近一次值得你看一眼的是：${event.message}`;
+}
+
+async function loadCatchUpLine(options: {
+  target?: string;
+  hostScope?: boolean;
+}): Promise<string | null> {
+  const reviewState = await loadAuditReviewState({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
+
+  if (!reviewState) {
+    return null;
+  }
+
+  const result = await readAuditEvents({
+    target: options.hostScope ? undefined : options.target,
+    since: reviewState.lastReviewedAt
+  });
+  const freshEvents = result.events.filter((event) => event.severity !== "safe");
+
+  if (freshEvents.length === 0) {
+    return null;
+  }
+
+  const [latest] = freshEvents;
+  if (!latest) {
+    return null;
+  }
+
+  if (latest.category === "action-event") {
+    const actor = runtimeActorLabel(latest.runtime);
+    const label = actionLabel(latest.action);
+    return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录；最新一条是：${actor}${latest.status === "succeeded" ? " 已完成" : latest.status === "failed" ? " 没有完成" : " 正在尝试"}「${label}」。`;
+  }
+
+  return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录；最新一条是：${latest.message}`;
 }
 
 function relativeTimeFromNow(value: string): string | null {
@@ -394,6 +435,7 @@ function renderDoctorResumeSummary(options: {
   profile: SavedHardeningProfile;
   reminder: string;
   boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
+  catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
@@ -449,6 +491,10 @@ function renderDoctorResumeSummary(options: {
       "",
       "💓 TraceRoot 这次不会重新生成整套 bundle，会先直接继续陪跑，并盯着这些边界变化。"
     );
+  }
+
+  if (options.catchUpLine) {
+    lines.push("", `🆕 ${options.catchUpLine}`);
   }
 
   if (options.watchFreshnessLine) {
@@ -546,6 +592,7 @@ function renderHostDoctorWatchIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
@@ -576,6 +623,10 @@ function renderHostDoctorWatchIntro(options: {
     ""
   );
 
+  if (options.catchUpLine) {
+    lines.splice(lines.length - 1, 0, `🆕 ${options.catchUpLine}`, "");
+  }
+
   if (options.watchFreshnessLine) {
     lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
   }
@@ -592,6 +643,7 @@ function renderHostDoctorWatchResumeIntro(options: {
   suggestedNames: string[];
   reminder: string;
   contextLine?: string;
+  catchUpLine?: string | null;
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
 }): string {
@@ -621,6 +673,10 @@ function renderHostDoctorWatchResumeIntro(options: {
     "📚 想回看今天发生了什么，可以直接用：traceroot-audit logs --today",
     ""
   );
+
+  if (options.catchUpLine) {
+    lines.splice(lines.length - 1, 0, `🆕 ${options.catchUpLine}`, "");
+  }
 
   if (options.watchFreshnessLine) {
     lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
@@ -803,6 +859,7 @@ async function runMachineLevelDoctorWatch(options: {
     .map((candidate) => candidate.displayPath);
   const watchFreshnessLine = await loadWatchFreshnessLine({ hostScope: true });
   const latestAttentionLine = await loadLatestAttentionLine({ hostScope: true });
+  const catchUpLine = await loadCatchUpLine({ hostScope: true });
 
   options.runtime.io.stdout(
     (options.reason === "smart-fallback" || options.reason === "remembered-host") &&
@@ -811,6 +868,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          catchUpLine,
           watchFreshnessLine,
           latestAttentionLine,
           contextLine:
@@ -822,6 +880,7 @@ async function runMachineLevelDoctorWatch(options: {
           candidateCount: hostDiscovery.candidates.length,
           suggestedNames,
           reminder,
+          catchUpLine,
           watchFreshnessLine,
           latestAttentionLine,
           contextLine:
@@ -832,6 +891,10 @@ async function runMachineLevelDoctorWatch(options: {
                 : undefined
         })
   );
+
+  await saveAuditReviewState({
+    scope: "host"
+  });
 
   await runHostWatch({
     runtime: options.runtime,
@@ -1139,6 +1202,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
                 openclawTarget: savedPreferences!.notifications.openclawTarget
               }),
               boundaryStatus,
+              catchUpLine: await loadCatchUpLine({
+                target: effectiveTarget
+              }),
               watchFreshnessLine: await loadWatchFreshnessLine({
                 target: effectiveTarget
               }),
@@ -1147,6 +1213,11 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               })
             })
           );
+
+          await saveAuditReviewState({
+            scope: "target",
+            target: effectiveTarget
+          });
         } else {
           plan = await buildHardeningPlan(effectiveTarget, selections);
           runtime.io.stdout(

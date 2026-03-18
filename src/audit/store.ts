@@ -15,6 +15,7 @@ export interface ReadAuditEventsOptions {
   severity?: AuditSeverity;
   today?: boolean;
   limit?: number;
+  since?: string;
 }
 
 export interface AuditRetentionOptions {
@@ -191,6 +192,16 @@ export async function readAuditEvents(
       const eventDate = new Date(event.timestamp);
       return !Number.isNaN(eventDate.getTime()) && eventDate.toDateString() === todayLabel;
     });
+  }
+
+  if (options.since) {
+    const sinceValue = new Date(options.since).getTime();
+    if (!Number.isNaN(sinceValue)) {
+      events = events.filter((event) => {
+        const eventValue = new Date(event.timestamp).getTime();
+        return !Number.isNaN(eventValue) && eventValue >= sinceValue;
+      });
+    }
   }
 
   events.sort((left, right) => right.timestamp.localeCompare(left.timestamp));
