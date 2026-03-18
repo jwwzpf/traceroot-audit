@@ -79,7 +79,7 @@ function statusLabel(event: AuditEvent): string | undefined {
   }
 }
 
-function buildTextSummary(event: AuditEvent): string {
+function buildTextSummary(event: AuditEvent, workflowScopeNote?: string): string {
   const actor = runtimeActorLabel(event.runtime);
   const triggerContext = actionTriggerSourceLabel(event);
   const parts = [
@@ -103,6 +103,10 @@ function buildTextSummary(event: AuditEvent): string {
     parts.push(`状态：${status}`);
   }
 
+  if (workflowScopeNote) {
+    parts.push(`工作流边界：${workflowScopeNote}`);
+  }
+
   if (event.recommendation) {
     parts.push(`建议：${event.recommendation}`);
   }
@@ -110,7 +114,7 @@ function buildTextSummary(event: AuditEvent): string {
   return parts.join("\n");
 }
 
-function buildChatRelayText(event: AuditEvent): string {
+function buildChatRelayText(event: AuditEvent, workflowScopeNote?: string): string {
   const actor = runtimeActorLabel(event.runtime);
   const triggerContext = actionTriggerSourceLabel(event);
   const lines = [
@@ -132,6 +136,10 @@ function buildChatRelayText(event: AuditEvent): string {
   const status = statusLabel(event);
   if (status) {
     lines.push(`状态：${status}`);
+  }
+
+  if (workflowScopeNote) {
+    lines.push(`工作流边界：${workflowScopeNote}`);
   }
 
   if (event.recommendation) {
@@ -220,7 +228,10 @@ export function validateNotificationConfig(
   return undefined;
 }
 
-export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> {
+export function buildWebhookPayload(
+  event: AuditEvent,
+  workflowScopeNote?: string
+): Record<string, unknown> {
   return {
     source: "traceroot-audit",
     type: "runtime-alert",
@@ -228,7 +239,7 @@ export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> 
     severity: event.severity,
     title: `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     summary: `Agent 刚刚触发了一个${severityLabel(event.severity)}动作：${actionLabel(event.action)}`,
-    text: buildTextSummary(event),
+    text: buildTextSummary(event, workflowScopeNote),
     action: event.action ?? null,
     actionLabel: actionLabel(event.action),
     triggerContext: actionTriggerSourceLabel(event),
@@ -236,13 +247,15 @@ export function buildWebhookPayload(event: AuditEvent): Record<string, unknown> 
     status: event.status ?? null,
     target: event.target ? displayUserPath(event.target) : null,
     message: event.message,
-    recommendation: event.recommendation ?? null
+    recommendation: event.recommendation ?? null,
+    workflowScopeNote: workflowScopeNote ?? null
   };
 }
 
 export async function sendWebhookNotification(
   event: AuditEvent,
-  config: ResolvedNotificationConfig
+  config: ResolvedNotificationConfig,
+  workflowScopeNote?: string
 ): Promise<void> {
   if (!config.webhookUrl) {
     return;
@@ -254,7 +267,7 @@ export async function sendWebhookNotification(
       "content-type": "application/json",
       "user-agent": "traceroot-audit/0.2.0"
     },
-    body: JSON.stringify(buildWebhookPayload(event))
+    body: JSON.stringify(buildWebhookPayload(event, workflowScopeNote))
   });
 
   if (!response.ok) {
@@ -264,7 +277,8 @@ export async function sendWebhookNotification(
 
 export async function sendOpenClawChannelNotification(
   event: AuditEvent,
-  config: ResolvedNotificationConfig
+  config: ResolvedNotificationConfig,
+  workflowScopeNote?: string
 ): Promise<void> {
   if (!hasOpenClawChannelNotification(config)) {
     return;
@@ -278,7 +292,7 @@ export async function sendOpenClawChannelNotification(
     "--target",
     config.openclawTarget!,
     "--message",
-    buildChatRelayText(event)
+    buildChatRelayText(event, workflowScopeNote)
   ];
 
   if (config.openclawAccount) {

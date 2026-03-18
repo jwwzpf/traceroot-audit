@@ -57,6 +57,7 @@ import {
 } from "../hardening/audit-coverage";
 import {
   getHardeningProfileById,
+  workflowScopeNoteForAction,
   type HardeningIntentId
 } from "../hardening/profiles";
 import { displayNotifyChannel } from "../hardening/notify-discovery";
@@ -453,7 +454,10 @@ function shouldEmitHeartbeat(options: {
   return options.now - options.lastHeartbeatAt >= options.heartbeatEveryMs;
 }
 
-function renderLiveActionAlert(event: AuditEvent): string[] {
+function renderLiveActionAlert(
+  event: AuditEvent,
+  approvedIntentIds: HardeningIntentId[] = []
+): string[] {
   const icon = alertIconForSeverity(event.severity);
   const actor = runtimeActorLabel(event.runtime);
   const triggerContext = actionTriggerSentence(event);
@@ -498,6 +502,11 @@ function renderLiveActionAlert(event: AuditEvent): string[] {
     lines.push("- 状态：执行失败，但这次尝试已经被记进审计时间线");
   } else if (event.status === "succeeded") {
     lines.push("- 状态：已经执行成功，并已记进审计时间线");
+  }
+
+  const workflowScopeNote = workflowScopeNoteForAction(event.action, approvedIntentIds);
+  if (workflowScopeNote) {
+    lines.push(`- 工作流边界：${workflowScopeNote}`);
   }
 
   if (event.recommendation) {
@@ -626,16 +635,19 @@ async function notifyActionEvent(
   runtime: CliRuntime,
   event: AuditEvent,
   notificationConfig: ResolvedNotificationConfig,
-  state: { warned: boolean }
+  state: { warned: boolean },
+  approvedIntentIds: HardeningIntentId[] = []
 ): Promise<void> {
   if (!hasNotificationChannel(notificationConfig)) {
     return;
   }
 
+  const workflowScopeNote = workflowScopeNoteForAction(event.action, approvedIntentIds);
+
   try {
     await Promise.all([
-      sendWebhookNotification(event, notificationConfig),
-      sendOpenClawChannelNotification(event, notificationConfig)
+      sendWebhookNotification(event, notificationConfig, workflowScopeNote),
+      sendOpenClawChannelNotification(event, notificationConfig, workflowScopeNote)
     ]);
   } catch (error) {
     if (!state.warned) {
@@ -660,6 +672,7 @@ async function emitLiveActionAlerts(options: {
   notificationConfig: ResolvedNotificationConfig;
   notificationState: { warned: boolean };
   alertState: { lastSentAtByFingerprint: Map<string, number> };
+  approvedIntentIds?: HardeningIntentId[];
 }): Promise<void> {
   const {
     runtime,
@@ -667,7 +680,8 @@ async function emitLiveActionAlerts(options: {
     seenActionEvents,
     notificationConfig,
     notificationState,
-    alertState
+    alertState,
+    approvedIntentIds = []
   } = options;
 
   const now = Date.now();
@@ -681,8 +695,14 @@ async function emitLiveActionAlerts(options: {
       continue;
     }
 
-    runtime.io.stdout(`${renderLiveActionAlert(event).join("\n")}\n`);
-    await notifyActionEvent(runtime, event, notificationConfig, notificationState);
+    runtime.io.stdout(`${renderLiveActionAlert(event, approvedIntentIds).join("\n")}\n`);
+    await notifyActionEvent(
+      runtime,
+      event,
+      notificationConfig,
+      notificationState,
+      approvedIntentIds
+    );
     alertState.lastSentAtByFingerprint.set(fingerprint, now);
     seenActionEvents.add(actionEventKey(event));
   }
@@ -1420,13 +1440,15 @@ export async function runTargetWatch(options: {
   const runtimeFeedCursor = await createRuntimeFeedCursor(runtimeFeeds);
   let previousBoundaryStatus: BoundaryStatus | null = null;
   let lastFeedRefreshAt = Date.now();
+  const approvedIntentIds =
+    hardeningProfileResult.profile?.selectedIntents.map(
+      (intent) => intent.id as HardeningIntentId
+    ) ?? [];
 
   if (hardeningProfileResult.profile) {
     const initialBoundaryState = await buildCurrentHardeningState(
       target,
-      hardeningProfileResult.profile.selectedIntents.map(
-        (intent) => intent.id as HardeningIntentId
-      )
+      approvedIntentIds
     );
     previousBoundaryStatus = evaluateBoundaryStatus(
       hardeningProfileResult.profile,
@@ -1581,7 +1603,8 @@ export async function runTargetWatch(options: {
       seenActionEvents,
       notificationConfig: {},
       notificationState,
-      alertState
+      alertState,
+      approvedIntentIds
     });
   }
 
@@ -1717,9 +1740,7 @@ export async function runTargetWatch(options: {
       if (hardeningProfileResult.profile && previousBoundaryStatus) {
         const latestBoundaryState = await buildCurrentHardeningState(
           target,
-          hardeningProfileResult.profile.selectedIntents.map(
-            (intent) => intent.id as HardeningIntentId
-          )
+          approvedIntentIds
         );
         currentBoundaryStatus = evaluateBoundaryStatus(
           hardeningProfileResult.profile,
@@ -1747,7 +1768,8 @@ export async function runTargetWatch(options: {
         seenActionEvents,
         notificationConfig,
         notificationState,
-        alertState
+        alertState,
+        approvedIntentIds
       });
       if (newActionAlerts.length > 0) {
         await refreshWatchStatus({
@@ -1938,7 +1960,8 @@ export async function runTargetWatch(options: {
       seenActionEvents,
       notificationConfig,
       notificationState,
-      alertState
+      alertState,
+      approvedIntentIds
     });
     if (newActionAlerts.length > 0) {
       await refreshWatchStatus({

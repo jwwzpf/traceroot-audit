@@ -16,6 +16,11 @@ import {
   loadAggregatedAuditCoverage,
   loadAuditCoverageSnapshot
 } from "../../hardening/audit-coverage";
+import { loadHardeningProfile } from "../../hardening/profile";
+import {
+  workflowScopeNoteForAction,
+  type HardeningIntentId
+} from "../../hardening/profiles";
 import { discoverHost } from "../../core/discovery";
 import {
   loadRecentDoctorContext,
@@ -668,7 +673,10 @@ function eventKey(event: AuditEvent): string {
   ].join("::");
 }
 
-function renderTimelineEntry(entry: TimelineEntry): string[] {
+function renderTimelineEntry(
+  entry: TimelineEntry,
+  approvedIntentIds: HardeningIntentId[] = []
+): string[] {
   const headline = timelineHeadline(entry);
   const lines = [
     `${severityIcon(entry.primary.severity)} [${formatTimestamp(entry.primary.timestamp)}] ${headline}`
@@ -699,6 +707,14 @@ function renderTimelineEntry(entry: TimelineEntry): string[] {
 
   if (entry.primary.recommendation) {
     lines.push(`   🔧 TraceRoot 建议先做: ${entry.primary.recommendation}`);
+  }
+
+  const workflowScopeNote = workflowScopeNoteForAction(
+    entry.primary.action,
+    approvedIntentIds
+  );
+  if (workflowScopeNote) {
+    lines.push(`   🧭 工作流边界：${workflowScopeNote}`);
   }
 
   return lines;
@@ -822,6 +838,14 @@ async function printLogs(
   });
   const eventsAscending = [...result.events].reverse();
   const timelineEntries = buildTimelineEntries(eventsAscending);
+  const hardeningProfileResult =
+    options.target && !options.hostScope
+      ? await loadHardeningProfile(options.target)
+      : { profile: null, profilePath: null };
+  const approvedIntentIds =
+    hardeningProfileResult.profile?.selectedIntents.map(
+      (intent) => intent.id as HardeningIntentId
+    ) ?? [];
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending);
@@ -880,6 +904,13 @@ async function printLogs(
       const detail = eventDetail(summary.latestAttention);
       if (detail && detail !== eventHeadline(summary.latestAttention)) {
         lines.push(`- 说明：${detail}`);
+      }
+      const workflowScopeNote = workflowScopeNoteForAction(
+        summary.latestAttention.action,
+        approvedIntentIds
+      );
+      if (workflowScopeNote) {
+        lines.push(`- 工作流边界：${workflowScopeNote}`);
       }
       if (summary.latestAttention.recommendation) {
         lines.push(`- 建议：${summary.latestAttention.recommendation}`);
@@ -950,7 +981,7 @@ async function printLogs(
   }
 
   for (const entry of timelineEntries) {
-    runtime.io.stdout(`${renderTimelineEntry(entry).join("\n")}\n`);
+    runtime.io.stdout(`${renderTimelineEntry(entry, approvedIntentIds).join("\n")}\n`);
   }
 
   return eventsAscending;
@@ -1003,6 +1034,14 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
       }
       const limit = Number.parseInt(options.limit, 10);
       const intervalSeconds = Number.parseInt(options.interval, 10);
+      const tailHardeningProfileResult =
+        target && !hostScope
+          ? await loadHardeningProfile(target)
+          : { profile: null, profilePath: null };
+      const tailApprovedIntentIds =
+        tailHardeningProfileResult.profile?.selectedIntents.map(
+          (intent) => intent.id as HardeningIntentId
+        ) ?? [];
 
       if (!Number.isInteger(limit) || limit <= 0) {
         runtime.io.stderr("`--limit` must be a positive integer.\n");
@@ -1046,7 +1085,9 @@ export function registerLogsCommand(program: Command, runtime: CliRuntime): void
           .filter((event) => !seen.has(eventKey(event)));
 
         for (const event of nextEvents) {
-          runtime.io.stdout(`${renderEvent(event).join("\n")}\n`);
+          runtime.io.stdout(
+            `${renderTimelineEntry({ primary: event, related: [] }, tailApprovedIntentIds).join("\n")}\n`
+          );
           seen.add(eventKey(event));
         }
       }

@@ -33,6 +33,7 @@ export interface HardeningIntentProfile {
   icon: string;
   title: string;
   subtitle: string;
+  expectedActions: string[];
   requiredCapabilities: SupportedCapability[];
   optionalCapabilities: SupportedCapability[];
   sideEffects: boolean;
@@ -47,6 +48,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "📧",
     title: "邮件整理与回复",
     subtitle: "读取邮件、起草回复、在确认后发送",
+    expectedActions: ["send-email"],
     requiredCapabilities: ["network", "email"],
     optionalCapabilities: ["browser"],
     sideEffects: true,
@@ -63,6 +65,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "🧵",
     title: "社交媒体发帖 / 运营",
     subtitle: "发 X/Twitter 更新，管理社媒发布流程",
+    expectedActions: ["public-post"],
     requiredCapabilities: ["network", "browser"],
     optionalCapabilities: ["filesystem"],
     sideEffects: true,
@@ -79,6 +82,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "🛒",
     title: "购物 / 下单自动化",
     subtitle: "购物车、配送时段、确认订单",
+    expectedActions: ["purchase-or-payment"],
     requiredCapabilities: ["network", "browser"],
     optionalCapabilities: ["payments", "email"],
     sideEffects: true,
@@ -95,6 +99,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "💻",
     title: "PR 审查 / 代码反馈",
     subtitle: "代码变更审查、反馈回传到聊天渠道",
+    expectedActions: ["send-message", "modify-files"],
     requiredCapabilities: ["network", "filesystem"],
     optionalCapabilities: ["browser"],
     sideEffects: false,
@@ -111,6 +116,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "💬",
     title: "客服 / 聊天支持 / 消息代发",
     subtitle: "在聊天渠道自动回复或转发消息",
+    expectedActions: ["send-message", "send-email"],
     requiredCapabilities: ["network"],
     optionalCapabilities: ["browser", "email"],
     sideEffects: true,
@@ -127,6 +133,7 @@ export const hardeningIntentProfiles: HardeningIntentProfile[] = [
     icon: "📈",
     title: "市场监控 / 图表分析",
     subtitle: "查看图表、抓截图、做技术分析",
+    expectedActions: ["bank-access", "finance-access", "sensitive-data-access"],
     requiredCapabilities: ["network"],
     optionalCapabilities: ["browser", "filesystem"],
     sideEffects: false,
@@ -148,4 +155,98 @@ export function getHardeningProfileById(id: HardeningIntentId): HardeningIntentP
   }
 
   return profile;
+}
+
+function normalizeActionForWorkflowScope(action?: string): string | null {
+  const normalized = action?.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    [
+      "send-email",
+      "public-post",
+      "send-message",
+      "delete-files",
+      "modify-files",
+      "purchase-or-payment",
+      "bank-access",
+      "finance-access",
+      "sensitive-secret-access",
+      "sensitive-data-access"
+    ].includes(normalized)
+  ) {
+    return normalized;
+  }
+
+  if (/(send|draft).*(email|mail)|(email|mail).*(send|draft)/.test(normalized)) {
+    return "send-email";
+  }
+
+  if (/(publish|publishing|post|posting|tweet|social|tiktok|youtube|linkedin|reddit)/.test(normalized)) {
+    return "public-post";
+  }
+
+  if (/(message|whatsapp|telegram|slack|discord|wechat)/.test(normalized)) {
+    return "send-message";
+  }
+
+  if (/(delete|deleting|remove|removing|rm|unlink|wipe|wiping|purge)/.test(normalized)) {
+    return "delete-files";
+  }
+
+  if (/(write|writing|modify|modifying|edit|editing|update|updating|rename|renaming|move|moving|copy|copying)/.test(normalized)) {
+    return "modify-files";
+  }
+
+  if (/(payment|paying|purchase|purchasing|checkout|checking out|order|ordering|stripe|paypal|wallet)/.test(normalized)) {
+    return "purchase-or-payment";
+  }
+
+  if (/(bank|banking|finance|financial|broker|trade|trading|portfolio|account-balance)/.test(normalized)) {
+    return "bank-access";
+  }
+
+  if (/(sensitive|private|customer-data|customer data|pii|record|records|dataset|datasets)/.test(normalized)) {
+    return "sensitive-data-access";
+  }
+
+  if (/(secret|secrets|token|tokens|credential|credentials|password|passwords|key|keys)/.test(normalized)) {
+    return "sensitive-secret-access";
+  }
+
+  return normalized;
+}
+
+export function workflowScopeNoteForAction(
+  action: string | undefined,
+  intentIds: HardeningIntentId[]
+): string | null {
+  if (!action || intentIds.length === 0) {
+    return null;
+  }
+
+  const normalizedAction = normalizeActionForWorkflowScope(action);
+  if (!normalizedAction || normalizedAction.startsWith("openclaw-command-")) {
+    return null;
+  }
+
+  const selectedProfiles = intentIds.map((intentId) => getHardeningProfileById(intentId));
+  const matchingProfiles = selectedProfiles.filter((profile) =>
+    profile.expectedActions.includes(normalizedAction)
+  );
+
+  if (matchingProfiles.length > 0) {
+    return null;
+  }
+
+  if (selectedProfiles.length === 1) {
+    return `这一步看起来超出了你批准过的工作流「${selectedProfiles[0]!.title}」。`;
+  }
+
+  return `这一步看起来不在你批准过的这些工作流里：${selectedProfiles
+    .map((profile) => profile.title)
+    .join("、")}。`;
 }

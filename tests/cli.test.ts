@@ -2718,6 +2718,88 @@ describe("CLI", () => {
     }
   });
 
+  it("tells users when a risky runtime action falls outside the approved workflow", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-workflow-mismatch-alert-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-workflow-mismatch-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nSTRIPE_SECRET_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.jsonl"), "", "utf8");
+      process.env.HOME = tempHome;
+
+      const watchCapture = createCapture();
+      const watchPromise = runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        watchCapture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await appendFile(
+        path.join(tempDir, "logs", "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          action: "purchase-or-payment",
+          severity: "high-risk",
+          status: "attempted",
+          runtime: "openclaw",
+          message: "OpenClaw 正在尝试支付一笔新的订单。",
+          recommendation: "先确认这笔订单是不是你这次真的想让它提交。"
+        })}\n`,
+        "utf8"
+      );
+
+      const watchExitCode = await watchPromise;
+      const watchOutput = watchCapture.read().stdout;
+
+      expect(watchExitCode).toBe(0);
+      expect(watchOutput).toContain("TraceRoot 实时提醒");
+      expect(watchOutput).toContain("付款或下单");
+      expect(watchOutput).toContain("工作流边界：这一步看起来超出了你批准过的工作流「邮件整理与回复」。");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        logsCapture.io
+      );
+
+      expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("工作流边界：这一步看起来超出了你批准过的工作流「邮件整理与回复」。");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("understands nested OpenClaw-style runtime events and shows human action labels", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-target-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-feed-home-"));
