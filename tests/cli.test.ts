@@ -1783,6 +1783,121 @@ describe("CLI", () => {
     }
   });
 
+  it("keeps unread attention when users only peek at part of the timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-peek-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-peek-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      process.env.HOME = tempHome;
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "send-email",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        createCapture().io,
+        createStaticPrompter({})
+      );
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "public-post",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      const peekCapture = createCapture();
+      const peekExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "1"],
+        peekCapture.io,
+        createStaticPrompter({})
+      );
+
+      expect(peekExitCode).toBe(0);
+      expect(peekCapture.read().stdout).toContain("🆕 自从你上次回来看这条时间线以后：");
+      expect(peekCapture.read().stdout).toContain("🧠 这次你看的还是一部分记录。");
+
+      await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "tap",
+          "--action",
+          "sensitive-data-access",
+          "--severity",
+          "high-risk",
+          "--target",
+          tempDir,
+          "--runtime",
+          "openclaw",
+          "--surface-kind",
+          "runtime",
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(0)"
+        ],
+        createCapture().io
+      );
+
+      const finalCapture = createCapture();
+      const finalExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today", "--limit", "10"],
+        finalCapture.io,
+        createStaticPrompter({})
+      );
+
+      expect(finalExitCode).toBe(0);
+      expect(finalCapture.read().stdout).toContain("🆕 自从你上次回来看这条时间线以后：");
+      expect(finalCapture.read().stdout).toContain("又发生了 2 条值得留意的记录");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("can fast-resume doctor watch with the remembered target, boundary, and reminder route", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-fast-resume-home-"));

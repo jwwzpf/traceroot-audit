@@ -891,13 +891,21 @@ async function printLogs(
     scope: options.hostScope ? "host" : "target",
     target: options.hostScope ? null : options.target
   });
-  const result = await readAuditEvents({
+  const query = {
     target: options.target,
     severity: options.severity,
-    today: options.today,
-    limit: options.limit
-  });
+    today: options.today
+  } as const;
+  const fullResult = await readAuditEvents(query);
+  const result = {
+    ...fullResult,
+    events:
+      typeof options.limit === "number" && options.limit > 0
+        ? fullResult.events.slice(0, options.limit)
+        : fullResult.events
+  };
   const eventsAscending = [...result.events].reverse();
+  const totalMatchingEvents = fullResult.events.length;
   const timelineEntries = buildTimelineEntries(eventsAscending);
   const hardeningProfileResult =
     options.target && !options.hostScope
@@ -970,6 +978,18 @@ async function printLogs(
       `🧱 边界与漂移: ${summary.boundaryEvents} 条边界漂移，${summary.driftEvents} 条整体变化`,
       ""
     );
+
+    const partialView =
+      Boolean(options.severity) ||
+      (typeof options.limit === "number" && totalMatchingEvents > options.limit);
+
+    if (partialView) {
+      lines.push(
+        "🧠 这次你看的还是一部分记录。",
+        "   TraceRoot 还会继续保留“上次没看完”的提醒，等你真正把这段时间线看完整再替你消掉它。",
+        ""
+      );
+    }
 
     if (outsideWorkflowTodayCount > 0) {
       lines.push(
@@ -1100,10 +1120,16 @@ async function printLogs(
     runtime.io.stdout(`${renderTimelineEntry(entry, approvedIntentIds).join("\n")}\n`);
   }
 
-  await saveAuditReviewState({
-    scope: options.hostScope ? "host" : "target",
-    target: options.hostScope ? null : options.target
-  });
+  const shouldMarkReviewed =
+    !options.severity &&
+    !(typeof options.limit === "number" && totalMatchingEvents > options.limit);
+
+  if (shouldMarkReviewed) {
+    await saveAuditReviewState({
+      scope: options.hostScope ? "host" : "target",
+      target: options.hostScope ? null : options.target
+    });
+  }
 
   return eventsAscending;
 }
