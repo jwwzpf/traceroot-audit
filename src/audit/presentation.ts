@@ -44,36 +44,36 @@ export function actionLabel(action?: string): string {
     return "对外发邮件";
   }
 
-  if (/(publish|post|tweet|social|tiktok|youtube|linkedin|reddit)/.test(normalized)) {
+  if (/(publish|publishing|post|posting|tweet|social|tiktok|youtube|linkedin|reddit)/.test(normalized)) {
     return "公开发帖";
+  }
+
+  if (/(delete|deleting|remove|removing|rm|unlink|wipe|wiping|purge)/.test(normalized)) {
+    return "删除本地文件";
+  }
+
+  if (/(write|writing|modify|modifying|edit|editing|update|updating|rename|renaming|move|moving|copy|copying)/.test(normalized) && /(file|files|fs|disk|path|workspace)/.test(normalized)) {
+    return "修改本地文件";
+  }
+
+  if (/(payment|paying|purchase|purchasing|checkout|checking out|order|ordering|stripe|paypal|wallet)/.test(normalized)) {
+    return "付款或下单";
+  }
+
+  if (/(bank|banking|finance|financial|broker|trade|trading|portfolio|account-balance)/.test(normalized)) {
+    return "访问银行或交易数据";
+  }
+
+  if (/(secret|secrets|token|tokens|credential|credentials|password|passwords|key|keys)/.test(normalized)) {
+    return "读取敏感 secret";
+  }
+
+  if (/(sensitive|private|customer-data|customer data|pii|record|records|dataset|datasets)/.test(normalized)) {
+    return "读取敏感数据";
   }
 
   if (/(message|whatsapp|telegram|slack|discord|wechat)/.test(normalized)) {
     return "对外发消息";
-  }
-
-  if (/(delete|remove|rm|unlink|wipe|purge)/.test(normalized)) {
-    return "删除本地文件";
-  }
-
-  if (/(write|modify|edit|update|rename|move|copy)/.test(normalized) && /(file|files|fs|disk|path|workspace)/.test(normalized)) {
-    return "修改本地文件";
-  }
-
-  if (/(payment|purchase|checkout|order|stripe|paypal|wallet)/.test(normalized)) {
-    return "付款或下单";
-  }
-
-  if (/(bank|finance|broker|trade|portfolio|account-balance)/.test(normalized)) {
-    return "访问银行或交易数据";
-  }
-
-  if (/(secret|token|credential|password|key)/.test(normalized)) {
-    return "读取敏感 secret";
-  }
-
-  if (/(sensitive|private|customer-data|pii|record|records)/.test(normalized)) {
-    return "读取敏感数据";
   }
 
   return action.replace(/^run-/, "运行 ").replace(/-/g, " ");

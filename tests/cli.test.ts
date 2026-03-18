@@ -2739,6 +2739,7 @@ describe("CLI", () => {
         "utf8"
       );
       await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.jsonl"), "", "utf8");
 
       process.env.HOME = tempHome;
 
@@ -2833,6 +2834,7 @@ describe("CLI", () => {
         "utf8"
       );
       await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.log"), "", "utf8");
 
       process.env.HOME = tempHome;
 
@@ -2887,6 +2889,176 @@ describe("CLI", () => {
       expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("mcp-events.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest plain-text runtime logs for destructive actions without extra wiring", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-delete-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-delete-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "AWS_SECRET_ACCESS_KEY=secret\nPRIVATE_DATA_KEY=hidden\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.log"),
+          `${new Date().toISOString()} WARN cleanup-agent deleting 28 files from WhatsApp +4917612345678 path=workspace/archive\n`,
+          "utf8"
+        );
+      }, 1250);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "3",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["pr-review"]],
+          chooseOne: ["always-confirm", "workspace-only", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("删除本地文件");
+      expect(output).toContain("这一步是从 WhatsApp（+4917612345678） 触发出来的");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("删除本地文件");
+      expect(logsOutput).toContain("cleanup-agent 刚记录到");
+      expect(logsOutput).toContain("触发来源：WhatsApp（+4917612345678）");
+      expect(logsOutput).toContain("来源日志");
+      expect(logsOutput).toContain("runtime-events.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can infer risky runtime actions from message-only JSON events", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "STRIPE_SECRET_KEY=secret\nBANK_TOKEN=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.jsonl"),
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            runtime: "billing-agent",
+            channel: "slack",
+            sender: "@fin-ops",
+            message: "Attempting payment checkout for invoice 1042 path=billing/invoices/1042.json"
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["shopping-automation"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("付款或下单");
+      expect(output).toContain("这一步是从 Slack（@fin-ops） 触发出来的");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("付款或下单");
+      expect(logsOutput).toContain("Attempting payment checkout for invoice 1042");
+      expect(logsOutput).toContain("触发来源：Slack（@fin-ops）");
+      expect(logsOutput).toContain("来源日志");
+      expect(logsOutput).toContain("runtime-events.jsonl");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

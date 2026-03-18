@@ -224,6 +224,33 @@ function inferActionFromText(message: string): string | undefined {
     return "send-email";
   }
 
+  if (/(delete|deleting|remove|removing|rm|unlink|wipe|wiping|purge)/.test(normalized)) {
+    return "delete-files";
+  }
+
+  if (
+    /(write|writing|modify|modifying|edit|editing|update|updating|rename|renaming|move|moving|copy|copying)/.test(normalized) &&
+    /(file|files|fs|disk|path|workspace)/.test(normalized)
+  ) {
+    return "modify-files";
+  }
+
+  if (/(payment|paying|purchase|purchasing|checkout|checking out|order|ordering|stripe|paypal|wallet)/.test(normalized)) {
+    return "purchase-or-payment";
+  }
+
+  if (/(bank|banking|finance|financial|broker|trade|trading|portfolio|account-balance)/.test(normalized)) {
+    return "bank-access";
+  }
+
+  if (/(secret|secrets|token|tokens|credential|credentials|password|passwords|key|keys)/.test(normalized)) {
+    return "sensitive-secret-access";
+  }
+
+  if (/(sensitive|private|customer-data|customer data|pii|record|records|dataset|datasets)/.test(normalized)) {
+    return "sensitive-data-access";
+  }
+
   if (/(publish|post|tweet|social|tiktok|youtube|linkedin|reddit)/.test(normalized)) {
     return "public-post";
   }
@@ -232,40 +259,17 @@ function inferActionFromText(message: string): string | undefined {
     return "send-message";
   }
 
-  if (/(delete|remove|rm|unlink|wipe|purge)/.test(normalized)) {
-    return "delete-files";
-  }
-
-  if (
-    /(write|modify|edit|update|rename|move|copy)/.test(normalized) &&
-    /(file|files|fs|disk|path|workspace)/.test(normalized)
-  ) {
-    return "modify-files";
-  }
-
-  if (/(payment|purchase|checkout|order|stripe|paypal|wallet)/.test(normalized)) {
-    return "purchase-or-payment";
-  }
-
-  if (/(bank|finance|broker|trade|portfolio|account-balance)/.test(normalized)) {
-    return "bank-access";
-  }
-
-  if (/(secret|token|credential|password|key)/.test(normalized)) {
-    return "sensitive-secret-access";
-  }
-
-  if (/(sensitive|private|customer-data|pii|record|records)/.test(normalized)) {
-    return "sensitive-data-access";
-  }
-
   return undefined;
 }
 
 function inferStatusFromMessage(message: string): AuditEvent["status"] {
   const normalized = message.trim().toLowerCase();
 
-  if (/(attempt|attempting|trying|starting|about to|preparing to)/.test(normalized)) {
+  if (
+    /(attempt|attempting|trying|starting|about to|preparing to|sending|posting|publishing|deleting|removing|wiping|reading|accessing|writing|modifying|updating|charging|paying|purchasing|checking out)/.test(
+      normalized
+    )
+  ) {
     return "attempted";
   }
 
@@ -368,12 +372,15 @@ function inferTargetFromText(message: string, targetRoot: string): string {
   return path.resolve(targetRoot, targetMatch[2]);
 }
 
-function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return null;
-  }
+type ParsedPlainTextLogLine = {
+  timestampValue?: string;
+  levelValue?: string;
+  scopeValue?: string;
+  message: string;
+};
 
+function parsePlainTextLogLine(line: string): ParsedPlainTextLogLine {
+  const trimmed = line.trim();
   const textMatch =
     trimmed.match(
       /^(?<timestamp>\d{4}-\d{2}-\d{2}[T ][^ ]+)\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
@@ -382,10 +389,25 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
       /^\[(?<timestamp>[^\]]+)\]\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
     );
 
-  const timestampValue = textMatch?.groups?.timestamp?.trim();
-  const levelValue = textMatch?.groups?.level?.trim();
-  const scopeValue = textMatch?.groups?.scope?.trim();
-  const message = textMatch?.groups?.message?.trim() ?? trimmed;
+  if (!textMatch) {
+    return { message: trimmed };
+  }
+
+  return {
+    timestampValue: textMatch.groups?.timestamp?.trim(),
+    levelValue: textMatch.groups?.level?.trim(),
+    scopeValue: textMatch.groups?.scope?.trim(),
+    message: textMatch.groups?.message?.trim() ?? trimmed
+  };
+}
+
+function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const { timestampValue, levelValue, scopeValue, message } = parsePlainTextLogLine(trimmed);
   const normalizedMessage = message.toLowerCase();
 
   if (
@@ -440,6 +462,52 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
     evidence: {
       source: "mcp-tool-call-log",
       toolName,
+      channel,
+      sender,
+      rawLine: trimmed
+    }
+  };
+}
+
+function parseGenericPlainTextRuntimeActionLine(line: string, targetRoot: string): AuditEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const { timestampValue, levelValue, scopeValue, message } = parsePlainTextLogLine(trimmed);
+  const action = inferActionFromText(message);
+  if (!action) {
+    return null;
+  }
+
+  const scopeNormalized = scopeValue?.trim().toLowerCase();
+  const runtimeName =
+    scopeValue &&
+    !["tool", "tools", "mcp", "gateway", "runtime", "agent", "watcher"].includes(
+      scopeNormalized ?? ""
+    )
+      ? scopeValue
+      : "运行时";
+  const severity = normalizeSeverity(levelValue) ?? severityFromAction(action);
+  const channel = inferChannelFromText(message);
+  const sender = inferSenderFromText(message);
+
+  return {
+    timestamp: timestampValue ?? new Date().toISOString(),
+    severity,
+    category: "action-event",
+    source: "runtime-feed",
+    target: inferTargetFromText(message, targetRoot),
+    runtime: runtimeName,
+    surfaceKind: "runtime",
+    action,
+    status: inferStatusFromMessage(message),
+    message: `${runtimeName} 刚记录到：${message}`,
+    recommendation: inferRecommendation(action, severity),
+    evidence: {
+      source: "runtime-plain-text-log",
+      scope: scopeValue,
       channel,
       sender,
       rawLine: trimmed
@@ -755,18 +823,7 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
     return null;
   }
 
-  const textMatch =
-    trimmed.match(
-      /^(?<timestamp>\d{4}-\d{2}-\d{2}[T ][^ ]+)\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
-    ) ??
-    trimmed.match(
-      /^\[(?<timestamp>[^\]]+)\]\s+(?<level>[A-Z]+)\s+(?<scope>[A-Za-z0-9_.-]+)[:\s-]+(?<message>.+)$/i
-    );
-
-  const timestampValue = textMatch?.groups?.timestamp?.trim();
-  const levelValue = textMatch?.groups?.level?.trim();
-  const scopeValue = textMatch?.groups?.scope?.trim();
-  const message = textMatch?.groups?.message?.trim() ?? trimmed;
+  const { timestampValue, levelValue, scopeValue, message } = parsePlainTextLogLine(trimmed);
   const action = inferActionFromText(message);
 
   if (!action) {
@@ -817,7 +874,10 @@ function parseRuntimeFeedEvent(
   try {
     parsed = JSON.parse(line) as Record<string, unknown> | unknown[];
   } catch {
-    return parsePlainTextMcpToolCallLine(line, targetRoot);
+    return (
+      parsePlainTextMcpToolCallLine(line, targetRoot) ??
+      parseGenericPlainTextRuntimeActionLine(line, targetRoot)
+    );
   }
 
   if (Array.isArray(parsed)) {
@@ -834,7 +894,19 @@ function parseRuntimeFeedEvent(
     return structuredEvent;
   }
 
-  const action = pickString(parsed, [
+  const message = pickString(parsed, [
+    "message",
+    "summary",
+    "text",
+    ["event", "message"],
+    ["data", "message"],
+    ["data", "summary"],
+    ["payload", "message"],
+    ["payload", "summary"]
+  ]);
+
+  const action =
+    pickString(parsed, [
     "action",
     "event",
     "name",
@@ -848,7 +920,7 @@ function parseRuntimeFeedEvent(
     ["payload", "action"],
     ["payload", "name"],
     ["payload", "type"]
-  ]);
+    ]) ?? inferActionFromText(message ?? "");
 
   if (!action) {
     return null;
@@ -954,16 +1026,7 @@ function parseRuntimeFeedEvent(
     ["payload", "path"]
   ]);
   const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
-  const message = pickString(parsed, [
-    "message",
-    "summary",
-    "text",
-    ["event", "message"],
-    ["data", "message"],
-    ["data", "summary"],
-    ["payload", "message"],
-    ["payload", "summary"]
-  ]) ?? inferMessage(action, status, runtimeName);
+  const displayMessage = message ?? inferMessage(action, status, runtimeName);
   const recommendation =
     pickString(parsed, [
       "recommendation",
@@ -992,7 +1055,7 @@ function parseRuntimeFeedEvent(
         : "runtime",
     action,
     status,
-    message,
+    message: displayMessage,
     recommendation,
     evidence: {
       source: pickString(parsed, [
