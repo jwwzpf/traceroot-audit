@@ -6,6 +6,7 @@ import { Command, Option } from "commander";
 import { appendAuditEvents } from "../../audit/store";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import { actionLabel } from "../../audit/presentation";
+import { buildActionEvidenceFromText } from "../../audit/feeds";
 import { displayUserPath } from "../../utils/paths";
 
 import type { CliRuntime } from "../index";
@@ -101,6 +102,16 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
         "📚 这次尝试会立刻被记进本地审计时间线。"
       ];
 
+      const attemptEvidence = buildActionEvidenceFromText(
+        [options.message, command.join(" ")].filter(Boolean).join(" "),
+        target,
+        {
+          command: command,
+          cwd: process.cwd()
+        },
+        options.action
+      );
+
       if (options.severity === "high-risk" || options.severity === "critical") {
         introLines.push("⚡ 这次动作会被单独记进高风险审计时间线。");
       }
@@ -120,10 +131,7 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
           status: "attempted",
           message: startMessage,
           recommendation: options.recommendation,
-          evidence: {
-            command: command,
-            cwd: process.cwd()
-          }
+          evidence: attemptEvidence
         }
       ]);
 
@@ -149,7 +157,7 @@ export function registerTapCommand(program: Command, runtime: CliRuntime): void 
               ? undefined
               : options.recommendation ?? "Review the command output and decide whether this action should stay enabled.",
             evidence: {
-              command: command,
+              ...attemptEvidence,
               exitCode: result.code,
               signal: result.signal
             }

@@ -1721,6 +1721,8 @@ describe("CLI", () => {
           "openclaw",
           "--surface-kind",
           "runtime",
+          "--message",
+          "Attempting to send email to customer@example.com",
           "--recommendation",
           "先确认这封外部邮件是不是真的该发出去。",
           "--",
@@ -1998,6 +2000,8 @@ describe("CLI", () => {
           "openclaw",
           "--surface-kind",
           "runtime",
+          "--message",
+          "Attempting payment checkout for invoice 1042",
           "--recommendation",
           "先确认这笔订单是不是你这次真的想让它提交。",
           "--",
@@ -2027,10 +2031,12 @@ describe("CLI", () => {
       expect(output).toContain("最近一次报平安");
       expect(output).toContain("你刚回来时最值得先看的是");
       expect(output).toContain("你上次离开以后，又出现了");
+      expect(output).toContain("你离开这段时间，agent 真正碰到的是");
       expect(output).toContain("其中 1 条看起来已经不是你让 agent 做的事");
       expect(output).toContain("最近一次值得你看一眼的是");
       expect(output).toContain("对外发邮件");
       expect(output).toContain("付款或下单");
+      expect(output).toContain("invoice 1042（付款或下单）");
       expect(output).not.toContain("TraceRoot 已经先帮你准备好了这些内容");
       expect(output).not.toContain("权限收缩预览");
       expect(output).toContain("TraceRoot Audit Doctor Watch");

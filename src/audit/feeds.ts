@@ -528,7 +528,7 @@ function isFileLikeAction(action?: string): boolean {
   return /(delete|remove|modify|write|edit|copy|move|file)/i.test(action ?? "");
 }
 
-function buildActionEvidenceFromText(
+export function buildActionEvidenceFromText(
   message: string,
   targetRoot: string,
   baseEvidence: Record<string, unknown> = {},

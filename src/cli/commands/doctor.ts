@@ -38,6 +38,8 @@ import {
   type HardeningIntentId
 } from "../../hardening/profiles";
 import {
+  actionLabel,
+  actionSubjectLabel,
   actionLabelWithSubject,
   actionTriggerSourceLabel,
   runtimeActorLabel,
@@ -273,6 +275,71 @@ async function loadCatchUpLine(options: {
   }
 
   return `你上次离开以后，又出现了 ${freshEvents.length} 条值得留意的记录${workflowSuffix}；最新一条是：${latest.message}`;
+}
+
+async function loadCatchUpSubjectHighlights(options: {
+  target?: string;
+  hostScope?: boolean;
+}): Promise<string[]> {
+  const reviewState = await loadAuditReviewState({
+    scope: options.hostScope ? "host" : "target",
+    target: options.hostScope ? null : options.target
+  });
+
+  if (!reviewState) {
+    return [];
+  }
+
+  const result = await readAuditEvents({
+    target: options.hostScope ? undefined : options.target,
+    since: reviewState.lastReviewedAt
+  });
+  const freshEvents = result.events.filter((event) => event.severity !== "safe");
+  const subjects = new Map<
+    string,
+    { subjectLabel: string; count: number; severity: AuditEvent["severity"]; actions: Set<string> }
+  >();
+
+  const severityWeight = (severity: AuditEvent["severity"]): number => {
+    if (severity === "critical") return 4;
+    if (severity === "high-risk") return 3;
+    if (severity === "risky") return 2;
+    return 1;
+  };
+
+  for (const event of freshEvents) {
+    const subjectLabel = actionSubjectLabel(event);
+    if (!subjectLabel) {
+      continue;
+    }
+
+    const entry = subjects.get(subjectLabel) ?? {
+      subjectLabel,
+      count: 0,
+      severity: event.severity,
+      actions: new Set<string>()
+    };
+
+    entry.count += 1;
+    entry.actions.add(actionLabel(event.action));
+
+    if (severityWeight(event.severity) > severityWeight(entry.severity)) {
+      entry.severity = event.severity;
+    }
+
+    subjects.set(subjectLabel, entry);
+  }
+
+  return [...subjects.values()]
+    .sort((left, right) => {
+      return (
+        severityWeight(right.severity) - severityWeight(left.severity) ||
+        right.count - left.count ||
+        right.actions.size - left.actions.size
+      );
+    })
+    .slice(0, 3)
+    .map((entry) => `${entry.subjectLabel}（${[...entry.actions].slice(0, 2).join("、")}）`);
 }
 
 function relativeTimeFromNow(value: string): string | null {
@@ -537,6 +604,7 @@ function renderDoctorResumeSummary(options: {
   reminder: string;
   boundaryStatus: ReturnType<typeof evaluateBoundaryStatus>;
   catchUpLine?: string | null;
+  catchUpSubjects?: string[];
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
   attentionHighlights?: string[];
@@ -597,6 +665,13 @@ function renderDoctorResumeSummary(options: {
 
   if (options.catchUpLine) {
     lines.push("", `🆕 ${options.catchUpLine}`);
+  }
+
+  if (options.catchUpSubjects && options.catchUpSubjects.length > 0) {
+    lines.push("", "🧩 你离开这段时间，agent 真正碰到的是：");
+    for (const item of options.catchUpSubjects) {
+      lines.push(`- ${item}`);
+    }
   }
 
   if (options.watchFreshnessLine) {
@@ -702,6 +777,7 @@ function renderHostDoctorWatchIntro(options: {
   reminder: string;
   contextLine?: string;
   catchUpLine?: string | null;
+  catchUpSubjects?: string[];
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
   attentionHighlights?: string[];
@@ -737,6 +813,14 @@ function renderHostDoctorWatchIntro(options: {
     lines.splice(lines.length - 1, 0, `🆕 ${options.catchUpLine}`, "");
   }
 
+  if (options.catchUpSubjects && options.catchUpSubjects.length > 0) {
+    lines.splice(lines.length - 1, 0, "🧩 你离开这段时间，agent 真正碰到的是：");
+    for (const item of options.catchUpSubjects) {
+      lines.splice(lines.length - 1, 0, `- ${item}`);
+    }
+    lines.splice(lines.length - 1, 0, "");
+  }
+
   if (options.watchFreshnessLine) {
     lines.splice(lines.length - 1, 0, `💓 ${options.watchFreshnessLine}`, "");
   }
@@ -762,6 +846,7 @@ function renderHostDoctorWatchResumeIntro(options: {
   reminder: string;
   contextLine?: string;
   catchUpLine?: string | null;
+  catchUpSubjects?: string[];
   watchFreshnessLine?: string | null;
   latestAttentionLine?: string | null;
   attentionHighlights?: string[];
@@ -795,6 +880,14 @@ function renderHostDoctorWatchResumeIntro(options: {
 
   if (options.catchUpLine) {
     lines.splice(lines.length - 1, 0, `🆕 ${options.catchUpLine}`, "");
+  }
+
+  if (options.catchUpSubjects && options.catchUpSubjects.length > 0) {
+    lines.splice(lines.length - 1, 0, "🧩 你离开这段时间，agent 真正碰到的是：");
+    for (const item of options.catchUpSubjects) {
+      lines.splice(lines.length - 1, 0, `- ${item}`);
+    }
+    lines.splice(lines.length - 1, 0, "");
   }
 
   if (options.watchFreshnessLine) {
@@ -987,6 +1080,7 @@ async function runMachineLevelDoctorWatch(options: {
   const watchFreshnessLine = await loadWatchFreshnessLine({ hostScope: true });
   const latestAttentionLine = await loadLatestAttentionLine({ hostScope: true });
   const catchUpLine = await loadCatchUpLine({ hostScope: true });
+  const catchUpSubjects = await loadCatchUpSubjectHighlights({ hostScope: true });
   const attentionHighlights = await loadAttentionHighlights({ hostScope: true });
 
   options.runtime.io.stdout(
@@ -997,6 +1091,7 @@ async function runMachineLevelDoctorWatch(options: {
           suggestedNames,
           reminder,
           catchUpLine,
+          catchUpSubjects,
           watchFreshnessLine,
           latestAttentionLine,
           attentionHighlights,
@@ -1010,6 +1105,7 @@ async function runMachineLevelDoctorWatch(options: {
           suggestedNames,
           reminder,
           catchUpLine,
+          catchUpSubjects,
           watchFreshnessLine,
           latestAttentionLine,
           attentionHighlights,
@@ -1335,6 +1431,9 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
               catchUpLine: await loadCatchUpLine({
                 target: effectiveTarget,
                 approvedIntentIds: selections.intentIds
+              }),
+              catchUpSubjects: await loadCatchUpSubjectHighlights({
+                target: effectiveTarget
               }),
               watchFreshnessLine: await loadWatchFreshnessLine({
                 target: effectiveTarget
