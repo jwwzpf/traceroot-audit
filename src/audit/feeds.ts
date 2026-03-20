@@ -996,23 +996,65 @@ function looksLikeStructuredToolItem(candidate: unknown): candidate is Record<st
   return typeof type === "string" && !!toolName && looksLikeStructuredToolEvent(type);
 }
 
+function parseStructuredArguments(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function normalizeCandidateToolItem(candidate: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(candidate)) {
+    return undefined;
+  }
+
+  if (looksLikeStructuredToolItem(candidate)) {
+    return candidate;
+  }
+
+  const functionName = pickString(candidate, [["function", "name"]]);
+  if (functionName) {
+    return {
+      ...candidate,
+      type: "function_call",
+      name: functionName,
+      arguments: parseStructuredArguments(getNestedValue(candidate, ["function", "arguments"]))
+    };
+  }
+
+  return undefined;
+}
+
 function firstStructuredToolItemFromArray(candidate: unknown): Record<string, unknown> | undefined {
   if (!Array.isArray(candidate)) {
     return undefined;
   }
 
   for (const item of candidate) {
-    if (looksLikeStructuredToolItem(item)) {
-      return item;
+    const normalizedItem = normalizeCandidateToolItem(item);
+    if (normalizedItem) {
+      return normalizedItem;
     }
 
     if (isRecord(item)) {
-      if (looksLikeStructuredToolItem(item.item)) {
-        return item.item;
+      const nestedItem = normalizeCandidateToolItem(item.item);
+      if (nestedItem) {
+        return nestedItem;
       }
 
-      if (looksLikeStructuredToolItem(item.content_block)) {
-        return item.content_block;
+      const nestedContentBlock = normalizeCandidateToolItem(item.content_block);
+      if (nestedContentBlock) {
+        return nestedContentBlock;
       }
     }
   }
@@ -1029,18 +1071,38 @@ function normalizeStructuredToolPayload(parsed: Record<string, unknown>): Record
     isRecord(parsed.response) ? parsed.response.output : undefined,
     isRecord(parsed.response) ? parsed.response.content : undefined,
     isRecord(parsed.response) ? parsed.response.items : undefined,
+    isRecord(parsed.response) && isRecord(parsed.response.message)
+      ? parsed.response.message.tool_calls
+      : undefined,
     parsed.output,
     parsed.content,
     parsed.items,
+    isRecord(parsed.message) ? parsed.message.tool_calls : undefined,
+    parsed.tool_calls,
+    Array.isArray(parsed.choices) && isRecord(parsed.choices[0]) && isRecord(parsed.choices[0].message)
+      ? parsed.choices[0].message.tool_calls
+      : undefined,
     isRecord(parsed.event) ? parsed.event.output : undefined,
     isRecord(parsed.event) ? parsed.event.content : undefined,
     isRecord(parsed.event) ? parsed.event.items : undefined,
+    isRecord(parsed.event) && isRecord(parsed.event.message)
+      ? parsed.event.message.tool_calls
+      : undefined,
+    isRecord(parsed.event) ? parsed.event.tool_calls : undefined,
     isRecord(parsed.data) ? parsed.data.output : undefined,
     isRecord(parsed.data) ? parsed.data.content : undefined,
     isRecord(parsed.data) ? parsed.data.items : undefined,
+    isRecord(parsed.data) && isRecord(parsed.data.message)
+      ? parsed.data.message.tool_calls
+      : undefined,
+    isRecord(parsed.data) ? parsed.data.tool_calls : undefined,
     isRecord(parsed.payload) ? parsed.payload.output : undefined,
     isRecord(parsed.payload) ? parsed.payload.content : undefined,
-    isRecord(parsed.payload) ? parsed.payload.items : undefined
+    isRecord(parsed.payload) ? parsed.payload.items : undefined,
+    isRecord(parsed.payload) && isRecord(parsed.payload.message)
+      ? parsed.payload.message.tool_calls
+      : undefined,
+    isRecord(parsed.payload) ? parsed.payload.tool_calls : undefined
   ];
 
   for (const candidate of candidates) {

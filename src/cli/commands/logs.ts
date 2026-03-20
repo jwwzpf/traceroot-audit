@@ -320,6 +320,25 @@ function eventTimeMs(event: AuditEvent): number {
   return Number.isNaN(value) ? 0 : value;
 }
 
+function elapsedLabel(startTimestamp: string, endTimestamp: string): string | undefined {
+  const start = new Date(startTimestamp).getTime();
+  const end = new Date(endTimestamp).getTime();
+
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+    return undefined;
+  }
+
+  const diffMs = end - start;
+  const seconds = Math.max(1, Math.round(diffMs / 1000));
+
+  if (seconds < 60) {
+    return `大约 ${seconds} 秒`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+  return `大约 ${minutes} 分钟`;
+}
+
 function canFoldIntoOneIncident(first: AuditEvent, next: AuditEvent): boolean {
   if (first.category !== "action-event" || next.category !== "action-event") {
     return false;
@@ -435,12 +454,19 @@ function timelineDetail(entry: TimelineEntry): string | undefined {
     return eventDetail(entry.primary);
   }
 
+  const attempt = entry.related[0];
+  const duration = attempt ? elapsedLabel(attempt.timestamp, entry.primary.timestamp) : undefined;
+
   if (entry.primary.status === "succeeded") {
-    return "TraceRoot 看到这个动作先被触发，随后已经执行完成。";
+    return duration
+      ? `TraceRoot 看到这个动作先被触发，随后在${duration}后执行完成。`
+      : "TraceRoot 看到这个动作先被触发，随后已经执行完成。";
   }
 
   if (entry.primary.status === "failed") {
-    return "TraceRoot 看到这个动作先被触发，不过最后没有完成。";
+    return duration
+      ? `TraceRoot 看到这个动作先被触发，不过在${duration}后还是没有完成。`
+      : "TraceRoot 看到这个动作先被触发，不过最后没有完成。";
   }
 
   return eventDetail(entry.primary);

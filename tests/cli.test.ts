@@ -2854,7 +2854,7 @@ describe("CLI", () => {
       expect(logsCapture.read().stdout).toContain("今天最值得留意的动作");
       expect(logsCapture.read().stdout).toContain("对外发邮件：出现了 1 次");
       expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
-      expect(logsCapture.read().stdout).toContain("TraceRoot 看到这个动作先被触发，随后已经执行完成。");
+      expect(logsCapture.read().stdout).toContain("TraceRoot 看到这个动作先被触发，随后在大约");
       expect(logsCapture.read().stdout).toContain("建议：Require confirmation before outbound email actions.");
       expect(logsCapture.read().stdout).toContain("对你来说更像 1 件完整的事");
     } finally {
@@ -4621,6 +4621,107 @@ describe("CLI", () => {
       }
       await rm(tempDir, { recursive: true, force: true });
       await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest message.tool_calls arrays without extra wiring", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-message-tool-calls-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-message-tool-calls-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "mcp-events.jsonl"),
+          `${JSON.stringify({
+            type: "response.completed",
+            runtime: "gmail-mcp",
+            channel: "telegram",
+            sender: "@ops-room",
+            message: {
+              role: "assistant",
+              tool_calls: [
+                {
+                  id: "call_123",
+                  type: "function",
+                  function: {
+                    name: "send_email",
+                    arguments: JSON.stringify({
+                      to: "customer@example.com",
+                      path: "mailer.ts"
+                    })
+                  }
+                }
+              ]
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件（发给 customer@example.com）");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("Agent 已完成：对外发邮件");
+      expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
     }
   });
 
