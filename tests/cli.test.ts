@@ -4234,6 +4234,195 @@ describe("CLI", () => {
     }
   });
 
+  it("can ingest nested tool_use events with tool.name and input fields", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-tool-use-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-tool-use-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "mcp-events.jsonl"),
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            runtime: "gmail-mcp",
+            event: {
+              type: "tool_use",
+              channel: "telegram",
+              sender: "@ops-room",
+              tool: {
+                name: "send_email"
+              },
+              input: {
+                to: "customer@example.com",
+                path: "mailer.ts"
+              }
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件（发给 customer@example.com）");
+      expect(output).toContain("这一步是从 Telegram（@ops-room） 触发出来的");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("gmail-mcp 正在调用一个 MCP 工具");
+      expect(logsOutput).toContain("TraceRoot 判断这一步相当于：对外发邮件");
+      expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest tool_result events that expose toolName and arguments fields", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-tool-result-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-tool-result-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "mcp-events.jsonl"),
+          `${JSON.stringify({
+            type: "tool_result",
+            runtime: "gmail-mcp",
+            channel: "telegram",
+            sender: "@ops-room",
+            toolName: "send_email",
+            arguments: {
+              to: "customer@example.com",
+              path: "mailer.ts"
+            },
+            result: {
+              ok: true
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("刚刚已经完成了一个高风险动作：对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("Agent 已完成：对外发邮件");
+      expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can ingest OpenClaw gateway logs from the runtime config without extra wiring", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-native-home-"));
     const previousHome = process.env.HOME;
