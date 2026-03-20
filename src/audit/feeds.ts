@@ -3,6 +3,7 @@ import path from "node:path";
 import { open, readFile, realpath, stat } from "node:fs/promises";
 
 import fg from "fast-glob";
+import JSON5 from "json5";
 import YAML from "yaml";
 
 import type { AuditEvent, AuditSeverity } from "./types";
@@ -1622,7 +1623,7 @@ async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<Compa
       const configRaw = await readFile(path.join(targetRoot, configName), "utf8");
       const config =
         configName === "openclaw.json"
-          ? (JSON.parse(configRaw) as Record<string, unknown>)
+          ? (JSON5.parse(configRaw) as Record<string, unknown>)
           : (YAML.parse(configRaw) as Record<string, unknown>);
       hasOpenClawConfig = true;
 
@@ -1765,7 +1766,7 @@ async function discoverMcpCompanionFeeds(targetRoot: string): Promise<CompanionF
       const configRaw = await readFile(path.join(targetRoot, configName), "utf8");
       const config =
         configName.endsWith(".json")
-          ? (JSON.parse(configRaw) as Record<string, unknown>)
+          ? (JSON5.parse(configRaw) as Record<string, unknown>)
           : (YAML.parse(configRaw) as Record<string, unknown>);
 
       hasMcpConfig = true;

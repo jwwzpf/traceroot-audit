@@ -4402,6 +4402,96 @@ describe("CLI", () => {
     }
   });
 
+  it("can ingest OpenClaw gateway logs when openclaw.json uses JSON5 syntax", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-json5-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(openClawDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+
+      const gatewayLog = path.join(tempHome, "openclaw-json5-gateway.log");
+      await writeFile(
+        path.join(openClawDir, "openclaw.json"),
+        `{
+  // OpenClaw runtime logging
+  logging: {
+    file: "${gatewayLog}",
+  },
+}
+`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com from Telegram @ops-room path=mailer.ts\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("openclaw-json5-gateway.log");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("openclaw-json5-gateway.log");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can ingest OpenClaw gateway logs when the runtime uses openclaw.yaml", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-yaml-home-"));
     const previousHome = process.env.HOME;
