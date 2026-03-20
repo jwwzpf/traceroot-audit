@@ -1006,6 +1006,70 @@ function eventKey(event: AuditEvent): string {
   ].join("::");
 }
 
+function eventDisplayScore(event: AuditEvent): number {
+  let score = 0;
+
+  if (event.recommendation) score += 4;
+  if (actionTriggerSourceLabel(event)) score += 3;
+  if (actionObjectSentence(event)) score += 3;
+  if (typeof event.evidence?.feedPath === "string" && event.evidence.feedPath.trim().length > 0) {
+    score += 2;
+  }
+  if (event.message.trim().length > 0) score += Math.min(event.message.trim().length, 120) / 120;
+
+  return score;
+}
+
+function eventDisplayTimeBucket(event: AuditEvent): string {
+  const bucketMs = event.category === "action-event" ? 5_000 : 1_000;
+  const value = new Date(event.timestamp).getTime();
+  if (Number.isNaN(value)) {
+    return event.timestamp;
+  }
+
+  const bucket = Math.floor(value / bucketMs) * bucketMs;
+  return new Date(bucket).toISOString();
+}
+
+function eventDisplayKey(event: AuditEvent): string {
+  if (event.category === "action-event") {
+    return [
+      eventDisplayTimeBucket(event),
+      event.category,
+      event.status ?? "",
+      event.action ?? "",
+      event.runtime ?? "",
+      event.target ?? "",
+      actionTriggerSourceLabel(event) ?? "",
+      actionObjectSentence(event) ?? "",
+      event.severity
+    ].join("::");
+  }
+
+  return [
+    eventDisplayTimeBucket(event),
+    event.category,
+    event.target ?? "",
+    event.message,
+    event.severity
+  ].join("::");
+}
+
+function dedupeEventsForDisplay(events: AuditEvent[]): AuditEvent[] {
+  const deduped = new Map<string, AuditEvent>();
+
+  for (const event of events) {
+    const key = eventDisplayKey(event);
+    const existing = deduped.get(key);
+
+    if (!existing || eventDisplayScore(event) > eventDisplayScore(existing)) {
+      deduped.set(key, event);
+    }
+  }
+
+  return [...deduped.values()].sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+}
+
 function renderTimelineEntry(
   entry: TimelineEntry,
   approvedIntentIds: HardeningIntentId[] = []
@@ -1251,15 +1315,16 @@ async function printLogs(
     today: options.today
   } as const;
   const fullResult = await readAuditEvents(query);
+  const dedupedEvents = dedupeEventsForDisplay(fullResult.events);
   const result = {
     ...fullResult,
     events:
       typeof options.limit === "number" && options.limit > 0
-        ? fullResult.events.slice(0, options.limit)
-        : fullResult.events
+        ? dedupedEvents.slice(0, options.limit)
+        : dedupedEvents
   };
   const eventsAscending = [...result.events].reverse();
-  const totalMatchingEvents = fullResult.events.length;
+  const totalMatchingEvents = dedupedEvents.length;
   const timelineEntries = buildTimelineEntries(eventsAscending);
   const hardeningProfileResult =
     options.target && !options.hostScope
