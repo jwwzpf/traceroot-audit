@@ -649,6 +649,15 @@ function buildActionEvidenceFromStructuredPayload(options: {
       ["input", "recipient"],
       ["input", "to"],
       ["input", "email"],
+      ["item", "input", "recipient"],
+      ["item", "input", "to"],
+      ["item", "input", "email"],
+      ["item", "arguments", "recipient"],
+      ["item", "arguments", "to"],
+      ["item", "arguments", "email"],
+      ["content_block", "input", "recipient"],
+      ["content_block", "input", "to"],
+      ["content_block", "input", "email"],
       ["args", "recipient"],
       ["args", "to"],
       ["args", "email"],
@@ -693,6 +702,12 @@ function buildActionEvidenceFromStructuredPayload(options: {
       "link",
       ["input", "url"],
       ["input", "link"],
+      ["item", "input", "url"],
+      ["item", "input", "link"],
+      ["item", "arguments", "url"],
+      ["item", "arguments", "link"],
+      ["content_block", "input", "url"],
+      ["content_block", "input", "link"],
       ["args", "url"],
       ["args", "link"],
       ["arguments", "url"],
@@ -716,6 +731,12 @@ function buildActionEvidenceFromStructuredPayload(options: {
       "tokenName",
       ["input", "secret"],
       ["input", "secretName"],
+      ["item", "input", "secret"],
+      ["item", "input", "secretName"],
+      ["item", "arguments", "secret"],
+      ["item", "arguments", "secretName"],
+      ["content_block", "input", "secret"],
+      ["content_block", "input", "secretName"],
       ["args", "secret"],
       ["args", "secretName"],
       ["arguments", "secret"],
@@ -750,6 +771,21 @@ function buildActionEvidenceFromStructuredPayload(options: {
       ["input", "invoice"],
       ["input", "orderId"],
       ["input", "merchant"],
+      ["item", "input", "account"],
+      ["item", "input", "accountId"],
+      ["item", "input", "invoice"],
+      ["item", "input", "orderId"],
+      ["item", "input", "merchant"],
+      ["item", "arguments", "account"],
+      ["item", "arguments", "accountId"],
+      ["item", "arguments", "invoice"],
+      ["item", "arguments", "orderId"],
+      ["item", "arguments", "merchant"],
+      ["content_block", "input", "account"],
+      ["content_block", "input", "accountId"],
+      ["content_block", "input", "invoice"],
+      ["content_block", "input", "orderId"],
+      ["content_block", "input", "merchant"],
       ["args", "account"],
       ["args", "accountId"],
       ["args", "invoice"],
@@ -801,6 +837,15 @@ function buildActionEvidenceFromStructuredPayload(options: {
       ["input", "dataset"],
       ["input", "table"],
       ["input", "document"],
+      ["item", "input", "dataset"],
+      ["item", "input", "table"],
+      ["item", "input", "document"],
+      ["item", "arguments", "dataset"],
+      ["item", "arguments", "table"],
+      ["item", "arguments", "document"],
+      ["content_block", "input", "dataset"],
+      ["content_block", "input", "table"],
+      ["content_block", "input", "document"],
       ["args", "dataset"],
       ["args", "table"],
       ["args", "document"],
@@ -875,7 +920,7 @@ function looksLikeStructuredToolEvent(method?: string): boolean {
     return false;
   }
 
-  return /(tools\/call|tools\/result|tools\/error|tool.call|tool.result|tool.error|tool-call|tool-result|tool-error|mcp.tool.call|mcp.tool.result|mcp.tool.error|tool_use|tool_result|tool_error|tool-use|tool-result|tool-error|tool use|tool result|tool error|mcp.tool_use|mcp.tool_result|mcp.tool_error)/i.test(
+  return /(tools\/call|tools\/result|tools\/error|tool.call|tool.result|tool.error|tool-call|tool-result|tool-error|toolCall|toolResult|toolError|mcp.tool.call|mcp.tool.result|mcp.tool.error|tool_use|tool_result|tool_error|tool-use|tool-result|tool-error|tool use|tool result|tool error|toolUse|toolResult|toolError|mcp.tool_use|mcp.tool_result|mcp.tool_error|function_call|function.call|function-call|function call)/i.test(
     method
   );
 }
@@ -1042,6 +1087,14 @@ function inferStructuredRuntimeFeedEvent(
   targetRoot: string
 ): AuditEvent | null {
   const method = pickString(parsed, [
+    ["item", "type"],
+    ["content_block", "type"],
+    ["event", "item", "type"],
+    ["event", "content_block", "type"],
+    ["data", "item", "type"],
+    ["data", "content_block", "type"],
+    ["payload", "item", "type"],
+    ["payload", "content_block", "type"],
     "method",
     "type",
     ["event", "method"],
@@ -1056,6 +1109,10 @@ function inferStructuredRuntimeFeedEvent(
     "tool_name",
     "name",
     ["tool", "name"],
+    ["item", "name"],
+    ["content_block", "name"],
+    ["item", "tool", "name"],
+    ["content_block", "tool", "name"],
     ["input", "toolName"],
     ["input", "tool_name"],
     ["args", "toolName"],
@@ -1069,6 +1126,8 @@ function inferStructuredRuntimeFeedEvent(
     ["event", "name"],
     ["event", "toolName"],
     ["event", "tool_name"],
+    ["event", "item", "name"],
+    ["event", "content_block", "name"],
     ["event", "tool", "name"],
     ["event", "input", "toolName"],
     ["event", "input", "tool_name"],
@@ -1081,6 +1140,8 @@ function inferStructuredRuntimeFeedEvent(
     ["data", "name"],
     ["data", "toolName"],
     ["data", "tool_name"],
+    ["data", "item", "name"],
+    ["data", "content_block", "name"],
     ["data", "tool", "name"],
     ["data", "input", "toolName"],
     ["data", "input", "tool_name"],
@@ -1093,6 +1154,8 @@ function inferStructuredRuntimeFeedEvent(
     ["payload", "name"],
     ["payload", "toolName"],
     ["payload", "tool_name"],
+    ["payload", "item", "name"],
+    ["payload", "content_block", "name"],
     ["payload", "tool", "name"],
     ["payload", "input", "toolName"],
     ["payload", "input", "tool_name"],
@@ -1130,12 +1193,24 @@ function inferStructuredRuntimeFeedEvent(
     ["data", "status"],
     ["payload", "status"]
   ]);
+  const outerEventType = pickString(parsed, [
+    "type",
+    ["event", "type"],
+    ["data", "type"],
+    ["payload", "type"]
+  ]);
   const status = explicitStatus
     ? normalizeStatus(explicitStatus)
     : hasError
       ? "failed"
       : hasResult
         ? "succeeded"
+        : typeof outerEventType === "string" &&
+            /(done|completed|finished|result|success|stop)$/i.test(outerEventType)
+          ? "succeeded"
+          : typeof outerEventType === "string" &&
+              /(error|failed|failure)$/i.test(outerEventType)
+            ? "failed"
         : "attempted";
 
   const runtimeName =
@@ -1203,6 +1278,18 @@ function inferStructuredRuntimeFeedEvent(
     "path",
     "file",
     "resource",
+    ["item", "input", "path"],
+    ["item", "input", "file"],
+    ["item", "input", "target"],
+    ["item", "input", "resource"],
+    ["item", "arguments", "path"],
+    ["item", "arguments", "file"],
+    ["item", "arguments", "target"],
+    ["item", "arguments", "resource"],
+    ["content_block", "input", "path"],
+    ["content_block", "input", "file"],
+    ["content_block", "input", "target"],
+    ["content_block", "input", "resource"],
     ["input", "path"],
     ["input", "file"],
     ["input", "target"],
