@@ -61,6 +61,7 @@ import { detectLikelyNotifyChannelsForTargets } from "../../hardening/notify-dis
 import { runTargetWatch } from "../watch";
 import { displayUserPath } from "../../utils/paths";
 import { resolveTarget } from "../../utils/files";
+import { resolveUserHomeDir } from "../../utils/home";
 import { discoverHost, knownLocalAgentHomes } from "../../core/discovery";
 import { runHostWatch } from "../watch";
 
@@ -1610,8 +1611,16 @@ export function registerDoctorCommand(program: Command, runtime: CliRuntime): vo
           !notificationSettings.openclawChannel &&
           !notificationSettings.openclawTarget
         ) {
+          const likelyNotifyTargets = [
+            effectiveTarget,
+            ...(await discoverLikelyNotifyHomes(resolveUserHomeDir()))
+          ];
+          const likelyChannels = await detectLikelyNotifyChannelsForTargets(
+            [...new Set(likelyNotifyTargets)]
+          );
           const selection = await promptNotificationSelection(runtime, {
-            target: effectiveTarget
+            target: effectiveTarget,
+            likelyChannels
           });
 
           if (selection.mode === "webhook") {

@@ -5643,6 +5643,78 @@ describe("CLI", () => {
     }
   }, 10000);
 
+  it("can reuse a chat reminder route from a known OpenClaw home even when doctor runs on a project folder", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-project-known-home-notify-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-project-known-home-notify-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const openClawDir = path.join(tempHome, ".config", "openclaw");
+      await mkdir(openClawDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("高风险提醒顺手发到 Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 10000);
+
   it("can detect a JSON5 reminder route without asking for extra reminder details", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-json5-notify-route-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-json5-notify-home-"));
