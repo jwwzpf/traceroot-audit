@@ -208,6 +208,17 @@ function truncateDisplayText(value: string, maxLength = 60): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
+function lastPathSegment(value: string): string {
+  const normalized = value.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : value;
+}
+
+function displayDataLabel(value: string): string {
+  const compact = /[\\/]/.test(value) ? lastPathSegment(value) : value;
+  return truncateDisplayText(compact);
+}
+
 function channelSubjectLabel(event: AuditEvent): string | null {
   const evidence = event.evidence ?? {};
   const normalizedAction = (event.action ?? "").trim().toLowerCase();
@@ -230,6 +241,32 @@ function channelSubjectLabel(event: AuditEvent): string | null {
 
   if (rawRecipient) {
     return `发给 ${truncateDisplayText(rawRecipient)}`;
+  }
+
+  return null;
+}
+
+function socialPostSubjectLabel(event: AuditEvent): string | null {
+  const evidence = event.evidence ?? {};
+  const normalizedAction = (event.action ?? "").trim().toLowerCase();
+
+  if (normalizedAction !== "public-post") {
+    return null;
+  }
+
+  const platform = normalizeDisplayText(evidence.platform);
+  const account = normalizeDisplayText(evidence.socialAccount);
+
+  if (platform && account) {
+    return `${platform}（${truncateDisplayText(account)}）`;
+  }
+
+  if (platform) {
+    return platform;
+  }
+
+  if (account) {
+    return truncateDisplayText(account);
   }
 
   return null;
@@ -367,6 +404,11 @@ function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
 }
 
 export function actionSubjectLabel(event: AuditEvent): string | null {
+  const socialPostSubject = socialPostSubjectLabel(event);
+  if (socialPostSubject) {
+    return socialPostSubject;
+  }
+
   const channelSubject = channelSubjectLabel(event);
   if (channelSubject) {
     return channelSubject;
@@ -391,13 +433,22 @@ export function actionSubjectLabel(event: AuditEvent): string | null {
 
   const resourceLabel = normalizeDisplayText(evidence.resourceLabel);
   const accountLabel = normalizeDisplayText(evidence.accountLabel);
+  const sensitiveDataLabel = normalizeDisplayText(evidence.sensitiveDataLabel);
   const secretName = normalizeDisplayText(evidence.secretName);
+
+  if (/(purchase-or-payment|bank-access|finance-access)/.test(normalizedAction) && accountLabel) {
+    return truncateDisplayText(accountLabel);
+  }
 
   if (
     /(bank-access|purchase-or-payment|finance-access)/.test(normalizedAction) &&
     resourceLabel
   ) {
     return truncateDisplayText(resourceLabel);
+  }
+
+  if (normalizedAction === "sensitive-data-access" && sensitiveDataLabel) {
+    return displayDataLabel(sensitiveDataLabel);
   }
 
   if (accountLabel) {
@@ -409,7 +460,7 @@ export function actionSubjectLabel(event: AuditEvent): string | null {
   }
 
   if (resourceLabel) {
-    return truncateDisplayText(resourceLabel);
+    return displayDataLabel(resourceLabel);
   }
 
   return inferSubjectFromRawEvidence(event);

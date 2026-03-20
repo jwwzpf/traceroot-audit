@@ -395,6 +395,39 @@ function inferUrlFromText(message: string): string | undefined {
   return match?.[0];
 }
 
+function inferSocialPlatformFromText(message: string): string | undefined {
+  const normalized = message.toLowerCase();
+
+  if (/\btiktok\b/.test(normalized)) return "TikTok";
+  if (/\b(?:twitter|tweeting|tweeted)\b/.test(normalized)) return "X";
+  if (/\bx\b/.test(normalized) && /\b(?:post|posting|publish|publishing)\b/.test(normalized)) {
+    return "X";
+  }
+  if (/\byoutube\b/.test(normalized)) return "YouTube";
+  if (/\blinkedin\b/.test(normalized)) return "LinkedIn";
+  if (/\breddit\b/.test(normalized)) return "Reddit";
+  if (/\binstagram\b/.test(normalized)) return "Instagram";
+  return undefined;
+}
+
+function inferSocialAccountFromText(message: string): string | undefined {
+  const labeledMatch = message.match(
+    /\b(?:account|channel|handle|profile)\s*[:=]?\s*("?)(@[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]{3,})\1/i
+  );
+  if (labeledMatch?.[2]) {
+    return labeledMatch[2];
+  }
+
+  const naturalMatch = message.match(
+    /\b(?:to|on|via)\s+(?:twitter|x|tiktok|youtube|linkedin|reddit|instagram)\s+(?:account|channel|handle|profile)\s+(@?[A-Za-z0-9_.-]{3,})/i
+  );
+  if (naturalMatch?.[1]) {
+    return naturalMatch[1];
+  }
+
+  return undefined;
+}
+
 function inferSecretNameFromText(message: string): string | undefined {
   const labeledMatch = message.match(
     /\b(?:secret|token|credential|password|key)\s*[:=]\s*("?)([A-Z][A-Z0-9_]{2,})\1/
@@ -412,13 +445,23 @@ function inferSecretNameFromText(message: string): string | undefined {
 }
 
 function inferAccountLabelFromText(message: string): string | undefined {
+  const ibanMatch = message.match(/\b([A-Z]{2}\d{2}[A-Z0-9]{8,30})\b/);
+  if (ibanMatch?.[1]) {
+    return `bank account ${ibanMatch[1]}`;
+  }
+
   const invoiceMatch = message.match(/\b(invoice|order)\s+([A-Za-z0-9_-]+)/i);
   if (invoiceMatch?.[0]) {
     return invoiceMatch[0];
   }
 
+  const merchantMatch = message.match(/\bmerchant\s*[:=]?\s*([A-Za-z0-9_.-]+)/i);
+  if (merchantMatch?.[1]) {
+    return `merchant ${merchantMatch[1]}`;
+  }
+
   const accountMatch = message.match(
-    /\b(account|portfolio|wallet|card)\s*[:=]?\s*([A-Za-z0-9_.-]+)/i
+    /\b(account|portfolio|wallet|card)\b\s*[:=]?\s*([A-Za-z0-9_.-]+)/i
   );
   if (accountMatch?.[0]) {
     return accountMatch[0];
@@ -427,6 +470,31 @@ function inferAccountLabelFromText(message: string): string | undefined {
   const bankingOverviewMatch = message.match(/\bbank(?:ing)?\s+account\s+[A-Za-z0-9_.-]+/i);
   if (bankingOverviewMatch?.[0]) {
     return bankingOverviewMatch[0];
+  }
+
+  return undefined;
+}
+
+function inferSensitiveDataLabelFromText(message: string): string | undefined {
+  const datasetMatch = message.match(
+    /\b(?:dataset|table|records?|customer-data|customer data|pii|document)\s*[:=]?\s*([A-Za-z0-9_.-]+\.(?:csv|json|jsonl|parquet|xlsx|tsv)|[A-Za-z0-9_.-]{3,})/i
+  );
+  if (datasetMatch?.[1]) {
+    return datasetMatch[1];
+  }
+
+  const naturalDatasetMatch = message.match(
+    /\b(?:reading|accessing|opening|loading)\s+(?:dataset|table|records?)\s+([A-Za-z0-9_.-]+\.(?:csv|json|jsonl|parquet|xlsx|tsv)|[A-Za-z0-9_.-]{3,})/i
+  );
+  if (naturalDatasetMatch?.[1]) {
+    return naturalDatasetMatch[1];
+  }
+
+  const fileLikeMatch = message.match(
+    /\b([A-Za-z0-9_.-]+\.(?:csv|json|jsonl|parquet|xlsx|tsv|db|sqlite))\b/i
+  );
+  if (fileLikeMatch?.[1]) {
+    return fileLikeMatch[1];
   }
 
   return undefined;
@@ -472,6 +540,9 @@ function buildActionEvidenceFromText(
   const url = inferUrlFromText(message);
   const secretName = inferSecretNameFromText(message);
   const accountLabel = inferAccountLabelFromText(message);
+  const sensitiveDataLabel = inferSensitiveDataLabelFromText(message);
+  const socialPlatform = inferSocialPlatformFromText(message);
+  const socialAccount = inferSocialAccountFromText(message);
 
   if (recipient) {
     evidence.recipient = recipient;
@@ -495,6 +566,18 @@ function buildActionEvidenceFromText(
 
   if (accountLabel) {
     evidence.accountLabel = accountLabel;
+  }
+
+  if (sensitiveDataLabel) {
+    evidence.sensitiveDataLabel = sensitiveDataLabel;
+  }
+
+  if (socialPlatform) {
+    evidence.platform = socialPlatform;
+  }
+
+  if (socialAccount) {
+    evidence.socialAccount = socialAccount;
   }
 
   return evidence;
@@ -570,6 +653,24 @@ function buildActionEvidenceFromStructuredPayload(options: {
     ]) ??
     inferAccountLabelFromText(serialized) ??
     undefined;
+  const sensitiveDataLabel =
+    pickString(options.parsed, [
+      "dataset",
+      "table",
+      "recordSet",
+      "document",
+      ["params", "dataset"],
+      ["params", "table"],
+      ["params", "document"],
+      ["data", "dataset"],
+      ["data", "table"],
+      ["data", "document"],
+      ["payload", "dataset"],
+      ["payload", "table"],
+      ["payload", "document"]
+    ]) ??
+    inferSensitiveDataLabelFromText(serialized) ??
+    undefined;
 
   if (recipient) {
     evidence.recipient = recipient;
@@ -594,6 +695,10 @@ function buildActionEvidenceFromStructuredPayload(options: {
 
   if (accountLabel) {
     evidence.accountLabel = accountLabel;
+  }
+
+  if (sensitiveDataLabel) {
+    evidence.sensitiveDataLabel = sensitiveDataLabel;
   }
 
   return evidence;

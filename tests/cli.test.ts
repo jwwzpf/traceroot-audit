@@ -3190,8 +3190,7 @@ describe("CLI", () => {
 
       expect(watchExitCode).toBe(0);
       expect(watchOutput).toContain("TraceRoot 实时提醒");
-      expect(watchOutput).toContain("访问银行或支付账户");
-      expect(watchOutput).toContain("这一步看起来涉及：accounts/checking");
+      expect(watchOutput).toContain("访问银行或支付账户（accounts/checking）");
 
       const logsCapture = createCapture();
       const logsExitCode = await runCli(
@@ -3202,7 +3201,9 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsCapture.read().stdout).toContain("OpenClaw 正在读取一个银行账户概览。");
       expect(logsCapture.read().stdout).toContain("访问银行或支付账户：出现了 1 次");
-      expect(logsCapture.read().stdout).toContain("这一步看起来涉及：accounts/checking");
+      expect(logsCapture.read().stdout).toContain(
+        "Agent 开始尝试：访问银行或支付账户（accounts/checking）"
+      );
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -3555,6 +3556,83 @@ describe("CLI", () => {
     }
   });
 
+  it("shows which public account a risky post is headed to in the audit timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-post-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-post-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "TIKTOK_TOKEN=secret\nSOCIAL_API_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.log"),
+          `${new Date().toISOString()} WARN social-agent posting to TikTok account brand_eu path=workspace/social-plan.md\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["social-posting"]],
+          chooseOne: ["always-confirm", "workspace-only", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("公开发帖（TikTok（brand_eu））");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("Agent 开始尝试：公开发帖（TikTok（brand_eu））");
+      expect(logsOutput).toContain("这一步看起来涉及：TikTok（brand_eu）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can infer risky runtime actions from message-only JSON events", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-home-"));
@@ -3614,7 +3692,7 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("TraceRoot 实时提醒");
-      expect(output).toContain("付款或下单");
+      expect(output).toContain("付款或下单（invoice 1042）");
       expect(output).toContain("这一步是从 Slack（@fin-ops） 触发出来的");
 
       const logsCapture = createCapture();
@@ -3627,8 +3705,9 @@ describe("CLI", () => {
       const logsOutput = logsCapture.read().stdout;
 
       expect(logsExitCode).toBe(0);
-      expect(logsOutput).toContain("付款或下单");
+      expect(logsOutput).toContain("付款或下单（invoice 1042）");
       expect(logsOutput).toContain("Attempting payment checkout for invoice 1042");
+      expect(logsOutput).toContain("这一步看起来涉及：invoice 1042");
       expect(logsOutput).toContain("触发来源：Slack（@fin-ops）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("runtime-events.jsonl");
@@ -3736,6 +3815,85 @@ describe("CLI", () => {
       } else {
         process.env.HOME = previousHome;
       }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("shows which sensitive dataset the agent touched in the audit timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-log-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "PRIVATE_DATA_KEY=hidden\nCUSTOMER_EXPORT_TOKEN=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.log"),
+          `${new Date().toISOString()} WARN data-agent reading dataset customers-2026.csv from Slack @risk-ops path=exports/customers-2026.csv\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["chat-support"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("读取敏感数据（customers-2026.csv）");
+      expect(output).toContain("这一步是从 Slack（@risk-ops） 触发出来的");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("Agent 开始尝试：读取敏感数据（customers-2026.csv）");
+      expect(logsOutput).toContain("这一步看起来涉及：customers-2026.csv");
+      expect(logsOutput).toContain("触发来源：Slack（@risk-ops）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
       await rm(tempHome, { recursive: true, force: true });
     }
   });
