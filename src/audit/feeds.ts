@@ -754,7 +754,7 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
   const normalizedMessage = message.toLowerCase();
 
   if (
-    !/(tools\/call|tools\/result|tool\s+call|tool\s+result|tool-call|tool-result|mcp\s+tool|calling\s+tool|invoking\s+tool|completed\s+tool|finished\s+tool|failed\s+tool)/i.test(
+    !/(tools\/call|tools\/result|tools\/error|tool\s+call|tool\s+result|tool\s+error|tool-call|tool-result|tool-error|mcp\s+tool|calling\s+tool|invoking\s+tool|completed\s+tool|finished\s+tool|failed\s+tool|error\s+tool)/i.test(
       normalizedMessage
     )
   ) {
@@ -899,7 +899,7 @@ function inferStructuredRuntimeFeedEvent(
 
   const looksLikeToolCall =
     typeof method === "string" &&
-    /(tools\/call|tools\/result|tool.call|tool.result|tool-call|tool-result|mcp.tool.call|mcp.tool.result)/i.test(method);
+    /(tools\/call|tools\/result|tools\/error|tool.call|tool.result|tool.error|tool-call|tool-result|tool-error|mcp.tool.call|mcp.tool.result|mcp.tool.error)/i.test(method);
 
   const action = inferActionFromToolName(toolName);
   if (!looksLikeToolCall || !action) {

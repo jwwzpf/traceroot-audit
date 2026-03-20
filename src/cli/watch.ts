@@ -476,7 +476,7 @@ function renderLiveActionAlert(
     event.status === "succeeded"
       ? `- ${actor} 刚刚已经完成了一个${riskLabel}动作：${action}`
       : event.status === "failed"
-        ? `- ${actor} 刚刚试过一个${riskLabel}动作：${action}`
+        ? `- ${actor} 刚刚尝试了一个${riskLabel}动作，但没有完成：${action}`
         : `- ${actor} 刚刚触发了一个${riskLabel}动作：${action}`;
   const lines = [
     `${icon} ${timestamp()} TraceRoot 实时提醒`,
