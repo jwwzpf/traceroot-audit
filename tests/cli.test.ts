@@ -2643,7 +2643,9 @@ describe("CLI", () => {
       expect(logsOutput).toContain("现在已经盯住：对外发邮件");
       expect(logsOutput).toContain("已经自动接好 1 个常见动作入口");
       expect(logsOutput).toContain("最近一次报平安");
+      expect(logsOutput).toContain("今天还没收住的事情");
       expect(logsOutput).toContain("当前运行态重新变宽了");
+      expect(logsOutput).toContain("当前运行态比你批准的边界更宽");
       expect(logsOutput).toContain("TraceRoot 已经开始陪跑这个 agent");
       expect(logsOutput).toContain("风险概览");
       expect(logsOutput).toContain("今天还没有触发值得单独提醒的 agent 动作");
@@ -3105,6 +3107,8 @@ describe("CLI", () => {
       );
 
       expect(logsExitCode).toBe(0);
+      expect(logsCapture.read().stdout).toContain("今天还没收住的事情");
+      expect(logsCapture.read().stdout).toContain("付款或下单 刚刚开始了");
       expect(logsCapture.read().stdout).toContain("当前最值得注意的事情：");
       expect(logsCapture.read().stdout).toContain("Agent 开始尝试：付款或下单");
       expect(logsCapture.read().stdout).not.toContain("付款或下单（");

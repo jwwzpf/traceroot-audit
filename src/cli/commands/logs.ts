@@ -22,7 +22,8 @@ import {
   actionObjectSentence,
   actionSubjectLabel,
   summarizeActionLabels,
-  actionTriggerSourceLabel
+  actionTriggerSourceLabel,
+  actionTriggerSentence
 } from "../../audit/presentation";
 import {
   loadAggregatedAuditCoverage,
@@ -62,6 +63,14 @@ type TimelineEntry = {
   related: AuditEvent[];
 };
 
+type OpenMatter = {
+  severity: AuditSeverity;
+  headline: string;
+  note: string;
+  priority: number;
+  timestamp: string;
+};
+
 function severityIcon(severity: AuditSeverity): string {
   switch (severity) {
     case "critical":
@@ -73,6 +82,20 @@ function severityIcon(severity: AuditSeverity): string {
     case "safe":
     default:
       return "🟢";
+  }
+}
+
+function severityRank(severity: AuditSeverity): number {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high-risk":
+      return 3;
+    case "risky":
+      return 2;
+    case "safe":
+    default:
+      return 1;
   }
 }
 
@@ -414,6 +437,155 @@ function timelineDetail(entry: TimelineEntry): string | undefined {
   }
 
   return eventDetail(entry.primary);
+}
+
+function openMatterPriority(entry: TimelineEntry): number {
+  const event = entry.primary;
+
+  if (event.category === "action-event") {
+    if (event.status === "failed") {
+      return 40;
+    }
+
+    if (event.status === "attempted") {
+      return 35;
+    }
+  }
+
+  if (event.category === "boundary-drift") {
+    return 30;
+  }
+
+  if (event.category === "finding-change") {
+    return 20;
+  }
+
+  if (event.category === "risk-change") {
+    return 15;
+  }
+
+  if (event.category === "surface-change") {
+    return 10;
+  }
+
+  return 0;
+}
+
+function summarizeOpenMatters(
+  timelineEntries: TimelineEntry[],
+  approvedIntentIds: HardeningIntentId[] = []
+): OpenMatter[] {
+  const matters: OpenMatter[] = [];
+
+  for (const entry of timelineEntries) {
+    const event = entry.primary;
+
+    if (event.severity === "safe") {
+      continue;
+    }
+
+    if (event.category === "action-event") {
+      const label = actionLabelWithSubject(event);
+
+      if (event.status === "failed") {
+        matters.push({
+          severity: event.severity,
+          headline: `${label} 这次没有完成`,
+          priority: openMatterPriority(entry),
+          timestamp: event.timestamp,
+          note: event.recommendation
+            ? `TraceRoot 建议你先看一眼：${event.recommendation}`
+            : "这类动作虽然没有完成，但通常值得确认会不会重试，或者有没有留下半完成状态。"
+        });
+        continue;
+      }
+
+      if (event.status === "attempted") {
+        const scopeWarning = workflowScopeUserWarningForAction(
+          event.action,
+          approvedIntentIds
+        );
+        matters.push({
+          severity: event.severity,
+          headline: `${label} 刚刚开始了，但还没看到它收住`,
+          priority: openMatterPriority(entry),
+          timestamp: event.timestamp,
+          note:
+            scopeWarning ??
+            actionTriggerSentence(event) ??
+            "TraceRoot 已经先把这一步记住了，你可以继续盯一下它后面有没有真的完成。"
+        });
+        continue;
+      }
+    }
+
+    if (event.category === "boundary-drift") {
+      matters.push({
+        severity: event.severity,
+        headline: "当前运行态比你批准的边界更宽",
+        priority: openMatterPriority(entry),
+        timestamp: event.timestamp,
+        note: event.recommendation
+          ? `TraceRoot 建议你先做：${event.recommendation}`
+          : "这通常意味着 agent 现在拿到的能力，比你原本批准的那套还要多。"
+      });
+      continue;
+    }
+
+    if (event.category === "finding-change") {
+      matters.push({
+        severity: event.severity,
+        headline: "今天又冒出了新的风险信号",
+        priority: openMatterPriority(entry),
+        timestamp: event.timestamp,
+        note:
+          event.recommendation ??
+          "TraceRoot 觉得这里值得回头看一眼，确认是不是新出现的高风险入口或动作。"
+      });
+      continue;
+    }
+
+    if (event.category === "risk-change") {
+      matters.push({
+        severity: event.severity,
+        headline: "整体风险刚刚又变高了",
+        priority: openMatterPriority(entry),
+        timestamp: event.timestamp,
+        note:
+          event.recommendation ??
+          "这说明当前运行态的风险面又往上走了一步，值得确认最近变了什么。"
+      });
+      continue;
+    }
+
+    if (event.category === "surface-change") {
+      matters.push({
+        severity: event.severity,
+        headline: "机器上的 agent 入口今天有变化",
+        priority: openMatterPriority(entry),
+        timestamp: event.timestamp,
+        note:
+          event.recommendation ??
+          "如果这不是你预期中的变化，最好回头看看是不是多了新的运行入口。"
+      });
+    }
+  }
+
+  return matters
+    .sort((left, right) => {
+      const severityDelta = severityRank(right.severity) - severityRank(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      const priorityDelta = right.priority - left.priority;
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return right.timestamp.localeCompare(left.timestamp);
+    })
+    .slice(0, 3);
 }
 
 function summarizeEvents(
@@ -1048,6 +1220,7 @@ async function printLogs(
 
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending, approvedIntentIds);
+    const openMatters = summarizeOpenMatters(timelineEntries, approvedIntentIds);
     const freshSinceLastReview = reviewState
       ? (
           await readAuditEvents({
@@ -1156,6 +1329,21 @@ async function printLogs(
       }
 
       lines.push("");
+    }
+
+    if (openMatters.length > 0) {
+      lines.push("🚨 今天还没收住的事情：");
+      for (const matter of openMatters) {
+        lines.push(`- ${severityIcon(matter.severity)} ${matter.headline}`);
+        lines.push(`  ${matter.note}`);
+      }
+      lines.push("");
+    } else if (eventsAscending.length > 0) {
+      lines.push(
+        "🫶 今天暂时没有“还没收住”的高风险事情。",
+        "   这代表目前看起来没有哪一步正卡在半路上，也没有哪块边界正在明显外扩。",
+        ""
+      );
     }
 
     if (summary.latestAttention) {
