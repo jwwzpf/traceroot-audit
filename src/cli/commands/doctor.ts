@@ -96,6 +96,22 @@ async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]>
   return [...new Set(matchedRoots)];
 }
 
+async function discoverLikelyNotifyHomes(homeDir: string): Promise<string[]> {
+  const matchedRoots: string[] = [];
+
+  for (const root of knownLocalAgentHomes(homeDir)) {
+    try {
+      if ((await stat(root)).isDirectory()) {
+        matchedRoots.push(root);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [...new Set(matchedRoots)];
+}
+
 async function loadLatestAttentionLine(options: {
   target?: string;
   hostScope?: boolean;
@@ -1007,11 +1023,13 @@ async function runMachineLevelDoctorWatch(options: {
       };
     } else if (savedMachinePreferences?.mode !== "local-only") {
       const likelyChannels = await detectLikelyNotifyChannelsForTargets(
-        (
+        [...new Set([
           hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath).length > 0
             ? hostDiscovery.candidates.slice(0, 6).map((candidate) => candidate.absolutePath)
             : knownRuntimeFeedHomes.slice(0, 6)
-        )
+          ,
+          ...(await discoverLikelyNotifyHomes(hostDiscovery.homeDir))
+        ].flat())]
       );
       const selection = await promptNotificationSelection(options.runtime, {
         likelyChannels,

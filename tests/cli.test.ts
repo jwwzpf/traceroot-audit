@@ -3970,6 +3970,99 @@ describe("CLI", () => {
     }
   });
 
+  it("can reuse a chat route from a known OpenClaw home even when actions only appear in the default temp logs", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-default-temp-notify-home-"));
+    const tempTmpRoot = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-default-temp-notify-root-"));
+    const previousHome = process.env.HOME;
+    const previousTmpDir = process.env.TMPDIR;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      const openClawConfigDir = path.join(tempHome, ".config", "openclaw");
+      await mkdir(openClawConfigDir, { recursive: true });
+      await writeFile(
+        path.join(openClawConfigDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const defaultLogDir = path.join(tempTmpRoot, "openclaw");
+      await mkdir(defaultLogDir, { recursive: true });
+      const gatewayLog = path.join(defaultLogDir, "openclaw-2026-03-20.log");
+      await writeFile(gatewayLog, "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.env.TMPDIR = tempTmpRoot;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com from Telegram @ops-room path=mailer.ts\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const messengerArgs = await messenger.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(messengerArgs).toContain("--channel");
+      expect(messengerArgs).toContain("telegram");
+      expect(messengerArgs).toContain("--target");
+      expect(messengerArgs).toContain("@ops-room");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      if (previousTmpDir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = previousTmpDir;
+      }
+
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempTmpRoot, { recursive: true, force: true });
+    }
+  });
+
   it("shows which sensitive dataset the agent touched in the audit timeline", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-log-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-home-"));
