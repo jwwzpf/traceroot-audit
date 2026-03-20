@@ -3708,6 +3708,8 @@ describe("CLI", () => {
       expect(logsOutput).toContain("付款或下单（invoice 1042）");
       expect(logsOutput).toContain("Attempting payment checkout for invoice 1042");
       expect(logsOutput).toContain("这一步看起来涉及：invoice 1042");
+      expect(logsOutput).toContain("🧩 今天 agent 真正碰到的关键对象：");
+      expect(logsOutput).toContain("invoice 1042：被碰了 1 次（付款或下单）");
       expect(logsOutput).toContain("触发来源：Slack（@fin-ops）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("runtime-events.jsonl");
@@ -3886,6 +3888,8 @@ describe("CLI", () => {
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("Agent 开始尝试：读取敏感数据（customers-2026.csv）");
       expect(logsOutput).toContain("这一步看起来涉及：customers-2026.csv");
+      expect(logsOutput).toContain("🧩 今天 agent 真正碰到的关键对象：");
+      expect(logsOutput).toContain("customers-2026.csv：被碰了 1 次（读取敏感数据）");
       expect(logsOutput).toContain("触发来源：Slack（@risk-ops）");
     } finally {
       if (previousHome === undefined) {

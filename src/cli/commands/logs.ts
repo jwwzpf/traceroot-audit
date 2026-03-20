@@ -15,6 +15,7 @@ import {
   actionLabel,
   actionLabelWithSubject,
   actionObjectSentence,
+  actionSubjectLabel,
   summarizeActionLabels,
   actionTriggerSourceLabel
 } from "../../audit/presentation";
@@ -452,6 +453,10 @@ function summarizeEvents(
     string,
     { actionLabel: string; count: number; failed: number; severity: AuditSeverity }
   >();
+  const attentionSubjects = new Map<
+    string,
+    { subjectLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
+  >();
   const attentionActors = new Map<
     string,
     { actorLabel: string; count: number; severity: AuditSeverity; actions: Set<string> }
@@ -550,6 +555,24 @@ function summarizeEvents(
         }
 
         attentionActions.set(label, existing);
+
+        const subject = actionSubjectLabel(event);
+        if (subject) {
+          const subjectEntry = attentionSubjects.get(subject) ?? {
+            subjectLabel: subject,
+            count: 0,
+            severity: event.severity,
+            actions: new Set<string>()
+          };
+
+          subjectEntry.count += 1;
+          subjectEntry.actions.add(label);
+          if (severityWeight(event.severity) > severityWeight(subjectEntry.severity)) {
+            subjectEntry.severity = event.severity;
+          }
+
+          attentionSubjects.set(subject, subjectEntry);
+        }
 
         const actor = actorLabel(event);
         const actorEntry = attentionActors.get(actor) ?? {
@@ -664,6 +687,21 @@ function summarizeEvents(
         );
       })
       .slice(0, 3),
+    attentionSubjects: [...attentionSubjects.values()]
+      .sort((left, right) => {
+        return (
+          severityWeight(right.severity) - severityWeight(left.severity) ||
+          right.count - left.count ||
+          right.actions.size - left.actions.size
+        );
+      })
+      .slice(0, 4)
+      .map((entry) => ({
+        subjectLabel: entry.subjectLabel,
+        count: entry.count,
+        severity: entry.severity,
+        actions: [...entry.actions]
+      })),
     attentionActors: [...attentionActors.values()]
       .sort((left, right) => {
         return (
@@ -1068,6 +1106,17 @@ async function printLogs(
         "   TraceRoot 目前主要在盯边界有没有重新变宽，以及新的风险信号有没有冒出来。",
         ""
       );
+    }
+
+    if (summary.attentionSubjects.length > 0) {
+      lines.push("🧩 今天 agent 真正碰到的关键对象：");
+      for (const subject of summary.attentionSubjects) {
+        const prefix = severityIcon(subject.severity);
+        lines.push(
+          `- ${prefix} ${subject.subjectLabel}：被碰了 ${subject.count} 次（${subject.actions.slice(0, 2).join("、")}）`
+        );
+      }
+      lines.push("");
     }
 
     if (summary.attentionActors.length > 0) {
