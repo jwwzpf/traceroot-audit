@@ -3,12 +3,16 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { Command, Option } from "commander";
 
-import { readAuditEvents } from "../../audit/store";
+import { appendAuditEvents, readAuditEvents } from "../../audit/store";
 import {
   loadAuditReviewState,
   saveAuditReviewState
 } from "../../audit/review-state";
-import { discoverRuntimeEventFeeds } from "../../audit/feeds";
+import {
+  discoverRuntimeEventFeeds,
+  readRecentRuntimeFeedEvents,
+  readTodaysRuntimeFeedEvents
+} from "../../audit/feeds";
 import { loadWatchStatusSession } from "../../audit/status";
 import type { AuditEvent, AuditSeverity } from "../../audit/types";
 import {
@@ -914,6 +918,64 @@ async function renderHostAuditCoverageSummary(): Promise<string[] | null> {
   return lines;
 }
 
+async function backfillRuntimeFeedEvents(options: {
+  target?: string;
+  today?: boolean;
+  hostScope?: boolean;
+}): Promise<number> {
+  const feedMap = new Map<string, Awaited<ReturnType<typeof discoverRuntimeEventFeeds>>[number]>();
+
+  if (options.hostScope) {
+    const discovery = await discoverHost({ includeCwd: false });
+    for (const candidate of discovery.candidates) {
+      const feeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+      for (const feed of feeds) {
+        feedMap.set(feed.absolutePath, feed);
+      }
+    }
+  } else if (options.target) {
+    const feeds = await discoverRuntimeEventFeeds(options.target);
+    for (const feed of feeds) {
+      feedMap.set(feed.absolutePath, feed);
+    }
+  } else {
+    return 0;
+  }
+
+  const feeds = [...feedMap.values()];
+  if (feeds.length === 0) {
+    return 0;
+  }
+
+  const feedEvents = options.today
+    ? await readTodaysRuntimeFeedEvents({
+        feeds,
+        targetRoot: options.target ?? process.cwd()
+      })
+    : await readRecentRuntimeFeedEvents({
+        feeds,
+        targetRoot: options.target ?? process.cwd()
+      });
+
+  if (feedEvents.length === 0) {
+    return 0;
+  }
+
+  const existingEvents = await readAuditEvents({
+    target: options.hostScope ? undefined : options.target,
+    today: options.today
+  });
+  const existingKeys = new Set(existingEvents.events.map(eventKey));
+  const freshEvents = feedEvents.filter((event) => !existingKeys.has(eventKey(event)));
+
+  if (freshEvents.length === 0) {
+    return 0;
+  }
+
+  await appendAuditEvents(freshEvents);
+  return freshEvents.length;
+}
+
 async function printLogs(
   runtime: CliRuntime,
   options: {
@@ -925,6 +987,11 @@ async function printLogs(
     hostScope?: boolean;
   }
 ): Promise<AuditEvent[]> {
+  const backfilledFeedEvents = await backfillRuntimeFeedEvents({
+    target: options.target,
+    today: options.today,
+    hostScope: options.hostScope
+  });
   const reviewState = await loadAuditReviewState({
     scope: options.hostScope ? "host" : "target",
     target: options.hostScope ? null : options.target
@@ -998,6 +1065,12 @@ async function printLogs(
 
     if (options.today) {
       lines.push("📅 时间范围: 今天");
+    }
+
+    if (backfilledFeedEvents > 0) {
+      lines.push(
+        `🧲 TraceRoot 这次还顺手从原生运行时日志里补回了 ${backfilledFeedEvents} 条今天的动作记录。`
+      );
     }
 
     if (watchStatusLines) {

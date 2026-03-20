@@ -1081,6 +1081,67 @@ describe("CLI", () => {
     }
   });
 
+  it("can backfill today's risky runtime actions straight from logs --today even when watch was not running", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-backfill-target-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-logs-backfill-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const logsDir = path.join(tempDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(logsDir, "runtime-events.jsonl"),
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          runtime: "gmail-mcp",
+          channel: "telegram",
+          sender: "@ops-room",
+          message: "Attempting to send email to customer@example.com"
+        })}\n`,
+        "utf8"
+      );
+
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        capture.io,
+        createStaticPrompter({})
+      );
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 这次还顺手从原生运行时日志里补回了 1 条今天的动作记录");
+      expect(output).toContain("对外发邮件（发给 customer@example.com）");
+      expect(output).toContain("customer@example.com：被碰了 1 次（对外发邮件）");
+
+      const auditStoreContent = await readFile(
+        path.join(tempHome, ".traceroot", "audit", "events.jsonl"),
+        "utf8"
+      );
+      expect((auditStoreContent.match(/"action":"send-email"/g) ?? []).length).toBe(1);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("remembers a backfilled risky runtime action the next time machine-level doctor watch starts", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-backfill-memory-home-"));
     const previousHome = process.env.HOME;
