@@ -27,6 +27,8 @@ export interface RuntimeFeedCursor {
   trailingFragments: Map<string, string>;
 }
 
+const clawFamilyNames = ["openclaw", "claw", "lobster"] as const;
+
 const candidateRelativePaths = [
   ".traceroot/runtime-events.jsonl",
   "runtime-events.jsonl",
@@ -48,6 +50,7 @@ const candidateRelativePaths = [
   path.join("logs", "action-events.jsonl"),
   path.join("logs", "action-events.log"),
   path.join(".openclaw", "events.jsonl"),
+  path.join(".lobster", "events.jsonl"),
   path.join(".mcp", "events.jsonl"),
   path.join(".mcp", "events.log"),
   path.join("logs", "commands.log"),
@@ -62,6 +65,8 @@ const candidateGlobPatterns = [
   "logs/**/*actions*.log",
   ".openclaw/**/*events*.jsonl",
   ".openclaw/**/*actions*.jsonl",
+  ".lobster/**/*events*.jsonl",
+  ".lobster/**/*actions*.jsonl",
   ".mcp/**/*events*.jsonl",
   ".mcp/**/*events*.log",
   ".mcp/**/*actions*.jsonl",
@@ -87,12 +92,38 @@ function classifyFeedKind(absolutePath: string): RuntimeEventFeed["kind"] {
     basename === "gateway.log" ||
     basename === "gateway.err.log" ||
     basename === "openclaw-gateway.log" ||
-    /^openclaw-\d{4}-\d{2}-\d{2}\.log$/.test(basename)
+    basename === "claw-gateway.log" ||
+    basename === "lobster-gateway.log" ||
+    /^(openclaw|claw|lobster)-\d{4}-\d{2}-\d{2}\.log$/.test(basename)
   ) {
     return "openclaw-gateway-log";
   }
 
   return "generic-jsonl";
+}
+
+function inferClawRuntimeName(options: {
+  feedPath?: string;
+  targetRoot?: string;
+  fallback?: string;
+}): string {
+  const candidates = [options.feedPath, options.targetRoot, options.fallback]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+
+  if (candidates.some((value) => value.includes("lobster"))) {
+    return "lobster";
+  }
+
+  if (
+    candidates.some(
+      (value) => value.includes(".claw") || /(^|[\\/])claw([\\/]|$)/.test(value)
+    )
+  ) {
+    return "claw";
+  }
+
+  return options.fallback?.trim() || "openclaw";
 }
 
 function normalizeSeverity(value?: unknown): AuditSeverity | undefined {
@@ -1091,7 +1122,11 @@ function inferStructuredRuntimeFeedEvent(
   };
 }
 
-function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEvent | null {
+function parseOpenClawCommandLogLine(
+  line: string,
+  targetRoot: string,
+  feedPath?: string
+): AuditEvent | null {
   let parsed: Record<string, unknown>;
 
   try {
@@ -1110,13 +1145,21 @@ function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEve
   const sessionKey = pickString(parsed, ["sessionKey"]);
   const normalized = action.toLowerCase();
 
-  let message = `OpenClaw 刚收到一个控制命令：${action}。`;
+  const runtimeName = inferClawRuntimeName({
+    feedPath,
+    targetRoot,
+    fallback: "openclaw"
+  });
+  const runtimeTitle =
+    runtimeName === "lobster" ? "Lobster" : runtimeName === "claw" ? "Claw" : "OpenClaw";
+
+  let message = `${runtimeTitle} 刚收到一个控制命令：${action}。`;
   if (normalized === "new") {
-    message = `OpenClaw 刚收到一个新任务启动命令（来源：${sourceChannel}）。`;
+    message = `${runtimeTitle} 刚收到一个新任务启动命令（来源：${sourceChannel}）。`;
   } else if (normalized === "stop") {
-    message = `OpenClaw 刚收到一个停止命令（来源：${sourceChannel}）。`;
+    message = `${runtimeTitle} 刚收到一个停止命令（来源：${sourceChannel}）。`;
   } else if (normalized === "resume") {
-    message = `OpenClaw 刚收到一个恢复运行命令（来源：${sourceChannel}）。`;
+    message = `${runtimeTitle} 刚收到一个恢复运行命令（来源：${sourceChannel}）。`;
   }
 
   if (sender) {
@@ -1129,7 +1172,7 @@ function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEve
     category: "action-event",
     source: "runtime-feed",
     target: targetRoot,
-    runtime: "openclaw",
+    runtime: runtimeName,
     surfaceKind: "runtime",
     action: `openclaw-command-${normalized}`,
     status: "observed",
@@ -1150,8 +1193,12 @@ function parseOpenClawCommandLogLine(line: string, targetRoot: string): AuditEve
   };
 }
 
-function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEvent | null {
-  const plainTextEvent = parseOpenClawGatewayTextLine(line, targetRoot);
+function parseOpenClawGatewayLogLine(
+  line: string,
+  targetRoot: string,
+  feedPath?: string
+): AuditEvent | null {
+  const plainTextEvent = parseOpenClawGatewayTextLine(line, targetRoot, feedPath);
   if (plainTextEvent) {
     return plainTextEvent;
   }
@@ -1179,7 +1226,9 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
     normalizeSeverity(pickString(parsed, ["level", "severity", "risk"])) ??
     severityFromAction(action);
   const subsystem = pickString(parsed, ["subsystem", "logger", "scope"]);
-  const runtimeName = pickString(parsed, ["runtime", "service"]) ?? "openclaw";
+  const runtimeName =
+    pickString(parsed, ["runtime", "service"]) ??
+    inferClawRuntimeName({ feedPath, targetRoot, fallback: "openclaw" });
   const channel =
     pickString(parsed, ["channel", "source", "provider", "chat", "account"]) ??
     inferChannelFromText(message) ??
@@ -1225,7 +1274,11 @@ function parseOpenClawGatewayLogLine(line: string, targetRoot: string): AuditEve
   };
 }
 
-function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEvent | null {
+function parseOpenClawGatewayTextLine(
+  line: string,
+  targetRoot: string,
+  feedPath?: string
+): AuditEvent | null {
   const trimmed = line.trim();
   if (!trimmed) {
     return null;
@@ -1248,11 +1301,11 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
     category: "action-event",
     source: "runtime-feed",
     target: inferTargetFromText(message, targetRoot),
-    runtime: "openclaw",
+    runtime: inferClawRuntimeName({ feedPath, targetRoot, fallback: "openclaw" }),
     surfaceKind: "runtime",
     action,
     status: inferStatusFromMessage(message),
-    message: `openclaw 刚提到：${message}`,
+    message: `${inferClawRuntimeName({ feedPath, targetRoot, fallback: "openclaw" })} 刚提到：${message}`,
     recommendation: inferRecommendation(action, severity),
     evidence: buildActionEvidenceFromText(message, targetRoot, {
       source: "openclaw-gateway-log",
@@ -1267,14 +1320,15 @@ function parseOpenClawGatewayTextLine(line: string, targetRoot: string): AuditEv
 function parseRuntimeFeedEvent(
   line: string,
   targetRoot: string,
-  feedKind: RuntimeEventFeed["kind"] = "generic-jsonl"
+  feedKind: RuntimeEventFeed["kind"] = "generic-jsonl",
+  feedPath?: string
 ): AuditEvent | null {
   if (feedKind === "openclaw-command-log") {
-    return parseOpenClawCommandLogLine(line, targetRoot);
+    return parseOpenClawCommandLogLine(line, targetRoot, feedPath);
   }
 
   if (feedKind === "openclaw-gateway-log") {
-    return parseOpenClawGatewayLogLine(line, targetRoot);
+    return parseOpenClawGatewayLogLine(line, targetRoot, feedPath);
   }
 
   let parsed: Record<string, unknown> | unknown[];
@@ -1492,49 +1546,49 @@ type CompanionFeed = {
   kind: RuntimeEventFeed["kind"];
 };
 
-function openClawDefaultTempLogDir(): string {
+function clawFamilyDefaultTempLogDirs(): string[] {
   const tempRoot =
     process.env.TMPDIR?.trim() ||
     process.env.TEMP?.trim() ||
     process.env.TMP?.trim() ||
     os.tmpdir();
 
-  return path.join(tempRoot, "openclaw");
+  return clawFamilyNames.map((name) => path.join(tempRoot, name));
 }
 
 async function discoverDefaultOpenClawTempFeeds(): Promise<CompanionFeed[]> {
-  const tempLogDir = openClawDefaultTempLogDir();
   const companionMap = new Map<string, CompanionFeed>();
-
-  const globMatches = await fg(path.join(tempLogDir, "openclaw-*.log"), {
-    absolute: true,
-    onlyFiles: true,
-    unique: true
-  });
-
-  for (const matchedPath of globMatches) {
-    companionMap.set(matchedPath, {
-      absolutePath: matchedPath,
-      kind: classifyFeedKind(matchedPath)
+  for (const tempLogDir of clawFamilyDefaultTempLogDirs()) {
+    const globMatches = await fg(path.join(tempLogDir, "*-*.log"), {
+      absolute: true,
+      onlyFiles: true,
+      unique: true
     });
-  }
 
-  for (const filename of ["gateway.log", "gateway.err.log", "commands.log", "commands.err.log"]) {
-    const candidatePath = path.join(tempLogDir, filename);
-
-    try {
-      const feedStats = await stat(candidatePath);
-      if (!feedStats.isFile()) {
-        continue;
-      }
-    } catch {
-      continue;
+    for (const matchedPath of globMatches) {
+      companionMap.set(matchedPath, {
+        absolutePath: matchedPath,
+        kind: classifyFeedKind(matchedPath)
+      });
     }
 
-    companionMap.set(candidatePath, {
-      absolutePath: candidatePath,
-      kind: classifyFeedKind(candidatePath)
-    });
+    for (const filename of ["gateway.log", "gateway.err.log", "commands.log", "commands.err.log"]) {
+      const candidatePath = path.join(tempLogDir, filename);
+
+      try {
+        const feedStats = await stat(candidatePath);
+        if (!feedStats.isFile()) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      companionMap.set(candidatePath, {
+        absolutePath: candidatePath,
+        kind: classifyFeedKind(candidatePath)
+      });
+    }
   }
 
   return [...companionMap.values()];
@@ -1643,15 +1697,29 @@ function addCompanionFeedCandidate(options: {
 async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<CompanionFeed[]> {
   const rootName = path.basename(targetRoot).toLowerCase();
   const looksLikeOpenClawRoot =
-    rootName.startsWith(".openclaw") || rootName.includes("openclaw");
+    rootName.startsWith(".openclaw") ||
+    rootName.startsWith(".lobster") ||
+    rootName.includes("openclaw") ||
+    rootName.includes("lobster") ||
+    rootName === "claw";
   const candidates = new Map<string, CompanionFeed>();
   let hasOpenClawConfig = false;
 
-  for (const configName of ["openclaw.json", "openclaw.yaml", "openclaw.yml"]) {
+  for (const configName of [
+    "openclaw.json",
+    "openclaw.yaml",
+    "openclaw.yml",
+    "claw.json",
+    "claw.yaml",
+    "claw.yml",
+    "lobster.json",
+    "lobster.yaml",
+    "lobster.yml"
+  ]) {
     try {
       const configRaw = await readFile(path.join(targetRoot, configName), "utf8");
       const config =
-        configName === "openclaw.json"
+        configName.endsWith(".json")
           ? (JSON5.parse(configRaw) as Record<string, unknown>)
           : (YAML.parse(configRaw) as Record<string, unknown>);
       hasOpenClawConfig = true;
@@ -1926,7 +1994,8 @@ export async function discoverHostNativeRuntimeFeeds(homeDir: string): Promise<{
   feeds: RuntimeEventFeed[];
   watchedRoots: NativeRuntimeFeedRoot[];
 }> {
-  const defaultTempRoot = openClawDefaultTempLogDir();
+  const defaultTempRoots = clawFamilyDefaultTempLogDirs();
+  const defaultTempRoot = defaultTempRoots[0] ?? path.join(os.tmpdir(), "openclaw");
   const defaultFeeds = await discoverDefaultOpenClawTempFeeds();
 
   if (defaultFeeds.length === 0) {
@@ -1938,13 +2007,24 @@ export async function discoverHostNativeRuntimeFeeds(homeDir: string): Promise<{
 
   const preferredRootCandidates = [
     path.join(homeDir, ".openclaw"),
+    path.join(homeDir, ".lobster"),
     path.join(homeDir, ".config", "openclaw"),
+    path.join(homeDir, ".config", "lobster"),
+    path.join(homeDir, ".config", "claw"),
     ...(process.platform === "darwin"
-      ? [path.join(homeDir, "Library", "Application Support", "OpenClaw")]
+      ? [
+          path.join(homeDir, "Library", "Application Support", "OpenClaw"),
+          path.join(homeDir, "Library", "Application Support", "Lobster"),
+          path.join(homeDir, "Library", "Application Support", "Claw")
+        ]
       : []),
     path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
+    path.join(homeDir, "AppData", "Roaming", "Lobster"),
+    path.join(homeDir, "AppData", "Roaming", "Claw"),
     path.join(homeDir, "AppData", "Local", "OpenClaw"),
-    defaultTempRoot
+    path.join(homeDir, "AppData", "Local", "Lobster"),
+    path.join(homeDir, "AppData", "Local", "Claw"),
+    ...defaultTempRoots
   ];
   let rootDir = defaultTempRoot;
 
@@ -2027,7 +2107,8 @@ export async function readRecentRuntimeFeedEvents(options: {
       const event = parseRuntimeFeedEvent(
         line,
         feed.rootDir ?? options.targetRoot,
-        feed.kind
+        feed.kind,
+        feed.absolutePath
       );
 
       if (!event) {
@@ -2087,7 +2168,8 @@ export async function readTodaysRuntimeFeedEvents(options: {
       const event = parseRuntimeFeedEvent(
         line,
         feed.rootDir ?? options.targetRoot,
-        feed.kind
+        feed.kind,
+        feed.absolutePath
       );
 
       if (!event || !isTodayTimestamp(event.timestamp)) {
@@ -2159,7 +2241,8 @@ export async function readNewRuntimeFeedEvents(options: {
       const event = parseRuntimeFeedEvent(
         line,
         feed.rootDir ?? options.targetRoot,
-        feed.kind
+        feed.kind,
+        feed.absolutePath
       );
       if (event) {
         event.evidence = {

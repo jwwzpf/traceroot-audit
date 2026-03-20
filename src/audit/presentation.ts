@@ -91,6 +91,14 @@ export function runtimeActorLabel(runtime?: string): string {
     return "OpenClaw 运行时";
   }
 
+  if (normalized === "claw") {
+    return "Claw 运行时";
+  }
+
+  if (normalized === "lobster") {
+    return "Lobster 运行时";
+  }
+
   if (normalized === "mcp") {
     return "MCP 服务";
   }

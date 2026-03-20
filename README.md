@@ -405,6 +405,7 @@ and suggest the most useful paths to scan next.
 `discover --host` uses a targeted search of common local locations such as:
 
 - `~/.openclaw`
+- `~/.lobster`
 - `~/.mcp`
 - `~/.claude`
 - `~/.cursor`

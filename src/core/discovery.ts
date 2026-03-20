@@ -222,13 +222,13 @@ const hostMarkerPatterns = [
 
 const skillKeywordPattern = /^(skills?|tools?|plugins?|mcp(?:-servers?)?)$/i;
 const runtimeKeywordPattern = /^(runtime|config|configs|compose|deploy|infra)$/i;
-const actionKeywordPattern = /(openclaw|claw|agent|skill|tool|plugin|mcp|runtime)/i;
+const actionKeywordPattern = /(openclaw|claw|lobster|agent|skill|tool|plugin|mcp|runtime)/i;
 const manifestFilePattern = /^traceroot\.manifest\.(json|ya?ml)$/i;
 const dockerComposeFilePattern = /^docker-compose[^/]*\.ya?ml$/i;
 const envFilePattern = /^\.env(?:\..+)?$/i;
-const openClawPathPattern = /(^|\/)(?:\.openclaw|openclaw|claw)(\/|$)/i;
+const openClawPathPattern = /(^|\/)(?:\.openclaw|openclaw|claw|\.lobster|lobster)(\/|$)/i;
 const localAgentPathPattern =
-  /(^|\/)(?:\.openclaw|openclaw|claw|\.claude|claude|\.cursor|cursor)(\/|$)/i;
+  /(^|\/)(?:\.openclaw|openclaw|claw|\.lobster|lobster|\.claude|claude|\.cursor|cursor)(\/|$)/i;
 const mcpPathPattern = /(^|\/)(?:\.mcp|mcp(?:-servers?)?)(\/|$)|\.mcp\.(json|ya?ml)$/i;
 const skillPathLikePattern = /(^|\/)(?:skills?|tools?|plugins?)(\/|$)/i;
 const genericAppPathPattern = /(^|\/)(?:frontend|backend|mobile|apps?|web)(\/|$)/i;
@@ -236,31 +236,37 @@ const genericAppPathPattern = /(^|\/)(?:frontend|backend|mobile|apps?|web)(\/|$)
 export function knownLocalAgentHomes(homeDir: string): string[] {
   return [
     path.join(homeDir, ".openclaw"),
+    path.join(homeDir, ".lobster"),
     path.join(homeDir, ".mcp"),
     path.join(homeDir, ".claude"),
     path.join(homeDir, ".cursor"),
     path.join(homeDir, ".config", "openclaw"),
     path.join(homeDir, ".config", "claw"),
+    path.join(homeDir, ".config", "lobster"),
     path.join(homeDir, ".config", "mcp"),
     path.join(homeDir, ".config", "mcp-servers"),
     path.join(homeDir, ".config", "claude"),
     path.join(homeDir, ".config", "cursor"),
     path.join(homeDir, ".local", "share", "openclaw"),
     path.join(homeDir, ".local", "share", "claw"),
+    path.join(homeDir, ".local", "share", "lobster"),
     path.join(homeDir, ".local", "share", "claude"),
     path.join(homeDir, ".local", "share", "cursor"),
     path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
     path.join(homeDir, "AppData", "Roaming", "Claw"),
+    path.join(homeDir, "AppData", "Roaming", "Lobster"),
     path.join(homeDir, "AppData", "Roaming", "Claude"),
     path.join(homeDir, "AppData", "Roaming", "Cursor"),
     path.join(homeDir, "AppData", "Local", "OpenClaw"),
     path.join(homeDir, "AppData", "Local", "Claw"),
+    path.join(homeDir, "AppData", "Local", "Lobster"),
     path.join(homeDir, "AppData", "Local", "Claude"),
     path.join(homeDir, "AppData", "Local", "Cursor"),
     ...(process.platform === "darwin"
       ? [
           path.join(homeDir, "Library", "Application Support", "OpenClaw"),
           path.join(homeDir, "Library", "Application Support", "Claw"),
+          path.join(homeDir, "Library", "Application Support", "Lobster"),
           path.join(homeDir, "Library", "Application Support", "MCP"),
           path.join(homeDir, "Library", "Application Support", "Claude"),
           path.join(homeDir, "Library", "Application Support", "Cursor")

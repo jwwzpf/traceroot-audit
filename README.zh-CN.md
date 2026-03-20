@@ -405,6 +405,7 @@ node dist/cli/index.js discover --host
 `discover --host` 不会粗暴地全盘扫描整台电脑，而是只检查常见的高价值位置，例如：
 
 - `~/.openclaw`
+- `~/.lobster`
 - `~/.mcp`
 - `~/.claude`
 - `~/.cursor`
