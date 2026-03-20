@@ -611,6 +611,7 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口");
+      expect(output).toContain("TraceRoot 现在已经接上：OpenClaw 运行位点（~/.openclaw）");
       expect(output).toContain("整机入口变化会在后台轻量复查");
       expect(output).toContain("动作审计覆盖：");
       expect(output).toContain("运行时事件入口陪跑整机上的 agent");
@@ -705,6 +706,7 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain("这次 TraceRoot 会直接在这台机器上陪跑你常见的 agent / runtime 入口");
+      expect(output).toContain("TraceRoot 现在已经接上：OpenClaw 运行位点（~/.config/openclaw）");
       expect(output).toContain("~/.config/openclaw");
       expect(output).toContain("OpenClaw 运行态");
       expect(output).toContain("TraceRoot 实时提醒");
@@ -790,6 +792,7 @@ describe("CLI", () => {
       const output = capture.read().stdout;
 
       expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 现在已经接上：MCP 配置位点（~/.mcp）");
       expect(output).toContain("TraceRoot 实时提醒");
       expect(output).toContain("对外发邮件");
       expect(output).toContain("gmail-mcp-events.jsonl");

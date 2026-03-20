@@ -197,6 +197,56 @@ function renderHostAuditCoverageLines(options: {
   return lines;
 }
 
+function describeWatchedRootForHuman(root: {
+  absolutePath: string;
+  displayPath: string;
+  kind: "candidate" | "known-runtime-home";
+}): string {
+  const normalizedPath = root.absolutePath.toLowerCase();
+  const displayPath = root.displayPath;
+
+  if (normalizedPath.includes(".openclaw") || /(^|[\\/])openclaw([\\/]|$)/.test(normalizedPath)) {
+    return `OpenClaw 运行位点（${displayPath}）`;
+  }
+
+  if (normalizedPath.includes(".lobster") || /(^|[\\/])lobster([\\/]|$)/.test(normalizedPath)) {
+    return `Lobster 运行位点（${displayPath}）`;
+  }
+
+  if (normalizedPath.includes(".mcp") || /(^|[\\/])mcp([\\/]|$)/.test(normalizedPath)) {
+    return `MCP 配置位点（${displayPath}）`;
+  }
+
+  if (normalizedPath.includes(".claude") || /(^|[\\/])claude([\\/]|$)/.test(normalizedPath)) {
+    return `Claude 配置位点（${displayPath}）`;
+  }
+
+  return `运行位点（${displayPath}）`;
+}
+
+function summarizeWatchedRootsForHuman(
+  roots: Array<{
+    absolutePath: string;
+    displayPath: string;
+    kind: "candidate" | "known-runtime-home";
+  }>
+): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+
+  for (const root of roots) {
+    const label = describeWatchedRootForHuman(root);
+    if (seen.has(label)) {
+      continue;
+    }
+
+    seen.add(label);
+    labels.push(label);
+  }
+
+  return labels.slice(0, 3);
+}
+
 function actionAlertFingerprint(event: AuditEvent): string {
   return [
     event.action ?? "",
@@ -988,6 +1038,16 @@ export async function runHostWatch(options: {
           .slice(0, 3)
           .map((root) => root.displayPath)
           .join("、")}`,
+        ""
+      );
+    } else if (watchedFeedRoots.length > 0) {
+      const watchedRootLabels = summarizeWatchedRootsForHuman(watchedFeedRoots);
+      initialLines.push(
+        `👂 TraceRoot 现在已经接上：${watchedRootLabels.join("、")}${
+          watchedFeedRoots.length > watchedRootLabels.length
+            ? `，以及另外 ${watchedFeedRoots.length - watchedRootLabels.length} 个运行位点`
+            : ""
+        }。`,
         ""
       );
     }
