@@ -361,7 +361,7 @@ function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
       ["payload", "secret"]
     ]) ?? undefined;
   if (secret) {
-    return `secret ${truncateDisplayText(secret)}`;
+    return truncateDisplayText(secret);
   }
 
   const url =
@@ -456,7 +456,7 @@ export function actionSubjectLabel(event: AuditEvent): string | null {
   }
 
   if (secretName) {
-    return `secret ${truncateDisplayText(secretName)}`;
+    return truncateDisplayText(secretName);
   }
 
   if (resourceLabel) {

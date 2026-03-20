@@ -3902,6 +3902,86 @@ describe("CLI", () => {
     }
   });
 
+  it("shows which secret the agent touched in the audit timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-secret-log-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-secret-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "AWS_SECRET_ACCESS_KEY=hidden\nBANK_TOKEN=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.log"),
+          `${new Date().toISOString()} WARN secrets-agent reading secret AWS_SECRET_ACCESS_KEY from Slack @sec-ops path=.env\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["market-monitoring"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("读取敏感 secret（AWS_SECRET_ACCESS_KEY）");
+      expect(output).toContain("这一步是从 Slack（@sec-ops） 触发出来的");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("Agent 开始尝试：读取敏感 secret（AWS_SECRET_ACCESS_KEY）");
+      expect(logsOutput).toContain("这一步看起来涉及：AWS_SECRET_ACCESS_KEY");
+      expect(logsOutput).toContain("AWS_SECRET_ACCESS_KEY：被碰了 1 次（读取敏感 secret）");
+      expect(logsOutput).toContain("触发来源：Slack（@sec-ops）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can ingest plain-text OpenClaw gateway logs without extra wiring", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-plain-gateway-home-"));
     const previousHome = process.env.HOME;
