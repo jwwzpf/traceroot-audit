@@ -160,7 +160,13 @@ export async function detectLikelyNotifyChannelsForTargets(
   >();
 
   for (const target of targets) {
-    const channels = await detectLikelyNotifyChannels(target);
+    let channels: LikelyNotifyChannel[] = [];
+
+    try {
+      channels = await detectLikelyNotifyChannels(target);
+    } catch {
+      continue;
+    }
 
     for (const channel of channels) {
       const current = merged.get(channel.channel) ?? {

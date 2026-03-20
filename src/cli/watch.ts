@@ -24,6 +24,7 @@ import {
 } from "../audit/notifier";
 import {
   createRuntimeFeedCursor,
+  discoverHostNativeRuntimeFeeds,
   discoverRuntimeEventFeeds,
   readRecentRuntimeFeedEvents,
   readTodaysRuntimeFeedEvents,
@@ -806,6 +807,23 @@ async function discoverHostRuntimeFeeds(options: {
       if (!feedMap.has(feed.absolutePath)) {
         feedMap.set(feed.absolutePath, feed);
       }
+    }
+  }
+
+  const nativeFeedDiscovery = await discoverHostNativeRuntimeFeeds(options.homeDir);
+  for (const watchedRoot of nativeFeedDiscovery.watchedRoots) {
+    if (!watchedRoots.has(watchedRoot.absolutePath)) {
+      watchedRoots.set(watchedRoot.absolutePath, {
+        absolutePath: watchedRoot.absolutePath,
+        displayPath: watchedRoot.displayPath,
+        kind: "known-runtime-home"
+      });
+    }
+  }
+
+  for (const feed of nativeFeedDiscovery.feeds) {
+    if (!feedMap.has(feed.absolutePath)) {
+      feedMap.set(feed.absolutePath, feed);
     }
   }
 

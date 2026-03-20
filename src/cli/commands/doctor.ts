@@ -1,4 +1,5 @@
 import path from "node:path";
+import { stat } from "node:fs/promises";
 
 import { Command } from "commander";
 
@@ -45,7 +46,10 @@ import {
   runtimeActorLabel,
   summarizeActionLabels
 } from "../../audit/presentation";
-import { discoverRuntimeEventFeeds } from "../../audit/feeds";
+import {
+  discoverHostNativeRuntimeFeeds,
+  discoverRuntimeEventFeeds
+} from "../../audit/feeds";
 import { readAuditEvents } from "../../audit/store";
 import {
   loadAuditReviewState,
@@ -67,6 +71,14 @@ async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]>
 
   for (const root of knownLocalAgentHomes(homeDir)) {
     try {
+      if (!(await stat(root)).isDirectory()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    try {
       const feeds = await discoverRuntimeEventFeeds(root);
       if (feeds.length > 0) {
         matchedRoots.push(root);
@@ -76,7 +88,12 @@ async function discoverKnownRuntimeFeedHomes(homeDir: string): Promise<string[]>
     }
   }
 
-  return matchedRoots;
+  const nativeFeeds = await discoverHostNativeRuntimeFeeds(homeDir);
+  for (const root of nativeFeeds.watchedRoots) {
+    matchedRoots.push(root.absolutePath);
+  }
+
+  return [...new Set(matchedRoots)];
 }
 
 async function loadLatestAttentionLine(options: {

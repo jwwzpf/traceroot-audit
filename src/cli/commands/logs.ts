@@ -9,6 +9,7 @@ import {
   saveAuditReviewState
 } from "../../audit/review-state";
 import {
+  discoverHostNativeRuntimeFeeds,
   discoverRuntimeEventFeeds,
   readRecentRuntimeFeedEvents,
   readTodaysRuntimeFeedEvents
@@ -875,6 +876,11 @@ async function renderHostAuditCoverageSummary(): Promise<string[] | null> {
     }
   }
 
+  const nativeFeedDiscovery = await discoverHostNativeRuntimeFeeds(discovery.homeDir);
+  for (const feed of nativeFeedDiscovery.feeds) {
+    runtimeFeeds.set(feed.absolutePath, true);
+  }
+
   if (coverage.surfaceCount === 0 && runtimeFeeds.size === 0) {
     return null;
   }
@@ -932,6 +938,11 @@ async function backfillRuntimeFeedEvents(options: {
       for (const feed of feeds) {
         feedMap.set(feed.absolutePath, feed);
       }
+    }
+
+    const nativeFeedDiscovery = await discoverHostNativeRuntimeFeeds(discovery.homeDir);
+    for (const feed of nativeFeedDiscovery.feeds) {
+      feedMap.set(feed.absolutePath, feed);
     }
   } else if (options.target) {
     const feeds = await discoverRuntimeEventFeeds(options.target);

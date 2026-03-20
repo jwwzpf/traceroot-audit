@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { open, readFile, realpath, stat } from "node:fs/promises";
 
@@ -13,6 +14,11 @@ export interface RuntimeEventFeed {
   displayPath: string;
   rootDir: string;
   kind?: "generic-jsonl" | "openclaw-command-log" | "openclaw-gateway-log";
+}
+
+export interface NativeRuntimeFeedRoot {
+  absolutePath: string;
+  displayPath: string;
 }
 
 export interface RuntimeFeedCursor {
@@ -69,6 +75,10 @@ function classifyFeedKind(absolutePath: string): RuntimeEventFeed["kind"] {
   const basename = path.basename(absolutePath).toLowerCase();
 
   if (basename === "commands.log") {
+    return "openclaw-command-log";
+  }
+
+  if (basename === "commands.err.log") {
     return "openclaw-command-log";
   }
 
@@ -1452,6 +1462,54 @@ type CompanionFeed = {
   kind: RuntimeEventFeed["kind"];
 };
 
+function openClawDefaultTempLogDir(): string {
+  const tempRoot =
+    process.env.TMPDIR?.trim() ||
+    process.env.TEMP?.trim() ||
+    process.env.TMP?.trim() ||
+    os.tmpdir();
+
+  return path.join(tempRoot, "openclaw");
+}
+
+async function discoverDefaultOpenClawTempFeeds(): Promise<CompanionFeed[]> {
+  const tempLogDir = openClawDefaultTempLogDir();
+  const companionMap = new Map<string, CompanionFeed>();
+
+  const globMatches = await fg(path.join(tempLogDir, "openclaw-*.log"), {
+    absolute: true,
+    onlyFiles: true,
+    unique: true
+  });
+
+  for (const matchedPath of globMatches) {
+    companionMap.set(matchedPath, {
+      absolutePath: matchedPath,
+      kind: classifyFeedKind(matchedPath)
+    });
+  }
+
+  for (const filename of ["gateway.log", "gateway.err.log", "commands.log", "commands.err.log"]) {
+    const candidatePath = path.join(tempLogDir, filename);
+
+    try {
+      const feedStats = await stat(candidatePath);
+      if (!feedStats.isFile()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    companionMap.set(candidatePath, {
+      absolutePath: candidatePath,
+      kind: classifyFeedKind(candidatePath)
+    });
+  }
+
+  return [...companionMap.values()];
+}
+
 function collectNestedLogPathCandidates(options: {
   source: unknown;
   candidates: Map<string, CompanionFeed>;
@@ -1665,16 +1723,12 @@ async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<Compa
   }
 
   if (looksLikeOpenClawRoot || hasOpenClawConfig) {
-    const defaultLogs = await fg("/tmp/openclaw/openclaw-*.log", {
-      absolute: true,
-      onlyFiles: true,
-      unique: true
-    });
+    const defaultLogs = await discoverDefaultOpenClawTempFeeds();
 
-    for (const filePath of defaultLogs) {
-      candidates.set(filePath, {
-        absolutePath: filePath,
-        kind: classifyFeedKind(filePath)
+    for (const feed of defaultLogs) {
+      candidates.set(feed.absolutePath, {
+        absolutePath: feed.absolutePath,
+        kind: feed.kind
       });
     }
   }
@@ -1836,6 +1890,63 @@ export async function discoverRuntimeEventFeeds(targetRoot: string): Promise<Run
   return [...feedMap.values()].sort((left, right) =>
     left.displayPath.localeCompare(right.displayPath)
   );
+}
+
+export async function discoverHostNativeRuntimeFeeds(homeDir: string): Promise<{
+  feeds: RuntimeEventFeed[];
+  watchedRoots: NativeRuntimeFeedRoot[];
+}> {
+  const defaultTempRoot = openClawDefaultTempLogDir();
+  const defaultFeeds = await discoverDefaultOpenClawTempFeeds();
+
+  if (defaultFeeds.length === 0) {
+    return {
+      feeds: [],
+      watchedRoots: []
+    };
+  }
+
+  const preferredRootCandidates = [
+    path.join(homeDir, ".openclaw"),
+    path.join(homeDir, ".config", "openclaw"),
+    ...(process.platform === "darwin"
+      ? [path.join(homeDir, "Library", "Application Support", "OpenClaw")]
+      : []),
+    path.join(homeDir, "AppData", "Roaming", "OpenClaw"),
+    path.join(homeDir, "AppData", "Local", "OpenClaw"),
+    defaultTempRoot
+  ];
+  let rootDir = defaultTempRoot;
+
+  for (const candidateRoot of preferredRootCandidates) {
+    try {
+      if ((await stat(candidateRoot)).isDirectory()) {
+        rootDir = candidateRoot;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const feeds = await Promise.all(
+    defaultFeeds.map(async (feed) => ({
+      absolutePath: await canonicalFeedPath(feed.absolutePath),
+      displayPath: displayUserPath(feed.absolutePath),
+      rootDir,
+      kind: feed.kind ?? classifyFeedKind(feed.absolutePath)
+    }))
+  );
+
+  return {
+    feeds,
+    watchedRoots: [
+      {
+        absolutePath: rootDir,
+        displayPath: `系统默认 OpenClaw 日志位点（${displayUserPath(rootDir)}）`
+      }
+    ]
+  };
 }
 
 export async function createRuntimeFeedCursor(feeds: RuntimeEventFeed[]): Promise<RuntimeFeedCursor> {

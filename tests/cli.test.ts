@@ -3888,6 +3888,88 @@ describe("CLI", () => {
     }
   });
 
+  it("can hear default OpenClaw temp logs on host watch even without an obvious project folder", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-default-temp-home-"));
+    const tempTmpRoot = await mkdtemp(path.join(os.tmpdir(), "traceroot-openclaw-default-temp-root-"));
+    const previousHome = process.env.HOME;
+    const previousTmpDir = process.env.TMPDIR;
+
+    try {
+      const defaultLogDir = path.join(tempTmpRoot, "openclaw");
+      await mkdir(defaultLogDir, { recursive: true });
+      const gatewayLog = path.join(defaultLogDir, "openclaw-2026-03-20.log");
+      await writeFile(gatewayLog, "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.env.TMPDIR = tempTmpRoot;
+
+      setTimeout(() => {
+        void appendFile(
+          gatewayLog,
+          `${new Date().toISOString()} WARN gateway Attempting to send email to customer@example.com from Telegram @ops-room path=mailer.ts\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("系统默认 OpenClaw 日志位点");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+      expect(output).toContain("openclaw-2026-03-20.log");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("整机陪跑时间线");
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("openclaw-2026-03-20.log");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      if (previousTmpDir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = previousTmpDir;
+      }
+
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempTmpRoot, { recursive: true, force: true });
+    }
+  });
+
   it("shows which sensitive dataset the agent touched in the audit timeline", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-log-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-sensitive-data-home-"));
