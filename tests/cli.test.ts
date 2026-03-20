@@ -4549,6 +4549,16 @@ describe("CLI", () => {
             response: {
               output: [
                 {
+                  type: "message",
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "output_text",
+                      text: "I can help with that."
+                    }
+                  ]
+                },
+                {
                   type: "function_call",
                   name: "send_email",
                   arguments: {

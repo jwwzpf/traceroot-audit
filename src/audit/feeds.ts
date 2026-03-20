@@ -981,6 +981,81 @@ function looksLikeStructuredToolEvent(method?: string): boolean {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function looksLikeStructuredToolItem(candidate: unknown): candidate is Record<string, unknown> {
+  if (!isRecord(candidate)) {
+    return false;
+  }
+
+  const type = pickString(candidate, ["type"]);
+  const toolName = pickString(candidate, ["name", "toolName", "tool_name", ["tool", "name"]]);
+
+  return typeof type === "string" && !!toolName && looksLikeStructuredToolEvent(type);
+}
+
+function firstStructuredToolItemFromArray(candidate: unknown): Record<string, unknown> | undefined {
+  if (!Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  for (const item of candidate) {
+    if (looksLikeStructuredToolItem(item)) {
+      return item;
+    }
+
+    if (isRecord(item)) {
+      if (looksLikeStructuredToolItem(item.item)) {
+        return item.item;
+      }
+
+      if (looksLikeStructuredToolItem(item.content_block)) {
+        return item.content_block;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeStructuredToolPayload(parsed: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(parsed.item) || isRecord(parsed.content_block)) {
+    return parsed;
+  }
+
+  const candidates = [
+    isRecord(parsed.response) ? parsed.response.output : undefined,
+    isRecord(parsed.response) ? parsed.response.content : undefined,
+    isRecord(parsed.response) ? parsed.response.items : undefined,
+    parsed.output,
+    parsed.content,
+    parsed.items,
+    isRecord(parsed.event) ? parsed.event.output : undefined,
+    isRecord(parsed.event) ? parsed.event.content : undefined,
+    isRecord(parsed.event) ? parsed.event.items : undefined,
+    isRecord(parsed.data) ? parsed.data.output : undefined,
+    isRecord(parsed.data) ? parsed.data.content : undefined,
+    isRecord(parsed.data) ? parsed.data.items : undefined,
+    isRecord(parsed.payload) ? parsed.payload.output : undefined,
+    isRecord(parsed.payload) ? parsed.payload.content : undefined,
+    isRecord(parsed.payload) ? parsed.payload.items : undefined
+  ];
+
+  for (const candidate of candidates) {
+    const toolItem = firstStructuredToolItemFromArray(candidate);
+    if (toolItem) {
+      return {
+        ...parsed,
+        item: toolItem
+      };
+    }
+  }
+
+  return parsed;
+}
+
 type ParsedPlainTextLogLine = {
   timestampValue?: string;
   levelValue?: string;
@@ -1142,9 +1217,9 @@ function inferStructuredRuntimeFeedEvent(
   parsed: Record<string, unknown>,
   targetRoot: string
 ): AuditEvent | null {
-  const method = pickString(parsed, [
-    ["response", "output", "0", "type"],
-    ["content", "0", "type"],
+  const normalizedParsed = normalizeStructuredToolPayload(parsed);
+
+  const method = pickString(normalizedParsed, [
     ["item", "type"],
     ["content_block", "type"],
     ["event", "item", "type"],
@@ -1153,6 +1228,8 @@ function inferStructuredRuntimeFeedEvent(
     ["data", "content_block", "type"],
     ["payload", "item", "type"],
     ["payload", "content_block", "type"],
+    ["response", "output", "0", "type"],
+    ["content", "0", "type"],
     "method",
     "type",
     ["event", "method"],
@@ -1162,7 +1239,7 @@ function inferStructuredRuntimeFeedEvent(
     ["payload", "method"],
     ["payload", "type"]
   ]);
-  const toolName = pickString(parsed, [
+  const toolName = pickString(normalizedParsed, [
     "toolName",
     "tool_name",
     "name",
@@ -1237,17 +1314,17 @@ function inferStructuredRuntimeFeedEvent(
   }
 
   const hasError =
-    getNestedValue(parsed, ["error"]) !== undefined ||
-    getNestedValue(parsed, ["event", "error"]) !== undefined ||
-    getNestedValue(parsed, ["data", "error"]) !== undefined ||
-    getNestedValue(parsed, ["payload", "error"]) !== undefined;
+    getNestedValue(normalizedParsed, ["error"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["event", "error"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["data", "error"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["payload", "error"]) !== undefined;
   const hasResult =
-    getNestedValue(parsed, ["result"]) !== undefined ||
-    getNestedValue(parsed, ["event", "result"]) !== undefined ||
-    getNestedValue(parsed, ["data", "result"]) !== undefined ||
-    getNestedValue(parsed, ["payload", "result"]) !== undefined;
+    getNestedValue(normalizedParsed, ["result"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["event", "result"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["data", "result"]) !== undefined ||
+    getNestedValue(normalizedParsed, ["payload", "result"]) !== undefined;
 
-  const explicitStatus = pickString(parsed, [
+  const explicitStatus = pickString(normalizedParsed, [
     "status",
     "phase",
     "outcome",
@@ -1255,7 +1332,7 @@ function inferStructuredRuntimeFeedEvent(
     ["data", "status"],
     ["payload", "status"]
   ]);
-  const outerEventType = pickString(parsed, [
+  const outerEventType = pickString(normalizedParsed, [
     "type",
     ["event", "type"],
     ["data", "type"],
@@ -1276,7 +1353,7 @@ function inferStructuredRuntimeFeedEvent(
         : "attempted";
 
   const runtimeName =
-    pickString(parsed, [
+    pickString(normalizedParsed, [
       "runtime",
       "agent",
       "provider",
@@ -1291,7 +1368,7 @@ function inferStructuredRuntimeFeedEvent(
       ["payload", "service"]
     ]) ?? "mcp";
   const channel =
-    pickString(parsed, [
+    pickString(normalizedParsed, [
       "channel",
       "source",
       ["event", "channel"],
@@ -1302,7 +1379,7 @@ function inferStructuredRuntimeFeedEvent(
       ["payload", "source"]
     ]) ?? undefined;
   const sender =
-    pickString(parsed, [
+    pickString(normalizedParsed, [
       "sender",
       "senderId",
       "user",
@@ -1322,7 +1399,7 @@ function inferStructuredRuntimeFeedEvent(
       ["payload", "userId"]
     ]) ?? undefined;
   const sessionKey =
-    pickString(parsed, [
+    pickString(normalizedParsed, [
       "sessionKey",
       "sessionId",
       "threadId",
@@ -1335,7 +1412,7 @@ function inferStructuredRuntimeFeedEvent(
       ["payload", "sessionId"]
     ]) ?? undefined;
 
-  const targetValue = pickString(parsed, [
+  const targetValue = pickString(normalizedParsed, [
     "target",
     "path",
     "file",
@@ -1415,9 +1492,9 @@ function inferStructuredRuntimeFeedEvent(
     ["payload", "arguments", "target"]
   ]);
   const target = targetValue ? path.resolve(targetRoot, targetValue) : targetRoot;
-  const serialized = JSON.stringify(parsed);
+  const serialized = JSON.stringify(normalizedParsed);
   const directRecipient =
-    pickString(parsed, [
+    pickString(normalizedParsed, [
       "recipient",
       "to",
       "email",
@@ -1434,7 +1511,7 @@ function inferStructuredRuntimeFeedEvent(
   const humanAction = actionLabel(action);
   const severity =
     normalizeSeverity(
-      pickString(parsed, [
+      pickString(normalizedParsed, [
         "severity",
         "risk",
         "level",
@@ -1463,7 +1540,7 @@ function inferStructuredRuntimeFeedEvent(
   }
 
   return {
-    timestamp: pickString(parsed, [
+    timestamp: pickString(normalizedParsed, [
       "timestamp",
       "time",
       ["event", "timestamp"],
@@ -1481,7 +1558,7 @@ function inferStructuredRuntimeFeedEvent(
     message: humanMessage,
     recommendation: inferRecommendation(action, severity),
     evidence: buildActionEvidenceFromStructuredPayload({
-      parsed,
+      parsed: normalizedParsed,
       targetRoot,
       targetValue,
       action,
@@ -1494,7 +1571,7 @@ function inferStructuredRuntimeFeedEvent(
         sessionKey,
         recipient: directRecipient,
         resourceLabel: !isFileLikeAction(action) && targetValue ? targetValue : undefined,
-        raw: parsed
+        raw: normalizedParsed
       }
     })
   };
