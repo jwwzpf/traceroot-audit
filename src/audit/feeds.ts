@@ -361,6 +361,20 @@ function inferSenderFromText(message: string): string | undefined {
 }
 
 function inferRecipientFromText(message: string): string | undefined {
+  const naturalHandleOrPhoneMatch = message.match(
+    /\bto\s+(@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+|\+\d[\d\s-]{6,}\d)\b/i
+  );
+  if (naturalHandleOrPhoneMatch?.[1]) {
+    return naturalHandleOrPhoneMatch[1].replace(/\s+/g, " ").trim();
+  }
+
+  const handleOrPhoneMatch = message.match(
+    /\b(?:to|recipient|chat|room|channel|thread|dm|handle|user)\s*[:=]\s*("?)(@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+|\+\d[\d\s-]{6,}\d|[A-Za-z0-9_.-]{3,})\1/i
+  );
+  if (handleOrPhoneMatch?.[2]) {
+    return handleOrPhoneMatch[2].replace(/\s+/g, " ").trim();
+  }
+
   const labeledMatch = message.match(
     /\b(?:to|recipient|email|mail_to|mailto)\s*[:=]\s*("?)([A-Za-z0-9_.+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\1/i
   );

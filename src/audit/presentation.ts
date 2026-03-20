@@ -208,6 +208,33 @@ function truncateDisplayText(value: string, maxLength = 60): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
 }
 
+function channelSubjectLabel(event: AuditEvent): string | null {
+  const evidence = event.evidence ?? {};
+  const normalizedAction = (event.action ?? "").trim().toLowerCase();
+  const rawChannel = normalizeDisplayText(evidence.channel);
+  const rawRecipient = normalizeDisplayText(evidence.recipient);
+
+  if (!/(send-message|public-post)/.test(normalizedAction)) {
+    return null;
+  }
+
+  const channel = notifyChannelLabel(rawChannel);
+
+  if (channel && rawRecipient) {
+    return `${channel}（${truncateDisplayText(rawRecipient)}）`;
+  }
+
+  if (channel) {
+    return channel;
+  }
+
+  if (rawRecipient) {
+    return `发给 ${truncateDisplayText(rawRecipient)}`;
+  }
+
+  return null;
+}
+
 function getNestedValue(source: unknown, pathSegments: string[]): unknown {
   let current = source;
 
@@ -340,6 +367,11 @@ function inferSubjectFromRawEvidence(event: AuditEvent): string | null {
 }
 
 export function actionSubjectLabel(event: AuditEvent): string | null {
+  const channelSubject = channelSubjectLabel(event);
+  if (channelSubject) {
+    return channelSubject;
+  }
+
   const evidence = event.evidence ?? {};
   const normalizedAction = (event.action ?? "").trim().toLowerCase();
   const recipient = normalizeDisplayText(evidence.recipient);

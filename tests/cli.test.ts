@@ -3477,6 +3477,84 @@ describe("CLI", () => {
     }
   });
 
+  it("shows where a risky outgoing message is headed in the audit timeline", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-message-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-message-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "WHATSAPP_TOKEN=secret\nTELEGRAM_BOT_TOKEN=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "runtime-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "runtime-events.log"),
+          `${new Date().toISOString()} WARN notifier-agent sending message to @ops-room via Telegram path=workspace/outbox\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["chat-support"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("对外发消息（Telegram（@ops-room））");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("Agent 开始尝试：对外发消息（Telegram（@ops-room））");
+      expect(logsOutput).toContain("这一步看起来涉及：Telegram（@ops-room）");
+      expect(logsOutput).toContain("触发来源：Telegram");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can infer risky runtime actions from message-only JSON events", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-json-message-only-home-"));
