@@ -986,6 +986,93 @@ describe("CLI", () => {
     }
   });
 
+  it("can reuse a nested YAML chat route from a known OpenClaw home", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-yaml-notify-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      const openClawDir = path.join(tempHome, ".config", "openclaw");
+      const logsDir = path.join(openClawDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(openClawDir, "openclaw.yaml"),
+        [
+          "notifications:",
+          "  routes:",
+          "    - channel: telegram",
+          "      target: '@ops-room'",
+          "logging:",
+          "  gateway:",
+          "    file: logs/runtime-events.jsonl"
+        ].join("\n"),
+        "utf8"
+      );
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "openclaw",
+              target: "mailer.ts",
+              message: "Agent is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const messengerArgs = await messenger.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(messengerArgs).toContain("--channel");
+      expect(messengerArgs).toContain("telegram");
+      expect(messengerArgs).toContain("--target");
+      expect(messengerArgs).toContain("@ops-room");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("backfills today's earlier risky runtime actions into the audit timeline when doctor watch starts later", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-backfill-home-"));
     const previousHome = process.env.HOME;
@@ -5545,6 +5632,78 @@ describe("CLI", () => {
       expect(output).toContain("TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：Telegram（@ops-room）");
       expect(output).toContain("TraceRoot 这次会直接把高风险提醒顺手发到 Telegram（@ops-room）");
       expect(output).toContain("Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }, 10000);
+
+  it("can detect a JSON5 reminder route without asking for extra reminder details", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-json5-notify-route-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-json5-notify-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "0.0.0.0:11434:11434"\n',
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "mailer.ts"),
+        "import nodemailer from 'nodemailer';\nfetch('https://api.example.com');\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "openclaw.json"),
+        [
+          "{",
+          "  // TraceRoot should be able to read this route directly",
+          "  notifications: {",
+          "    routes: [",
+          "      { channel: 'telegram', target: '@ops-room', },",
+          "    ],",
+          "  },",
+          "}"
+        ].join("\n"),
+        "utf8"
+      );
+      process.env.HOME = tempHome;
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "1",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          confirm: [true]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("高风险提醒顺手发到 Telegram（@ops-room）");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

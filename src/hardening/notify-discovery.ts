@@ -1,3 +1,8 @@
+import path from "node:path";
+
+import JSON5 from "json5";
+import YAML from "yaml";
+
 import { discoverFiles, resolveTarget } from "../utils/files";
 import { SUPPORTED_OPENCLAW_NOTIFY_CHANNELS } from "../audit/notifier";
 
@@ -19,6 +24,13 @@ const displayChannelNames: Record<string, string> = {
   imessage: "iMessage",
   msteams: "Microsoft Teams"
 };
+
+const structuredConfigExtensions = new Set([".json", ".yaml", ".yml"]);
+const targetPropertyNames = ["target", "recipient", "destination", "to", "chat_id", "room_id", "channel_id"];
+const accountPropertyNames = ["account", "account_name", "profile"];
+const channelPropertyNames = ["channel", "type", "provider", "service", "platform"];
+const routeContainerPattern =
+  /(notify|notification|notifications|route|routes|channel|channels|chat|chats|alert|alerts|relay|reminder|reminders|delivery|deliveries)/i;
 
 function channelPattern(channel: string): RegExp {
   if (channel === "googlechat") {
@@ -93,6 +105,196 @@ function extractAccountCandidates(content: string): string[] {
   ]);
 }
 
+function normalizeChannelValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  for (const channel of SUPPORTED_OPENCLAW_NOTIFY_CHANNELS) {
+    if (normalized === channel) {
+      return channel;
+    }
+  }
+
+  if (normalized === "google-chat" || normalized === "google_chat") {
+    return "googlechat";
+  }
+
+  if (
+    normalized === "microsoft-teams" ||
+    normalized === "microsoft_teams" ||
+    normalized === "ms-teams" ||
+    normalized === "ms_teams" ||
+    normalized === "teams"
+  ) {
+    return "msteams";
+  }
+
+  return undefined;
+}
+
+function parseStructuredConfig(filePath: string, content: string): unknown {
+  const extension = path.extname(filePath).toLowerCase();
+  if (!structuredConfigExtensions.has(extension)) {
+    return undefined;
+  }
+
+  try {
+    if (extension === ".json") {
+      return JSON5.parse(content) as unknown;
+    }
+
+    return YAML.parse(content) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractStringPropertyCandidates(
+  source: Record<string, unknown>,
+  propertyNames: string[]
+): string[] {
+  return uniqueStrings(
+    propertyNames.flatMap((name) => {
+      const value = source[name];
+      return typeof value === "string" ? [value] : [];
+    })
+  );
+}
+
+function registerStructuredHit(
+  channel: string,
+  fileLabel: string,
+  contextLabel: string | undefined,
+  targetHints: string[],
+  accountHints: string[],
+  matches: Map<string, Set<string>>,
+  targets: Map<string, Set<string>>,
+  accounts: Map<string, Set<string>>
+): void {
+  const evidence = matches.get(channel) ?? new Set<string>();
+  evidence.add(contextLabel ? `${fileLabel}（${contextLabel}）` : fileLabel);
+  matches.set(channel, evidence);
+
+  const targetBucket = targets.get(channel) ?? new Set<string>();
+  for (const candidate of targetHints) {
+    targetBucket.add(candidate);
+  }
+  targets.set(channel, targetBucket);
+
+  const accountBucket = accounts.get(channel) ?? new Set<string>();
+  for (const candidate of accountHints) {
+    accountBucket.add(candidate);
+  }
+  accounts.set(channel, accountBucket);
+}
+
+function traverseStructuredNotifyConfig(
+  value: unknown,
+  state: {
+    fileLabel: string;
+    path: string[];
+    inheritedChannel?: string;
+    matches: Map<string, Set<string>>;
+    targets: Map<string, Set<string>>;
+    accounts: Map<string, Set<string>>;
+  }
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      traverseStructuredNotifyConfig(item, {
+        ...state,
+        path: [...state.path, `[${index}]`]
+      })
+    );
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  const pathLabel = state.path.join(" › ");
+  const contextLabel = pathLabel || undefined;
+
+  const explicitChannel = uniqueStrings(
+    channelPropertyNames.flatMap((name) => {
+      const detected = normalizeChannelValue(record[name]);
+      return detected ? [detected] : [];
+    })
+  )[0];
+
+  const pathChannels = state.path
+    .map((segment) => normalizeChannelValue(segment.replace(/^\[(\d+)\]$/, "")))
+    .filter((segment): segment is string => Boolean(segment));
+  const inheritedChannel = explicitChannel ?? pathChannels.at(-1) ?? state.inheritedChannel;
+
+  const targetHints = extractStringPropertyCandidates(record, targetPropertyNames);
+  const accountHints = extractStringPropertyCandidates(record, accountPropertyNames);
+
+  if (inheritedChannel && (targetHints.length > 0 || accountHints.length > 0)) {
+    registerStructuredHit(
+      inheritedChannel,
+      state.fileLabel,
+      contextLabel,
+      targetHints,
+      accountHints,
+      state.matches,
+      state.targets,
+      state.accounts
+    );
+  }
+
+  for (const [key, child] of Object.entries(record)) {
+    const normalizedKeyChannel = normalizeChannelValue(key);
+    const childPath = [...state.path, key];
+    const childInheritedChannel = normalizedKeyChannel ?? inheritedChannel;
+
+    if (normalizedKeyChannel) {
+      const childTargets =
+        typeof child === "string"
+          ? extractTargetCandidates(normalizedKeyChannel, child)
+          : [];
+      const childAccounts =
+        typeof child === "string"
+          ? extractAccountCandidates(child)
+          : [];
+
+      if (childTargets.length > 0 || childAccounts.length > 0) {
+        registerStructuredHit(
+          normalizedKeyChannel,
+          state.fileLabel,
+          childPath.join(" › "),
+          childTargets,
+          childAccounts,
+          state.matches,
+          state.targets,
+          state.accounts
+        );
+      }
+    }
+
+    const shouldDescend =
+      normalizedKeyChannel !== undefined ||
+      routeContainerPattern.test(key) ||
+      inheritedChannel !== undefined;
+
+    if (shouldDescend) {
+      traverseStructuredNotifyConfig(child, {
+        ...state,
+        path: childPath,
+        inheritedChannel: childInheritedChannel
+      });
+    }
+  }
+}
+
 export async function detectLikelyNotifyChannels(
   target: string
 ): Promise<LikelyNotifyChannel[]> {
@@ -127,6 +329,17 @@ export async function detectLikelyNotifyChannels(
         accountHints.add(candidate);
       }
       accounts.set(channel, accountHints);
+    }
+
+    const structured = parseStructuredConfig(file.relativePath, file.content);
+    if (structured !== undefined) {
+      traverseStructuredNotifyConfig(structured, {
+        fileLabel,
+        path: [],
+        matches,
+        targets,
+        accounts
+      });
     }
   }
 
