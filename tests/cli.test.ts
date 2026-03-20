@@ -3026,6 +3026,8 @@ describe("CLI", () => {
 
       expect(logsExitCode).toBe(0);
       expect(logsCapture.read().stdout).toContain("OpenClaw 刚刚已经把一封外部邮件发出去了。");
+      expect(logsCapture.read().stdout).toContain("今天已经收住的高风险动作");
+      expect(logsCapture.read().stdout).toContain("对外发邮件：已经走完 1 次");
       expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
     } finally {
       if (previousHome === undefined) {
@@ -3536,6 +3538,8 @@ describe("CLI", () => {
 
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("今天已经收住的高风险动作");
+      expect(logsOutput).toContain("对外发邮件：已经走完 1 次");
       expect(logsOutput).toContain("Agent 已完成：对外发邮件");
       expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
     } finally {
@@ -4036,6 +4040,8 @@ describe("CLI", () => {
 
       expect(logsExitCode).toBe(0);
       expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("今天已经收住的高风险动作");
+      expect(logsOutput).toContain("对外发邮件：已经走完 2 次");
       expect(logsOutput).toContain("Agent 已完成：对外发邮件");
       expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
     } finally {

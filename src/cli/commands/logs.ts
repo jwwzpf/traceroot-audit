@@ -71,6 +71,13 @@ type OpenMatter = {
   timestamp: string;
 };
 
+type SettledAction = {
+  severity: AuditSeverity;
+  actionLabel: string;
+  count: number;
+  note: string;
+};
+
 function severityIcon(severity: AuditSeverity): string {
   switch (severity) {
     case "critical":
@@ -586,6 +593,57 @@ function summarizeOpenMatters(
       return right.timestamp.localeCompare(left.timestamp);
     })
     .slice(0, 3);
+}
+
+function summarizeSettledActions(timelineEntries: TimelineEntry[]): SettledAction[] {
+  const settled = new Map<
+    string,
+    { severity: AuditSeverity; actionLabel: string; count: number }
+  >();
+
+  for (const entry of timelineEntries) {
+    const event = entry.primary;
+
+    if (
+      event.category !== "action-event" ||
+      event.status !== "succeeded" ||
+      event.severity === "safe"
+    ) {
+      continue;
+    }
+
+    const label = actionLabel(event.action);
+    const existing = settled.get(label) ?? {
+      severity: event.severity,
+      actionLabel: label,
+      count: 0
+    };
+
+    existing.count += 1;
+    if (severityRank(event.severity) > severityRank(existing.severity)) {
+      existing.severity = event.severity;
+    }
+
+    settled.set(label, existing);
+  }
+
+  return [...settled.values()]
+    .sort((left, right) => {
+      const severityDelta = severityRank(right.severity) - severityRank(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      return right.count - left.count;
+    })
+    .slice(0, 3)
+    .map((entry) => ({
+      ...entry,
+      note:
+        entry.count > 1
+          ? `今天这类高风险动作已经走完了 ${entry.count} 次，至少从时间线上看，目前没有卡在半路。`
+          : "这类高风险动作今天已经顺利走完，至少从时间线上看，目前没有卡在半路。"
+    }));
 }
 
 function summarizeEvents(
@@ -1221,6 +1279,7 @@ async function printLogs(
   if (options.header !== false) {
     const summary = summarizeEvents(eventsAscending, approvedIntentIds);
     const openMatters = summarizeOpenMatters(timelineEntries, approvedIntentIds);
+    const settledActions = summarizeSettledActions(timelineEntries);
     const freshSinceLastReview = reviewState
       ? (
           await readAuditEvents({
@@ -1344,6 +1403,15 @@ async function printLogs(
         "   这代表目前看起来没有哪一步正卡在半路上，也没有哪块边界正在明显外扩。",
         ""
       );
+    }
+
+    if (settledActions.length > 0) {
+      lines.push("✅ 今天已经收住的高风险动作：");
+      for (const action of settledActions) {
+        lines.push(`- ${severityIcon(action.severity)} ${action.actionLabel}：已经走完 ${action.count} 次`);
+        lines.push(`  ${action.note}`);
+      }
+      lines.push("");
     }
 
     if (summary.latestAttention) {
