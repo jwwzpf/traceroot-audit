@@ -132,6 +132,7 @@ node dist/cli/index.js logs --tail
 ```
 
 If TraceRoot already knows which target you were watching last, `logs` now resumes that target by default so you can jump back into the right audit timeline without retyping the path. Use `--all` when you want the full machine-wide timeline instead.
+When TraceRoot can see the same runtime action move from “started” to “completed” or “failed”, that full path now stays visible in the audit timeline too, so `logs --today` reads more like what actually happened than a pile of feed entries.
 
 Wrap a real high-risk action so TraceRoot records it before and after execution:
 

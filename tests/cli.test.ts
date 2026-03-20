@@ -3463,6 +3463,85 @@ describe("CLI", () => {
     }
   });
 
+  it("can ingest plain-text MCP tool result logs and show them as completed actions", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-mcp-tool-result-log-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-mcp-tool-result-log-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.log"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "mcp-events.log"),
+          `${new Date().toISOString()} INFO gmail-mcp tool result send_email sent to customer@example.com from Telegram @ops-room path=mailer.ts\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("刚刚已经完成了一个高风险动作：对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("Agent 已完成：对外发邮件");
+      expect(logsOutput).toContain("触发来源：Telegram（@ops-room）");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can ingest plain-text runtime logs for destructive actions without extra wiring", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-delete-"));
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-plain-runtime-delete-home-"));
@@ -3780,6 +3859,99 @@ describe("CLI", () => {
       expect(logsOutput).toContain("触发来源：Slack（@fin-ops）");
       expect(logsOutput).toContain("来源日志");
       expect(logsOutput).toContain("runtime-events.jsonl");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can ingest structured MCP tool result events and show them as completed actions", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-mcp-result-"));
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-structured-mcp-result-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      await writeFile(
+        path.join(tempDir, ".env"),
+        "SMTP_API_KEY=test\nAWS_SECRET_ACCESS_KEY=secret\n",
+        "utf8"
+      );
+      await writeFile(
+        path.join(tempDir, "docker-compose.yml"),
+        'services:\n  runtime:\n    ports:\n      - "127.0.0.1:11434:11434"\n',
+        "utf8"
+      );
+      await mkdir(path.join(tempDir, "logs"), { recursive: true });
+      await writeFile(path.join(tempDir, "logs", "mcp-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(tempDir, "logs", "mcp-events.jsonl"),
+          `${JSON.stringify({
+            method: "tools/result",
+            runtime: "gmail-mcp",
+            status: "completed",
+            channel: "telegram",
+            sender: "@ops-room",
+            params: {
+              name: "send_email",
+              to: "customer@example.com",
+              path: "mailer.ts"
+            },
+            result: {
+              ok: true
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          tempDir,
+          "--watch",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseMany: [["email-reply"]],
+          chooseOne: ["always-confirm", "no-write", "localhost-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("刚刚已经完成了一个高风险动作：对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", tempDir, "--today"],
+        logsCapture.io,
+        createStaticPrompter({})
+      );
+
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("gmail-mcp 刚完成了一个 MCP 工具调用");
+      expect(logsOutput).toContain("Agent 已完成：对外发邮件");
+      expect(logsOutput).toContain("这一步看起来涉及：发给 customer@example.com");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

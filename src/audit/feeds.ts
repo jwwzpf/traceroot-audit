@@ -754,7 +754,7 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
   const normalizedMessage = message.toLowerCase();
 
   if (
-    !/(tools\/call|tool\s+call|tool-call|mcp\s+tool|calling\s+tool|invoking\s+tool)/i.test(
+    !/(tools\/call|tools\/result|tool\s+call|tool\s+result|tool-call|tool-result|mcp\s+tool|calling\s+tool|invoking\s+tool|completed\s+tool|finished\s+tool|failed\s+tool)/i.test(
       normalizedMessage
     )
   ) {
@@ -783,6 +783,26 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
   const sender = inferSenderFromText(message);
   const humanAction = actionLabel(action);
   const toolLabel = toolName ?? action;
+  const inferredStatus = inferStatusFromMessage(message);
+  const status = inferredStatus === "observed" ? "attempted" : inferredStatus;
+
+  let humanMessage: string;
+  if (status === "succeeded") {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 刚完成了一个 MCP 工具调用，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 刚完成了一个 MCP 工具调用，TraceRoot 判断这一步相当于：${humanAction}。`;
+  } else if (status === "failed") {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 刚尝试了一个 MCP 工具调用，但没有完成，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 刚尝试了一个 MCP 工具调用，但没有完成，TraceRoot 判断这一步相当于：${humanAction}。`;
+  } else {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`;
+  }
 
   return {
     timestamp: timestampValue ?? new Date().toISOString(),
@@ -793,14 +813,8 @@ function parsePlainTextMcpToolCallLine(line: string, targetRoot: string): AuditE
     runtime: runtimeName,
     surfaceKind: "runtime",
     action,
-    status: (() => {
-      const inferredStatus = inferStatusFromMessage(message);
-      return inferredStatus === "observed" ? "attempted" : inferredStatus;
-    })(),
-    message:
-      toolName && toolName !== action
-        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
-        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
+    status,
+    message: humanMessage,
     recommendation: inferRecommendation(action, severity),
     evidence: buildActionEvidenceFromText(message, targetRoot, {
       source: "mcp-tool-call-log",
@@ -885,7 +899,7 @@ function inferStructuredRuntimeFeedEvent(
 
   const looksLikeToolCall =
     typeof method === "string" &&
-    /(tools\/call|tool.call|tool-call|mcp.tool.call)/i.test(method);
+    /(tools\/call|tools\/result|tool.call|tool.result|tool-call|tool-result|mcp.tool.call|mcp.tool.result)/i.test(method);
 
   const action = inferActionFromToolName(toolName);
   if (!looksLikeToolCall || !action) {
@@ -1021,6 +1035,24 @@ function inferStructuredRuntimeFeedEvent(
       ])
     ) ?? severityFromAction(action);
 
+  let humanMessage: string;
+  if (status === "succeeded") {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 刚完成了一个 MCP 工具调用，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 刚完成了一个 MCP 工具调用，TraceRoot 判断这一步相当于：${humanAction}。`;
+  } else if (status === "failed") {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 刚尝试了一个 MCP 工具调用，但没有完成，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 刚尝试了一个 MCP 工具调用，但没有完成，TraceRoot 判断这一步相当于：${humanAction}。`;
+  } else {
+    humanMessage =
+      toolName && toolName !== action
+        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
+        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`;
+  }
+
   return {
     timestamp: pickString(parsed, [
       "timestamp",
@@ -1037,10 +1069,7 @@ function inferStructuredRuntimeFeedEvent(
     surfaceKind: "runtime",
     action,
     status,
-    message:
-      toolName && toolName !== action
-        ? `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}（工具名：${toolLabel}）。`
-        : `${runtimeName} 正在调用一个 MCP 工具，TraceRoot 判断这一步相当于：${humanAction}。`,
+    message: humanMessage,
     recommendation: inferRecommendation(action, severity),
     evidence: buildActionEvidenceFromStructuredPayload({
       parsed,
