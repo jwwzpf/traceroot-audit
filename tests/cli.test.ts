@@ -6776,6 +6776,53 @@ describe("CLI", () => {
     }
   });
 
+  it("can discover a generic config-home runtime when native runtime feeds are present", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-generic-runtime-"));
+    const tempCwd = await mkdtemp(path.join(os.tmpdir(), "traceroot-host-discover-generic-cwd-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+
+    try {
+      const runtimeDir = path.join(tempHome, ".config", "shrimpbox");
+      const logsDir = path.join(runtimeDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(runtimeDir, "runtime-config.yaml"),
+        [
+          "logging:",
+          "  gateway:",
+          "    file: logs/runtime-events.jsonl"
+        ].join("\n"),
+        "utf8"
+      );
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.chdir(tempCwd);
+
+      const capture = createCapture();
+      const exitCode = await runCli(["node", "traceroot-audit", "discover", "--host"], capture.io);
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot Audit Host Discovery");
+      expect(output).toContain("Best first checks");
+      expect(output).toContain("~/.config/shrimpbox");
+      expect(output).toContain("原生运行时活动日志");
+      expect(output).toContain("runtime-events.jsonl");
+      expect(output).toContain("traceroot-audit doctor");
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempCwd, { recursive: true, force: true });
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("defaults discover to the current directory", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "traceroot-scan-default-"));
     const previousCwd = process.cwd();

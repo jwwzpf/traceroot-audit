@@ -202,6 +202,10 @@ function describeWatchedRootForHuman(root: {
   displayPath: string;
   kind: "candidate" | "known-runtime-home";
 }): string {
+  if (root.displayPath.includes("系统默认 OpenClaw 日志位点")) {
+    return root.displayPath;
+  }
+
   const normalizedPath = root.absolutePath.toLowerCase();
   const displayPath = root.displayPath;
 
@@ -862,7 +866,12 @@ async function discoverHostRuntimeFeeds(options: {
 
   const nativeFeedDiscovery = await discoverHostNativeRuntimeFeeds(options.homeDir);
   for (const watchedRoot of nativeFeedDiscovery.watchedRoots) {
-    if (!watchedRoots.has(watchedRoot.absolutePath)) {
+    const existing = watchedRoots.get(watchedRoot.absolutePath);
+    if (
+      !existing ||
+      existing.kind === "candidate" ||
+      watchedRoot.displayPath.includes("系统默认 OpenClaw 日志位点")
+    ) {
       watchedRoots.set(watchedRoot.absolutePath, {
         absolutePath: watchedRoot.absolutePath,
         displayPath: watchedRoot.displayPath,

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import fg from "fast-glob";
 
-import { discoverRuntimeEventFeeds } from "../audit/feeds";
+import { discoverHostNativeRuntimeFeeds, discoverRuntimeEventFeeds } from "../audit/feeds";
 import { loadManifest } from "../manifest/loader";
 import type { ScanTargetType } from "../rules/types";
 import { discoverFiles, resolveTarget } from "../utils/files";
@@ -232,6 +232,8 @@ const localAgentPathPattern =
 const mcpPathPattern = /(^|\/)(?:\.mcp|mcp(?:-servers?)?)(\/|$)|\.mcp\.(json|ya?ml)$/i;
 const skillPathLikePattern = /(^|\/)(?:skills?|tools?|plugins?)(\/|$)/i;
 const genericAppPathPattern = /(^|\/)(?:frontend|backend|mobile|apps?|web)(\/|$)/i;
+const configHomePathPattern =
+  /(^|\/)(?:\.config|Library\/Application Support|AppData\/(?:Roaming|Local))(\/|$)/i;
 
 export function knownLocalAgentHomes(homeDir: string): string[] {
   return [
@@ -455,6 +457,10 @@ function candidateMetadata(
   const hasActionMarker =
     pathHasActionSegment(candidatePath) ||
     normalizedSignals.some((value) => actionKeywordPattern.test(value));
+  const looksLikeConfigHomeRuntime =
+    hasRuntimeFeeds &&
+    (configHomePathPattern.test(normalizedCandidatePath) ||
+      normalizedSignals.some((value) => configHomePathPattern.test(value)));
   const looksGenericApp =
     genericAppPathPattern.test(normalizedCandidatePath) &&
     !hasOpenClawMarker &&
@@ -496,6 +502,10 @@ function candidateMetadata(
     score += 14;
   }
 
+  if (looksLikeConfigHomeRuntime) {
+    score += 10;
+  }
+
   if (hasLocalAgentMarker && hasRuntimeFeeds) {
     score += 10;
   }
@@ -534,7 +544,7 @@ function candidateMetadata(
     recommendedAction = "doctor";
     recommendedActionLabel = "open TraceRoot Doctor here first";
     recommendedCommand = hostDoctorCommandPath(candidatePath);
-  } else if (hasLocalAgentMarker && hasRuntimeFeeds) {
+  } else if ((hasLocalAgentMarker && hasRuntimeFeeds) || looksLikeConfigHomeRuntime) {
     categoryLabel = "local agent runtime";
     attention = "worth checking first: native runtime activity was detected here";
     recommendedAction = "doctor";
@@ -618,10 +628,22 @@ export async function discoverHost(
   const cwd = await canonicalPath(options.cwd ?? process.cwd());
   const includeCwd = options.includeCwd ?? false;
   const rootSpecs = hostSearchRoots(homeDir, cwd, includeCwd);
+  const nativeFeedDiscovery = await discoverHostNativeRuntimeFeeds(homeDir);
   const searchableRoots = [];
   const knownRuntimeHomeSet = new Set(
     knownLocalAgentHomes(homeDir).map((runtimeHome) => path.resolve(runtimeHome))
   );
+  const nativeFeedsByRoot = new Map<string, typeof nativeFeedDiscovery.feeds>();
+
+  for (const watchedRoot of nativeFeedDiscovery.watchedRoots) {
+    knownRuntimeHomeSet.add(path.resolve(watchedRoot.absolutePath));
+  }
+
+  for (const feed of nativeFeedDiscovery.feeds) {
+    const existing = nativeFeedsByRoot.get(feed.rootDir) ?? [];
+    existing.push(feed);
+    nativeFeedsByRoot.set(feed.rootDir, existing);
+  }
 
   for (const rootSpec of rootSpecs) {
     if (await pathExists(rootSpec.absolutePath)) {
@@ -692,6 +714,16 @@ export async function discoverHost(
     }
   }
 
+  for (const watchedRoot of nativeFeedDiscovery.watchedRoots) {
+    const existing = candidateMap.get(watchedRoot.absolutePath);
+    if (!existing || existing.score < 8) {
+      candidateMap.set(watchedRoot.absolutePath, {
+        absolutePath: watchedRoot.absolutePath,
+        score: 8
+      });
+    }
+  }
+
   const discoveredCandidates = [];
   const rankedCandidatePaths = [...candidateMap.values()]
     .sort((left, right) => {
@@ -716,28 +748,35 @@ export async function discoverHost(
 
     try {
       const discovery = await discoverTarget(candidate.absolutePath);
-      const runtimeFeeds = await discoverRuntimeEventFeeds(candidate.absolutePath);
+      const runtimeFeeds = new Map<string, Awaited<ReturnType<typeof discoverRuntimeEventFeeds>>[number]>();
+      for (const feed of await discoverRuntimeEventFeeds(candidate.absolutePath)) {
+        runtimeFeeds.set(feed.absolutePath, feed);
+      }
+      for (const feed of nativeFeedsByRoot.get(candidate.absolutePath) ?? []) {
+        runtimeFeeds.set(feed.absolutePath, feed);
+      }
+      const runtimeFeedList = [...runtimeFeeds.values()];
       const strongSignals = [
         ...summarizeStrongSignals(discovery),
-        ...runtimeFeeds
+        ...runtimeFeedList
           .slice(0, 3)
           .map((feed) => path.relative(candidate.absolutePath, feed.absolutePath).replace(/\\/g, "/"))
       ].slice(0, 5);
       const surfaceReasons =
-        runtimeFeeds.length > 0
+        runtimeFeedList.length > 0
           ? ["found native runtime activity logs under this local agent home", ...discovery.surface.reasons]
           : discovery.surface.reasons;
       const keepCandidate =
         strongSignals.length > 0 ||
         discovery.surface.confidence === "high" ||
         pathHasActionSegment(candidate.absolutePath) ||
-        runtimeFeeds.length > 0;
+        runtimeFeedList.length > 0;
 
       if (!keepCandidate) {
         continue;
       }
 
-      const metadata = candidateMetadata(discovery, candidate.absolutePath, runtimeFeeds.length > 0);
+      const metadata = candidateMetadata(discovery, candidate.absolutePath, runtimeFeedList.length > 0);
 
       discoveredCandidates.push({
         absolutePath: candidate.absolutePath,
@@ -745,7 +784,7 @@ export async function discoverHost(
         surface: {
           ...discovery.surface,
           confidence:
-            runtimeFeeds.length > 0 && discovery.surface.confidence === "low"
+            runtimeFeedList.length > 0 && discovery.surface.confidence === "low"
               ? "medium"
               : discovery.surface.confidence,
           reasons: surfaceReasons
