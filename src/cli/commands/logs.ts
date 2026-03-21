@@ -746,6 +746,25 @@ function summarizeDailyVerdict(options: {
   };
 }
 
+function latestAttentionReminder(event: AuditEvent | null): string | null {
+  if (!event || event.category !== "action-event") {
+    return null;
+  }
+
+  const actor = actorLabel(event);
+  const label = actionLabelWithSubject(event);
+
+  if (event.status === "succeeded") {
+    return `先记住这一件：${actor} 今天已经完成过「${label}」。`;
+  }
+
+  if (event.status === "failed") {
+    return `先记住这一件：${actor} 今天尝试过「${label}」，但最后没有完成。`;
+  }
+
+  return `先记住这一件：${actor} 今天动过「${label}」。`;
+}
+
 function summarizeEvents(
   events: AuditEvent[],
   approvedIntentIds: HardeningIntentId[] = []
@@ -1515,8 +1534,14 @@ async function printLogs(
       "🩺 今天的审计结论：",
       `- ${dailyVerdict.headline}`,
       `- ${dailyVerdict.note}`,
-      ""
     );
+
+    const reminder = latestAttentionReminder(summary.latestAttention);
+    if (reminder) {
+      lines.push(`- ${reminder}`);
+    }
+
+    lines.push("");
 
     const partialView =
       Boolean(options.severity) ||

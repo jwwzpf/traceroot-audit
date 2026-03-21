@@ -3295,6 +3295,7 @@ describe("CLI", () => {
       expect(logsCapture.read().stdout).toContain("OpenClaw 刚刚已经把一封外部邮件发出去了。");
       expect(logsCapture.read().stdout).toContain("今天的审计结论");
       expect(logsCapture.read().stdout).toContain("今天已经发生过高风险动作，最该先回看的是「对外发邮件」");
+      expect(logsCapture.read().stdout).toContain("先记住这一件：OpenClaw 运行时 今天已经完成过「对外发邮件」。");
       expect(logsCapture.read().stdout).toContain("今天已经收住的高风险动作");
       expect(logsCapture.read().stdout).toContain("对外发邮件：已经走完 1 次");
       expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
