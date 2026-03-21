@@ -732,6 +732,90 @@ describe("CLI", () => {
     }
   });
 
+  it("can hear native runtime events from a generic config home when the runtime uses OpenClaw-style config structure", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-generic-config-home-"));
+    const previousHome = process.env.HOME;
+
+    try {
+      const runtimeDir = path.join(tempHome, ".config", "shrimpbox");
+      const logsDir = path.join(runtimeDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(runtimeDir, "runtime-config.yaml"),
+        [
+          "logging:",
+          "  gateway:",
+          "    file: logs/runtime-events.jsonl"
+        ].join("\n"),
+        "utf8"
+      );
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "shrimpbox-runtime",
+              target: "mailer.ts",
+              message: "Shrimpbox runtime is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({
+          chooseOne: ["local-only"]
+        })
+      );
+
+      const output = capture.read().stdout;
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("TraceRoot 现在已经接上：运行位点（~/.config/shrimpbox）");
+      expect(output).toContain("~/.config/shrimpbox");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("对外发邮件");
+
+      const logsCapture = createCapture();
+      const logsExitCode = await runCli(
+        ["node", "traceroot-audit", "logs", "--today"],
+        logsCapture.io
+      );
+      const logsOutput = logsCapture.read().stdout;
+
+      expect(logsExitCode).toBe(0);
+      expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("~/.config/shrimpbox/mailer.ts");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("can hear native MCP runtime events from ~/.mcp config homes without an obvious project folder", async () => {
     const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-native-mcp-home-"));
     const previousHome = process.env.HOME;
@@ -966,6 +1050,102 @@ describe("CLI", () => {
       expect(exitCode).toBe(0);
       expect(output).toContain("Telegram（@ops-room）");
       expect(output).toContain("TraceRoot 实时提醒");
+      expect(messengerArgs).toContain("--channel");
+      expect(messengerArgs).toContain("telegram");
+      expect(messengerArgs).toContain("--target");
+      expect(messengerArgs).toContain("@ops-room");
+    } finally {
+      await messenger.close();
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      if (previousOpenClawBin === undefined) {
+        delete process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+      } else {
+        process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = previousOpenClawBin;
+      }
+      await rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("can reuse a detected chat route from a generic config home when the runtime uses OpenClaw-style config structure", async () => {
+    const tempHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-doctor-host-generic-notify-home-"));
+    const previousHome = process.env.HOME;
+    const previousOpenClawBin = process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN;
+    const messenger = await createFakeOpenClawMessenger();
+
+    try {
+      const runtimeDir = path.join(tempHome, ".config", "shrimpbox");
+      const logsDir = path.join(runtimeDir, "logs");
+      await mkdir(logsDir, { recursive: true });
+      await writeFile(
+        path.join(runtimeDir, "assistant-runtime.yaml"),
+        [
+          "logging:",
+          "  gateway:",
+          "    file: logs/runtime-events.jsonl"
+        ].join("\n"),
+        "utf8"
+      );
+      await writeFile(
+        path.join(runtimeDir, "notify-route.json"),
+        JSON.stringify(
+          {
+            channel: "telegram",
+            target: "@ops-room"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
+
+      process.env.HOME = tempHome;
+      process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
+
+      setTimeout(() => {
+        void appendFile(
+          path.join(logsDir, "runtime-events.jsonl"),
+          `${JSON.stringify({
+            event: {
+              type: "send-email",
+              status: "attempted",
+              runtime: "shrimpbox-runtime",
+              target: "mailer.ts",
+              message: "Shrimpbox runtime is attempting to send an external email."
+            }
+          })}\n`,
+          "utf8"
+        );
+      }, 200);
+
+      const capture = createCapture();
+      const exitCode = await runCli(
+        [
+          "node",
+          "traceroot-audit",
+          "doctor",
+          "--watch",
+          "--host",
+          "--cycles",
+          "2",
+          "--interval",
+          "1"
+        ],
+        capture.io,
+        createStaticPrompter({})
+      );
+
+      const output = capture.read().stdout;
+      const messengerArgs = await messenger.waitForRequest();
+
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 实时提醒");
+      expect(output).toContain("~/.config/shrimpbox");
       expect(messengerArgs).toContain("--channel");
       expect(messengerArgs).toContain("telegram");
       expect(messengerArgs).toContain("--target");

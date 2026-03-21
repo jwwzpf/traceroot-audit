@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { open, readFile, realpath, stat } from "node:fs/promises";
+import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 
 import fg from "fast-glob";
 import JSON5 from "json5";
@@ -76,6 +76,9 @@ const candidateGlobPatterns = [
   "logs/**/*commands*.log",
   ".openclaw/**/*commands*.log"
 ];
+
+const genericStructuredConfigNamePattern =
+  /(config|runtime|agent|assistant|claw|lobster|mcp|server|settings)/i;
 
 function classifyFeedKind(absolutePath: string): RuntimeEventFeed["kind"] {
   const basename = path.basename(absolutePath).toLowerCase();
@@ -2211,6 +2214,229 @@ function addCompanionFeedCandidate(options: {
   }
 }
 
+function collectOpenClawStructuredFeedCandidates(options: {
+  candidates: Map<string, CompanionFeed>;
+  targetRoot: string;
+  config: Record<string, unknown>;
+}): void {
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logging", "file"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logging", "files"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logging", "gateway", "file"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logging", "gateway", "files"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logging", "gateway", "path"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["gateway", "file"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["gateway", "files"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["gateway", "path"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logs", "file"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["logs", "files"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["runtimeLogs", "file"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["runtimeLogs", "files"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["paths", "logs"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["paths", "logs", "gateway"]),
+    kind: "openclaw-gateway-log"
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["paths", "logs", "runtime"])
+  });
+  addCompanionFeedCandidate({
+    candidates: options.candidates,
+    targetRoot: options.targetRoot,
+    value: getNestedValue(options.config, ["paths", "logs", "events"])
+  });
+}
+
+async function parseStructuredConfigFile(
+  configPath: string
+): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await readFile(configPath, "utf8");
+    const parsed =
+      path.extname(configPath).toLowerCase() === ".json"
+        ? (JSON5.parse(raw) as Record<string, unknown>)
+        : (YAML.parse(raw) as Record<string, unknown>);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function discoverSchemaBasedNativeRuntimeFeeds(homeDir: string): Promise<{
+  feeds: RuntimeEventFeed[];
+  watchedRoots: NativeRuntimeFeedRoot[];
+}> {
+  const configParents = [
+    path.join(homeDir, ".config"),
+    path.join(homeDir, ".local", "share"),
+    ...(process.platform === "darwin"
+      ? [path.join(homeDir, "Library", "Application Support")]
+      : []),
+    path.join(homeDir, "AppData", "Roaming"),
+    path.join(homeDir, "AppData", "Local")
+  ];
+  const feedMap = new Map<string, RuntimeEventFeed>();
+  const watchedRoots = new Map<string, NativeRuntimeFeedRoot>();
+
+  for (const parent of configParents) {
+    try {
+      if (!(await stat(parent)).isDirectory()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    let childEntries: Awaited<ReturnType<typeof readdir>>;
+    try {
+      childEntries = await readdir(parent, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const child of childEntries) {
+      if (!child.isDirectory()) {
+        continue;
+      }
+
+      const rootDir = path.join(parent, child.name);
+      let configEntries: Awaited<ReturnType<typeof readdir>>;
+      try {
+        configEntries = await readdir(rootDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      const structuredConfigFiles = configEntries
+        .filter((entry) => {
+          if (!entry.isFile()) {
+            return false;
+          }
+
+          const extension = path.extname(entry.name).toLowerCase();
+          if (![".json", ".yaml", ".yml"].includes(extension)) {
+            return false;
+          }
+
+          return genericStructuredConfigNamePattern.test(entry.name);
+        })
+        .slice(0, 8);
+
+      for (const configEntry of structuredConfigFiles) {
+        const configPath = path.join(rootDir, configEntry.name);
+        const config = await parseStructuredConfigFile(configPath);
+
+        if (!config) {
+          continue;
+        }
+
+        const companionFeeds = new Map<string, CompanionFeed>();
+        collectOpenClawStructuredFeedCandidates({
+          candidates: companionFeeds,
+          targetRoot: rootDir,
+          config
+        });
+        collectNestedLogPathCandidates({
+          source: config,
+          candidates: companionFeeds,
+          targetRoot: rootDir
+        });
+
+        if (companionFeeds.size === 0) {
+          continue;
+        }
+
+        watchedRoots.set(rootDir, {
+          absolutePath: rootDir,
+          displayPath: displayUserPath(rootDir)
+        });
+
+        for (const companionFeed of companionFeeds.values()) {
+          const absolutePath = await canonicalFeedPath(companionFeed.absolutePath);
+          feedMap.set(absolutePath, {
+            absolutePath,
+            displayPath: displayUserPath(absolutePath),
+            rootDir,
+            kind: companionFeed.kind ?? classifyFeedKind(absolutePath)
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    feeds: [...feedMap.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    ),
+    watchedRoots: [...watchedRoots.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    )
+  };
+}
+
 async function discoverOpenClawCompanionFeeds(targetRoot: string): Promise<CompanionFeed[]> {
   const rootName = path.basename(targetRoot).toLowerCase();
   const looksLikeOpenClawRoot =
@@ -2514,13 +2740,7 @@ export async function discoverHostNativeRuntimeFeeds(homeDir: string): Promise<{
   const defaultTempRoots = clawFamilyDefaultTempLogDirs();
   const defaultTempRoot = defaultTempRoots[0] ?? path.join(os.tmpdir(), "openclaw");
   const defaultFeeds = await discoverDefaultOpenClawTempFeeds();
-
-  if (defaultFeeds.length === 0) {
-    return {
-      feeds: [],
-      watchedRoots: []
-    };
-  }
+  const schemaDiscovery = await discoverSchemaBasedNativeRuntimeFeeds(homeDir);
 
   const preferredRootCandidates = [
     path.join(homeDir, ".openclaw"),
@@ -2556,23 +2776,55 @@ export async function discoverHostNativeRuntimeFeeds(homeDir: string): Promise<{
     }
   }
 
-  const feeds = await Promise.all(
-    defaultFeeds.map(async (feed) => ({
-      absolutePath: await canonicalFeedPath(feed.absolutePath),
-      displayPath: displayUserPath(feed.absolutePath),
-      rootDir,
-      kind: feed.kind ?? classifyFeedKind(feed.absolutePath)
-    }))
+  const feedMap = new Map<string, RuntimeEventFeed>();
+
+  for (const feed of schemaDiscovery.feeds) {
+    feedMap.set(feed.absolutePath, feed);
+  }
+
+  const normalizedDefaultFeeds = await Promise.all(
+    defaultFeeds.map(async (feed) => {
+      const absolutePath = await canonicalFeedPath(feed.absolutePath);
+      return {
+        absolutePath,
+        displayPath: displayUserPath(absolutePath),
+        rootDir,
+        kind: feed.kind ?? classifyFeedKind(absolutePath)
+      } satisfies RuntimeEventFeed;
+    })
   );
 
+  for (const feed of normalizedDefaultFeeds) {
+    feedMap.set(feed.absolutePath, feed);
+  }
+
+  if (feedMap.size === 0) {
+    return {
+      feeds: [],
+      watchedRoots: []
+    };
+  }
+
+  const watchedRoots = new Map<string, NativeRuntimeFeedRoot>();
+
+  for (const watchedRoot of schemaDiscovery.watchedRoots) {
+    watchedRoots.set(watchedRoot.absolutePath, watchedRoot);
+  }
+
+  if (normalizedDefaultFeeds.length > 0) {
+    watchedRoots.set(rootDir, {
+      absolutePath: rootDir,
+      displayPath: `系统默认 OpenClaw 日志位点（${displayUserPath(rootDir)}）`
+    });
+  }
+
   return {
-    feeds,
-    watchedRoots: [
-      {
-        absolutePath: rootDir,
-        displayPath: `系统默认 OpenClaw 日志位点（${displayUserPath(rootDir)}）`
-      }
-    ]
+    feeds: [...feedMap.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    ),
+    watchedRoots: [...watchedRoots.values()].sort((left, right) =>
+      left.displayPath.localeCompare(right.displayPath)
+    )
   };
 }
 

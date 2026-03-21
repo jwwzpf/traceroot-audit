@@ -110,6 +110,11 @@ async function discoverLikelyNotifyHomes(homeDir: string): Promise<string[]> {
     }
   }
 
+  const nativeFeeds = await discoverHostNativeRuntimeFeeds(homeDir);
+  for (const root of nativeFeeds.watchedRoots) {
+    matchedRoots.push(root.absolutePath);
+  }
+
   return [...new Set(matchedRoots)];
 }
 
