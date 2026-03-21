@@ -64,6 +64,7 @@ type TimelineEntry = {
 };
 
 type OpenMatter = {
+  kind: "action-open" | "action-failed" | "boundary" | "finding" | "risk" | "surface";
   severity: AuditSeverity;
   headline: string;
   note: string;
@@ -75,6 +76,11 @@ type SettledAction = {
   severity: AuditSeverity;
   actionLabel: string;
   count: number;
+  note: string;
+};
+
+type DailyVerdict = {
+  headline: string;
   note: string;
 };
 
@@ -522,6 +528,7 @@ function summarizeOpenMatters(
 
       if (event.status === "failed") {
         matters.push({
+          kind: "action-failed",
           severity: event.severity,
           headline: `${label} 这次没有完成`,
           priority: openMatterPriority(entry),
@@ -539,6 +546,7 @@ function summarizeOpenMatters(
           approvedIntentIds
         );
         matters.push({
+          kind: "action-open",
           severity: event.severity,
           headline: `${label} 刚刚开始了，但还没看到它收住`,
           priority: openMatterPriority(entry),
@@ -554,6 +562,7 @@ function summarizeOpenMatters(
 
     if (event.category === "boundary-drift") {
       matters.push({
+        kind: "boundary",
         severity: event.severity,
         headline: "当前运行态比你批准的边界更宽",
         priority: openMatterPriority(entry),
@@ -567,6 +576,7 @@ function summarizeOpenMatters(
 
     if (event.category === "finding-change") {
       matters.push({
+        kind: "finding",
         severity: event.severity,
         headline: "今天又冒出了新的风险信号",
         priority: openMatterPriority(entry),
@@ -580,6 +590,7 @@ function summarizeOpenMatters(
 
     if (event.category === "risk-change") {
       matters.push({
+        kind: "risk",
         severity: event.severity,
         headline: "整体风险刚刚又变高了",
         priority: openMatterPriority(entry),
@@ -593,6 +604,7 @@ function summarizeOpenMatters(
 
     if (event.category === "surface-change") {
       matters.push({
+        kind: "surface",
         severity: event.severity,
         headline: "机器上的 agent 入口今天有变化",
         priority: openMatterPriority(entry),
@@ -670,6 +682,68 @@ function summarizeSettledActions(timelineEntries: TimelineEntry[]): SettledActio
           ? `今天这类高风险动作已经走完了 ${entry.count} 次，至少从时间线上看，目前没有卡在半路。`
           : "这类高风险动作今天已经顺利走完，至少从时间线上看，目前没有卡在半路。"
     }));
+}
+
+function summarizeDailyVerdict(options: {
+  openMatters: OpenMatter[];
+  settledActions: SettledAction[];
+  summary: ReturnType<typeof summarizeEvents>;
+}): DailyVerdict {
+  const { openMatters, settledActions, summary } = options;
+
+  if (openMatters.length > 0) {
+    const topActionMatter = openMatters.find(
+      (matter) => matter.kind === "action-open" || matter.kind === "action-failed"
+    );
+
+    if (topActionMatter) {
+      return {
+        headline: `今天还有 ${openMatters.length} 件事没收住，最该先盯的是「${topActionMatter.headline}」`,
+        note: topActionMatter.note
+      };
+    }
+
+    if (settledActions.length > 0) {
+      const topAction = settledActions[0]!;
+      return {
+        headline: `今天已经发生过高风险动作，最该先回看的是「${topAction.actionLabel}」`,
+        note: `${topAction.actionLabel} 今天至少已经顺利走完了；不过与此同时，TraceRoot 看到运行态还有一些边界和风险信号没有完全收住。`
+      };
+    }
+
+    const topMatter = openMatters[0]!;
+    return {
+      headline: `今天还有 ${openMatters.length} 件事没收住，最该先盯的是「${topMatter.headline}」`,
+      note: topMatter.note
+    };
+  }
+
+  if (settledActions.length > 0) {
+    const topAction = settledActions[0]!;
+    return {
+      headline: "今天出现过高风险动作，但目前看起来都已经收住了",
+      note: `${topAction.actionLabel} 是今天最值得回头确认的一类动作，至少从时间线上看，它目前已经走完了。`
+    };
+  }
+
+  if (summary.boundaryEvents > 0 || summary.driftEvents > 0) {
+    return {
+      headline: "今天主要是边界和风险信号有变化，还没看到高风险动作失控",
+      note: "TraceRoot 目前主要在盯运行态有没有重新变宽，以及新的风险入口有没有冒出来。"
+    };
+  }
+
+  if (summary.actionEvents > 0) {
+    return {
+      headline: "今天 agent 有动作记录，但目前没有需要立刻打断你的事情",
+      note: "TraceRoot 已经把这些动作记进审计时间线里了；如果你想回看来龙去脉，直接往下看今天的记录就行。"
+    };
+  }
+
+  return {
+    headline: "今天目前还比较平稳，TraceRoot 正在继续陪跑",
+    note: "只要有新的高风险动作、边界漂移或风险变化冒出来，TraceRoot 就会把它提到最前面。"
+  };
 }
 
 function summarizeEvents(
@@ -1371,6 +1445,11 @@ async function printLogs(
     const summary = summarizeEvents(eventsAscending, approvedIntentIds);
     const openMatters = summarizeOpenMatters(timelineEntries, approvedIntentIds);
     const settledActions = summarizeSettledActions(timelineEntries);
+    const dailyVerdict = summarizeDailyVerdict({
+      openMatters,
+      settledActions,
+      summary
+    });
     const freshSinceLastReview = reviewState
       ? (
           await readAuditEvents({
@@ -1429,6 +1508,13 @@ async function printLogs(
       `🧮 风险概览: 🚨 ${summary.critical} / 🛑 ${summary.highRisk} / ⚠️ ${summary.risky} / 🟢 ${summary.safe}`,
       `🎬 动作记录: ${summary.actionEvents} 条`,
       `🧱 边界与漂移: ${summary.boundaryEvents} 条边界漂移，${summary.driftEvents} 条整体变化`,
+      ""
+    );
+
+    lines.push(
+      "🩺 今天的审计结论：",
+      `- ${dailyVerdict.headline}`,
+      `- ${dailyVerdict.note}`,
       ""
     );
 
