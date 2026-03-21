@@ -765,6 +765,40 @@ function latestAttentionReminder(event: AuditEvent | null): string | null {
   return `先记住这一件：${actor} 今天动过「${label}」。`;
 }
 
+function mainThreadReminder(event: AuditEvent | null): string | null {
+  if (!event || event.category !== "action-event") {
+    return null;
+  }
+
+  const actor = actorLabel(event);
+  const label = actionLabelWithSubject(event);
+  const trigger = actionTriggerSourceLabel(event);
+  const object = actionObjectSentence(event)
+    ?.replace(/^这一步看起来涉及：/, "")
+    .replace(/。$/, "");
+  const fragments: string[] = [];
+
+  if (trigger) {
+    fragments.push(`${trigger} 触发了`);
+  }
+
+  fragments.push(`${actor} 的「${label}」`);
+
+  if (object) {
+    fragments.push(`涉及：${object}`);
+  }
+
+  if (event.status === "succeeded") {
+    fragments.push("这一步已经完成");
+  } else if (event.status === "failed") {
+    fragments.push("这一步最后没有完成");
+  } else {
+    fragments.push("这一步还值得继续盯一下");
+  }
+
+  return fragments.join("，") + "。";
+}
+
 function summarizeEvents(
   events: AuditEvent[],
   approvedIntentIds: HardeningIntentId[] = []
@@ -1539,6 +1573,11 @@ async function printLogs(
     const reminder = latestAttentionReminder(summary.latestAttention);
     if (reminder) {
       lines.push(`- ${reminder}`);
+    }
+
+    const mainThread = mainThreadReminder(summary.latestAttention);
+    if (mainThread) {
+      lines.push(`- 今天这条主线可以先这样记：${mainThread}`);
     }
 
     lines.push("");

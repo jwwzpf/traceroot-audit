@@ -634,6 +634,7 @@ describe("CLI", () => {
       expect(logsOutput).toContain("当前整机动作审计覆盖");
       expect(logsOutput).toContain("主要还是靠原生运行时事件入口继续陪跑");
       expect(logsOutput).toContain("对外发邮件");
+      expect(logsOutput).toContain("今天这条主线可以先这样记：OpenClaw 运行时 的「对外发邮件（mailer.ts）」，涉及：mailer.ts，这一步还值得继续盯一下。");
       expect(logsOutput).toContain("今天最值得留意的动作");
       expect(logsOutput).toContain("今天这些 agent 最值得你看一眼");
       expect(logsOutput).toContain("今天最值得回头看的位置");
@@ -3296,6 +3297,7 @@ describe("CLI", () => {
       expect(logsCapture.read().stdout).toContain("今天的审计结论");
       expect(logsCapture.read().stdout).toContain("今天已经发生过高风险动作，最该先回看的是「对外发邮件」");
       expect(logsCapture.read().stdout).toContain("先记住这一件：OpenClaw 运行时 今天已经完成过「对外发邮件」。");
+      expect(logsCapture.read().stdout).toContain("今天这条主线可以先这样记：OpenClaw 运行时 的「对外发邮件」，这一步已经完成。");
       expect(logsCapture.read().stdout).toContain("今天已经收住的高风险动作");
       expect(logsCapture.read().stdout).toContain("对外发邮件：已经走完 1 次");
       expect(logsCapture.read().stdout).toContain("OpenClaw 运行时 已完成：对外发邮件");
