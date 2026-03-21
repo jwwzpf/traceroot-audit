@@ -87,7 +87,7 @@ function buildTextSummary(event: AuditEvent, workflowScopeNote?: string): string
   const parts = [
     `TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
-    `动作：${actionLabel(event.action)}`
+    `动作：${actionLabelWithSubject(event)}`
   ];
 
   if (triggerContext) {
@@ -118,6 +118,8 @@ function buildTextSummary(event: AuditEvent, workflowScopeNote?: string): string
     parts.push(`建议：${event.recommendation}`);
   }
 
+  parts.push("想看今天完整来龙去脉：traceroot-audit logs --today");
+
   return parts.join("\n");
 }
 
@@ -127,7 +129,7 @@ function buildChatRelayText(event: AuditEvent, workflowScopeNote?: string): stri
   const lines = [
     `${event.severity === "critical" ? "🚨" : event.severity === "high-risk" ? "🛑" : "⚠️"} TraceRoot 刚盯到一个${severityLabel(event.severity)}动作`,
     `是谁：${actor}`,
-    `动作：${actionLabel(event.action)}`
+    `动作：${actionLabelWithSubject(event)}`
   ];
 
   if (triggerContext) {
@@ -159,6 +161,7 @@ function buildChatRelayText(event: AuditEvent, workflowScopeNote?: string): stri
   }
 
   lines.push("本地审计时间线也已经同步更新了。");
+  lines.push("想看今天完整来龙去脉：traceroot-audit logs --today");
 
   return lines.join("\n");
 }

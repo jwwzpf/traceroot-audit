@@ -5949,6 +5949,8 @@ describe("CLI", () => {
       expect(payload.recommendation).toBe("先确认这封外部邮件是不是真的该发出去。");
       expect(String(payload.text)).toContain("是谁：OpenClaw 运行时");
       expect(String(payload.text)).toContain("为什么值得现在看一眼");
+      expect(String(payload.text)).toContain("动作：对外发邮件");
+      expect(String(payload.text)).toContain("想看今天完整来龙去脉：traceroot-audit logs --today");
     } finally {
       await webhook.close();
       if (previousHome === undefined) {
@@ -6134,6 +6136,7 @@ describe("CLI", () => {
       expect(argv.join(" ")).toContain("TraceRoot 刚盯到一个高风险动作");
       expect(argv.join(" ")).toContain("动作：对外发邮件");
       expect(argv.join(" ")).toContain("是谁：OpenClaw 运行时");
+      expect(argv.join(" ")).toContain("想看今天完整来龙去脉：traceroot-audit logs --today");
     } finally {
       await messenger.close();
       if (previousHome === undefined) {
