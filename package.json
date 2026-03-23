@@ -31,6 +31,7 @@
     "build": "tsup",
     "dev": "node --loader tsx src/cli/index.ts",
     "test": "vitest run",
+    "launch:acceptance": "vitest run tests/launch-candidate.test.ts",
     "lint": "eslint .",
     "format": "prettier --check .",
     "launch:check": "npm test && npm run build && npm run lint && npm run package:check",
