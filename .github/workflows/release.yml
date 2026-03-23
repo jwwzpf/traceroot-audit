@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -22,7 +22,7 @@ jobs:
           version: 10.6.5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -36,6 +36,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Launch acceptance
+        run: pnpm launch:acceptance
+
       - name: Build
         run: pnpm build
 
@@ -45,7 +48,36 @@ jobs:
       - name: Create tarball
         id: pack
         run: |
-          PACKAGE_FILE=$(npm pack --cache .npm)
+          RAW_PACK_OUTPUT=$(mktemp)
+          npm pack --json --cache .npm > "$RAW_PACK_OUTPUT"
+          PACKAGE_FILE=$(
+            node - "$RAW_PACK_OUTPUT" <<'NODE'
+            const fs = require('fs');
+            const filePath = process.argv[2];
+            const text = fs.readFileSync(filePath, 'utf8');
+
+            for (let i = 0; i < text.length; i++) {
+              const ch = text[i];
+              if (ch !== '[' && ch !== '{') continue;
+
+              const candidate = text.slice(i).trim();
+
+              try {
+                const parsed = JSON.parse(candidate);
+                const last = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
+
+                if (last && typeof last.filename === 'string' && last.filename.length > 0) {
+                  process.stdout.write(last.filename);
+                  process.exit(0);
+                }
+              } catch {}
+            }
+
+            console.error('Could not parse npm pack JSON output');
+            process.exit(1);
+            NODE
+          )
+          rm -f "$RAW_PACK_OUTPUT"
           echo "package_file=${PACKAGE_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
