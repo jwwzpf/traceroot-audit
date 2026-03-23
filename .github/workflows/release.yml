@@ -59,9 +59,8 @@ jobs:
           fi
           echo "package_file=${PACKAGE_FILE}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (trusted publishing)
+        if: ${{ secrets.NPM_TOKEN == '' }}
         run: |
           set +e
           npm publish --access public --cache .npm 2>&1 | tee publish.log
@@ -72,6 +71,27 @@ jobs:
             echo "::error::If trusted publishing is not matching on npm, add a granular NPM_TOKEN secret as a fallback."
             exit "$status"
           fi
+
+      - name: Publish to npm (token fallback)
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set +e
+          npm publish --access public --cache .npm 2>&1 | tee publish.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::npm publish failed even with NPM_TOKEN fallback."
+            exit "$status"
+          fi
+
+      - name: Upload publish log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-log
+          path: publish.log
+          if-no-files-found: ignore
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
