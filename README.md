@@ -6,11 +6,20 @@
 [![CI](https://github.com/jwwzpf/traceroot-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/jwwzpf/traceroot-audit/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 
-**Open-source scanner for the local files that define what an AI agent can really do.**
+**Independent runtime audit for local agents.**
 
-TraceRoot Audit helps developers inspect the action surface behind OpenClaw-like local agent ecosystems: runtime configs, skills and tool packages, agent-capable scripts, and the local files that wire shell, network, filesystem, email, and other real actions together.
+TraceRoot Audit watches OpenClaw-, MCP-, and other local agent runtimes, tells you when they attempt risky actions, and keeps a local audit trail you can review later.
 
 ![TraceRoot Audit demo GIF](./docs/assets/traceroot-demo.gif)
+
+## Start here in 30 seconds
+
+```bash
+npx traceroot-audit doctor --watch --host
+npx traceroot-audit logs --today
+```
+
+If your agent is already running, TraceRoot will try to find its runtime home, watch for risky actions, and keep a readable daily audit trail without making you explain the runtime layout first.
 
 ## Why it matters
 
@@ -22,7 +31,12 @@ Agent skills can now trigger real actions like:
 - email changes
 - purchases or other side effects
 
-TraceRoot Audit keeps the product narrow: it scans local action-capable surfaces and turns them into practical findings.
+TraceRoot Audit keeps the product narrow:
+
+- it scans local action-capable surfaces before launch
+- it watches live runtimes while they run
+- it alerts you when risky actions begin
+- it keeps a local audit trail you can actually read later
 
 ## Local development
 
@@ -542,7 +556,7 @@ To use it:
 
 1. Configure npm trusted publishing for this package and repository.
 2. Bump `package.json` version.
-3. Push a tag like `v0.2.0`.
+3. Push a tag like `v0.3.0`.
 
 The workflow will lint, test, build, dry-run the package, publish to npm, and attach the generated tarball to the GitHub Release.
 

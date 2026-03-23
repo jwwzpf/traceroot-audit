@@ -238,7 +238,7 @@ export function createProgram(runtime: CliRuntime): Command {
   program
     .name("traceroot-audit")
     .description("Shrink the blast radius of local AI runtimes and skills.")
-    .version("0.2.0")
+    .version("0.3.0")
     .showHelpAfterError();
 
   registerDoctorCommand(program, runtime);

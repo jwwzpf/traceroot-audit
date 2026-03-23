@@ -7501,6 +7501,6 @@ describe("CLI", () => {
     const exitCode = await runCli(["node", "traceroot-audit", "--version"], capture.io);
 
     expect(exitCode).toBe(0);
-    expect(capture.read().stdout.trim()).toBe("0.2.0");
+    expect(capture.read().stdout.trim()).toBe("0.3.0");
   });
 });
