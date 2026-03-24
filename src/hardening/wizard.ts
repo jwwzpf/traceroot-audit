@@ -204,6 +204,43 @@ function baseNotificationChoices(): CliChoice[] {
   ];
 }
 
+function targetRequirementHint(channel: string): { intro: string; example: string } {
+  switch (channel) {
+    case "whatsapp":
+      return {
+        intro:
+          "💡 要把提醒发到 WhatsApp，TraceRoot 还需要知道你已经在 OpenClaw 里接好的那个号码或聊天目标。",
+        example:
+          "例如：+4917612345678。如果你现在拿不准，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+      };
+    case "telegram":
+      return {
+        intro:
+          "💡 要把提醒发到 Telegram，TraceRoot 还需要知道你已经在 OpenClaw 里接好的聊天目标。",
+        example:
+          "例如：@ops-room 或 chat id。如果你现在拿不准，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+      };
+    case "slack":
+    case "discord":
+    case "mattermost":
+    case "googlechat":
+    case "msteams":
+    case "signal":
+    case "imessage":
+      return {
+        intro: `💡 要把提醒发到 ${displayNotifyChannel(channel)}，TraceRoot 还需要知道你已经接好的频道、房间或聊天目标。`,
+        example:
+          "例如：#ops-alerts、房间 id 或聊天目标。如果你现在拿不准，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+      };
+    default:
+      return {
+        intro: `💡 要把提醒发到 ${displayNotifyChannel(channel)}，TraceRoot 还需要知道应该发到哪个聊天目标。`,
+        example:
+          "如果你现在拿不准，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+      };
+  }
+}
+
 export async function resolveWizardTarget(
   runtime: CliRuntime,
   options: {
@@ -344,17 +381,10 @@ export async function promptNotificationSelection(
   const directDetectedChoices = likelyChoices.filter((choice) =>
     likelyChannels.some((item) => item.channel === choice.value && Boolean(item.target))
   );
-  const quickChannelChoices = (["telegram", "whatsapp", "slack", "discord"] as const)
-    .filter((channel) => !likelyChannels.some((item) => item.channel === channel))
-    .map((channel) => ({
-      value: channel,
-      label: `${channel === "whatsapp" ? "📱" : channel === "telegram" ? "💬" : channel === "slack" ? "🧵" : "🎮"} 发到 ${displayNotifyChannel(channel)}`,
-      hint: "适合你已经在 OpenClaw 里接好这个聊天入口的情况"
-    }));
   const quickChoices =
     directDetectedChoices.length > 0
-      ? [...directDetectedChoices, ...quickChannelChoices, ...staticChoices]
-      : [...staticChoices, ...quickChannelChoices, ...likelyChoices];
+      ? [...directDetectedChoices, ...staticChoices]
+      : [...staticChoices, ...likelyChoices];
 
   if (likelyChannels.length > 0 && !options.quiet) {
     runtime.io.stdout(
@@ -428,22 +458,33 @@ export async function promptNotificationSelection(
   if (choice === "other-channel") {
     channel = await runtime.prompter.chooseOne(
       "💡 你想用哪个已接好的聊天入口？",
-      SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.filter(
-        (value) => !["telegram", "whatsapp", "slack", "discord"].includes(value)
-      ).map((value) => ({
+      SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.map((value) => ({
         value,
-        label: value,
+        label: displayNotifyChannel(value),
         hint: "前提是 OpenClaw 已经接好了这个入口"
       }))
     );
+  }
+
+  if (!detectedChannel?.target) {
+    const hint = targetRequirementHint(channel);
+    runtime.io.stdout(`${hint.intro}\n`);
+    runtime.io.stdout(`${hint.example}\n`);
   }
 
   const target =
     detectedChannel?.target ??
     (await runtime.prompter.input(
       `📨 TraceRoot 应该把提醒发到哪里？（${displayNotifyChannel(channel)}）`,
-      { allowEmpty: false }
+      { allowEmpty: true }
     ));
+
+  if (!target.trim()) {
+    runtime.io.stdout(
+      "🧾 这次先只保留本地审计时间线；等你确认好提醒目标以后，再把聊天提醒接上就可以。\n"
+    );
+    return { mode: "local-only" };
+  }
 
   return {
     mode: "channel",
