@@ -2749,7 +2749,7 @@ describe("CLI", () => {
 
       expect(exitCode).toBe(0);
       expect(output).toContain(
-        "TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：WhatsApp（+4917611122233）"
+        "TraceRoot 已经在这个运行态里看到了这些可用聊天入口：WhatsApp。"
       );
       expect(output).toContain(
         "TraceRoot 这次会直接把高风险提醒顺手发到 WhatsApp（+4917611122233）"
@@ -3478,7 +3478,9 @@ describe("CLI", () => {
       const exitCode = await watchPromise;
 
       expect(exitCode).toBe(0);
-      expect(capture.read().stdout).toContain("这次会先只保留本地审计时间线");
+      expect(capture.read().stdout).toContain(
+        "如果你还没把聊天入口接进 OpenClaw 也没关系，这次先只保留本地审计时间线也可以。"
+      );
       expect(capture.read().stdout).toContain("TraceRoot 实时提醒");
       expect(capture.read().stderr).not.toContain("请同时提供 `--notify-target`");
     } finally {
@@ -6327,7 +6329,7 @@ describe("CLI", () => {
       expect(output).toContain(
         "TraceRoot 看起来你这次更像想让 AI 做这些事：📧 邮件整理与回复。"
       );
-      expect(output).toContain("TraceRoot 看起来已经在这个运行态里识别到了这些聊天入口：Telegram（@ops-room）");
+      expect(output).toContain("TraceRoot 已经在这个运行态里看到了这些可用聊天入口：Telegram。");
       expect(output).toContain("TraceRoot 这次会直接把高风险提醒顺手发到 Telegram（@ops-room）");
       expect(output).toContain("Telegram（@ops-room）");
     } finally {
