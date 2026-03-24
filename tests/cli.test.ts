@@ -215,12 +215,17 @@ function createStaticPrompter(answers: {
 
 describe("CLI", () => {
   let previousHome: string | undefined;
+  let previousCliLang: string | undefined;
+  let previousCliLanguage: string | undefined;
   let testHome: string;
 
   beforeEach(async () => {
     previousHome = process.env.HOME;
+    previousCliLang = process.env.TRACEROOT_LANG;
+    previousCliLanguage = process.env.TRACEROOT_LANGUAGE;
     testHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-test-home-"));
     process.env.HOME = testHome;
+    process.env.TRACEROOT_LANG = "zh";
     delete process.env.TRACEROOT_HOME;
   });
 
@@ -229,6 +234,18 @@ describe("CLI", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = previousHome;
+    }
+
+    if (previousCliLang === undefined) {
+      delete process.env.TRACEROOT_LANG;
+    } else {
+      process.env.TRACEROOT_LANG = previousCliLang;
+    }
+
+    if (previousCliLanguage === undefined) {
+      delete process.env.TRACEROOT_LANGUAGE;
+    } else {
+      process.env.TRACEROOT_LANGUAGE = previousCliLanguage;
     }
 
     vi.restoreAllMocks();
@@ -7501,6 +7518,6 @@ describe("CLI", () => {
     const exitCode = await runCli(["node", "traceroot-audit", "--version"], capture.io);
 
     expect(exitCode).toBe(0);
-    expect(capture.read().stdout.trim()).toBe("0.3.0");
+    expect(capture.read().stdout.trim()).toBe("0.3.1");
   });
 });

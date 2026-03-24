@@ -21,6 +21,8 @@ npx traceroot-audit logs --today
 
 如果你的 agent 已经在跑，TraceRoot 会先自己去找运行位点和日志入口，开始陪跑并记住今天真正值得你留意的动作，不需要你先研究目录和配置。
 
+CLI 现在默认输出英文；如果你更想看中文，可以加 `--lang zh`，或者设置 `TRACEROOT_LANG=zh`。
+
 ## 为什么需要它
 
 现在的 agent skill 已经可以触发真实动作，例如：

@@ -21,6 +21,8 @@ npx traceroot-audit logs --today
 
 If your agent is already running, TraceRoot will try to find its runtime home, watch for risky actions, and keep a readable daily audit trail without making you explain the runtime layout first.
 
+CLI output defaults to English. If you prefer Chinese, add `--lang zh` or set `TRACEROOT_LANG=zh`.
+
 ## Why it matters
 
 Agent skills can now trigger real actions like:

@@ -97,10 +97,15 @@ function createStaticPrompter(answers: {
 describe("Launch candidate acceptance", () => {
   let previousHome: string | undefined;
   let previousTmpDir: string | undefined;
+  let previousCliLang: string | undefined;
+  let previousCliLanguage: string | undefined;
 
   beforeEach(() => {
     previousHome = process.env.HOME;
     previousTmpDir = process.env.TMPDIR;
+    previousCliLang = process.env.TRACEROOT_LANG;
+    previousCliLanguage = process.env.TRACEROOT_LANGUAGE;
+    process.env.TRACEROOT_LANG = "zh";
   });
 
   afterEach(() => {
@@ -114,6 +119,18 @@ describe("Launch candidate acceptance", () => {
       delete process.env.TMPDIR;
     } else {
       process.env.TMPDIR = previousTmpDir;
+    }
+
+    if (previousCliLang === undefined) {
+      delete process.env.TRACEROOT_LANG;
+    } else {
+      process.env.TRACEROOT_LANG = previousCliLang;
+    }
+
+    if (previousCliLanguage === undefined) {
+      delete process.env.TRACEROOT_LANGUAGE;
+    } else {
+      process.env.TRACEROOT_LANGUAGE = previousCliLanguage;
     }
   });
 

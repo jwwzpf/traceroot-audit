@@ -280,7 +280,7 @@ export async function sendWebhookNotification(
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "user-agent": "traceroot-audit/0.3.0"
+      "user-agent": "traceroot-audit/0.3.1"
     },
     body: JSON.stringify(buildWebhookPayload(event, workflowScopeNote))
   });

@@ -38,6 +38,7 @@ import {
 import { discoverHost } from "../../core/discovery";
 import {
   loadRecentDoctorContext,
+  loadRecentDoctorTarget,
   recentTargetLabel
 } from "../../hardening/recent-target";
 import { displayUserPath } from "../../utils/paths";

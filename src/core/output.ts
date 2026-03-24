@@ -725,7 +725,7 @@ export function renderSarifOutput(result: ScanResult): string {
           driver: {
             name: "TraceRoot Audit",
             informationUri: "https://github.com/jwwzpf/traceroot-audit",
-            semanticVersion: "0.3.0",
+            semanticVersion: "0.3.1",
             rules: sarifRules
           }
         },

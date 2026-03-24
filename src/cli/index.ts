@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError } from "commander";
 
+import {
+  detectCliLanguageFromArgv,
+  setCliLanguage,
+  translateCliText
+} from "./locale";
 import { registerDoctorCommand } from "./commands/doctor";
 import { registerApplyCommand } from "./commands/apply";
 import { registerBaselineCommand } from "./commands/baseline";
@@ -56,6 +61,10 @@ const defaultIo: CliIO = {
 };
 
 function createDefaultPrompter(): CliPrompter {
+  function writeLocalized(text: string): void {
+    process.stdout.write(translateCliText(text));
+  }
+
   async function withInterface<T>(
     run: (prompt: readline.Interface) => Promise<T>
   ): Promise<T> {
@@ -87,18 +96,20 @@ function createDefaultPrompter(): CliPrompter {
           : undefined;
 
       while (true) {
-        process.stdout.write(`${question}\n`);
+        writeLocalized(`${question}\n`);
         choices.forEach((choice, index) => {
           const hint = choice.hint ? ` — ${choice.hint}` : "";
           const recommended = defaultValue === choice.value ? " [推荐]" : "";
-          process.stdout.write(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
+          writeLocalized(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
         });
 
         const answer = (
           await prompt.question(
-            defaultIndex
-              ? `请输入编号（直接回车采用 TraceRoot 的推荐：${defaultIndex}）：`
-              : "请输入编号："
+            translateCliText(
+              defaultIndex
+                ? `请输入编号（直接回车采用 TraceRoot 的推荐：${defaultIndex}）：`
+                : "请输入编号："
+            )
           )
         ).trim();
 
@@ -112,7 +123,7 @@ function createDefaultPrompter(): CliPrompter {
           return choices[index - 1]?.value ?? choices[0]!.value;
         }
 
-        process.stdout.write("请输入有效的编号。\n\n");
+        writeLocalized("请输入有效的编号。\n\n");
       }
     });
   }
@@ -132,18 +143,20 @@ function createDefaultPrompter(): CliPrompter {
         .map((index) => index + 1);
 
       while (true) {
-        process.stdout.write(`${question}\n`);
+        writeLocalized(`${question}\n`);
         choices.forEach((choice, index) => {
           const hint = choice.hint ? ` — ${choice.hint}` : "";
           const recommended = defaultValues.includes(choice.value) ? " [推荐]" : "";
-          process.stdout.write(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
+          writeLocalized(`  ${index + 1}. ${choice.label}${recommended}${hint}\n`);
         });
 
         const answer = (
           await prompt.question(
-            defaultIndexes.length > 0
-              ? `请输入一个或多个编号（用逗号分隔，直接回车采用 TraceRoot 的推荐：${defaultIndexes.join(", ")}）：`
-              : "请输入一个或多个编号（用逗号分隔）："
+            translateCliText(
+              defaultIndexes.length > 0
+                ? `请输入一个或多个编号（用逗号分隔，直接回车采用 TraceRoot 的推荐：${defaultIndexes.join(", ")}）：`
+                : "请输入一个或多个编号（用逗号分隔）："
+            )
           )
         ).trim();
 
@@ -163,7 +176,7 @@ function createDefaultPrompter(): CliPrompter {
           return values;
         }
 
-        process.stdout.write("请至少选一个有效的编号。\n\n");
+        writeLocalized("请至少选一个有效的编号。\n\n");
       }
     });
   }
@@ -173,7 +186,11 @@ function createDefaultPrompter(): CliPrompter {
       const suffix = defaultValue ? " [Y/n]: " : " [y/N]: ";
 
       while (true) {
-        const answer = (await prompt.question(`${question}${suffix}`)).trim().toLowerCase();
+        const answer = (
+          await prompt.question(translateCliText(`${question}${suffix}`))
+        )
+          .trim()
+          .toLowerCase();
 
         if (answer === "") {
           return defaultValue;
@@ -187,7 +204,7 @@ function createDefaultPrompter(): CliPrompter {
           return false;
         }
 
-        process.stdout.write("请回答 yes 或 no。\n");
+        writeLocalized("请回答 yes 或 no。\n");
       }
     });
   }
@@ -200,7 +217,9 @@ function createDefaultPrompter(): CliPrompter {
       const suffix = options.defaultValue ? ` [default: ${options.defaultValue}]: ` : ": ";
 
       while (true) {
-        const answer = (await prompt.question(`${question}${suffix}`)).trim();
+        const answer = (
+          await prompt.question(translateCliText(`${question}${suffix}`))
+        ).trim();
 
         if (answer.length > 0) {
           return answer;
@@ -214,7 +233,7 @@ function createDefaultPrompter(): CliPrompter {
           return "";
         }
 
-        process.stdout.write("请先输入一个值。\n");
+        writeLocalized("请先输入一个值。\n");
       }
     });
   }
@@ -238,7 +257,8 @@ export function createProgram(runtime: CliRuntime): Command {
   program
     .name("traceroot-audit")
     .description("Shrink the blast radius of local AI runtimes and skills.")
-    .version("0.3.0")
+    .version("0.3.1")
+    .option("--lang <lang>", "CLI language (en or zh). Defaults to en.")
     .showHelpAfterError();
 
   registerDoctorCommand(program, runtime);
@@ -257,14 +277,47 @@ export function createProgram(runtime: CliRuntime): Command {
   return program;
 }
 
+function stripGlobalLanguageOption(argv: string[]): string[] {
+  const sanitized: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+
+    if (!value) {
+      continue;
+    }
+
+    if (value === "--lang") {
+      index += 1;
+      continue;
+    }
+
+    if (value.startsWith("--lang=")) {
+      continue;
+    }
+
+    sanitized.push(value);
+  }
+
+  return sanitized;
+}
+
 export async function runCli(
   argv = process.argv,
   io: CliIO = defaultIo,
-  prompter: CliPrompter = createDefaultPrompter()
+  prompter?: CliPrompter
 ): Promise<number> {
+  setCliLanguage(detectCliLanguageFromArgv(argv));
+  const sanitizedArgv = stripGlobalLanguageOption(argv);
+
+  const localizedIo: CliIO = {
+    stdout: (text) => io.stdout(translateCliText(text)),
+    stderr: (text) => io.stderr(translateCliText(text))
+  };
+
   const runtime: CliRuntime = {
-    io,
-    prompter,
+    io: localizedIo,
+    prompter: prompter ?? createDefaultPrompter(),
     exitCode: 0
   };
 
@@ -272,7 +325,7 @@ export async function runCli(
   program.exitOverride();
 
   try {
-    await program.parseAsync(argv);
+    await program.parseAsync(sanitizedArgv);
     return runtime.exitCode;
   } catch (error) {
     if (error instanceof CommanderError) {
@@ -280,7 +333,7 @@ export async function runCli(
         error.code !== "commander.helpDisplayed" &&
         error.code !== "commander.version"
       ) {
-        io.stderr(`${error.message}\n`);
+        localizedIo.stderr(`${error.message}\n`);
       }
 
       return typeof error.exitCode === "number"
@@ -289,11 +342,11 @@ export async function runCli(
     }
 
     if (error instanceof Error) {
-      io.stderr(`${error.message}\n`);
+      localizedIo.stderr(`${error.message}\n`);
       return 1;
     }
 
-    io.stderr("Unexpected CLI error.\n");
+    localizedIo.stderr("Unexpected CLI error.\n");
     return 1;
   }
 }
