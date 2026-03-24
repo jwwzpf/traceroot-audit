@@ -430,17 +430,10 @@ export async function promptNotificationSelection(
   const likelyChannels =
     options.likelyChannels ??
     (options.target ? await detectLikelyNotifyChannels(options.target) : []);
-  const likelyChoices: CliChoice[] = likelyChannels.map((item) => ({
-    value: item.channel,
-    label: `${notifyChannelIcon(item.channel)} ${displayNotifyChannel(item.channel)}`
-  }));
   const staticChoices = baseNotificationChoices().filter(
     (choice) =>
       !likelyChannels.some((item) => item.channel === choice.value) &&
       !["telegram", "whatsapp", "slack", "discord"].includes(choice.value)
-  );
-  const directDetectedChoices = likelyChoices.filter((choice) =>
-    likelyChannels.some((item) => item.channel === choice.value && Boolean(item.target))
   );
   const simpleChannelChoices = SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.map((channel) => ({
     value: channel,

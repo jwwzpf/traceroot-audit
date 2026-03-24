@@ -214,7 +214,7 @@ const exactReplacements: Array<[RegExp, string]> = [
   [/🎬 当前整机动作审计覆盖：/g, "🎬 Current machine-wide action-audit coverage:"],
   [/🩺 今天的审计结论：/g, "🩺 Today's audit conclusion:"],
   [/🧭 今天这条主线可以先这样记：(.+)/g, "🧭 Here is the simplest way to remember today's main thread: $1"],
-  [/   TraceRoot 还会继续保留“上次没看完”的提醒，等你真正把这段时间线看完整再替你消掉它。/g, "   TraceRoot will keep this reminder until you have really reviewed the rest of the timeline."],
+  [/ {3}TraceRoot 还会继续保留“上次没看完”的提醒，等你真正把这段时间线看完整再替你消掉它。/g, "   TraceRoot will keep this reminder until you have really reviewed the rest of the timeline."],
   [/- 今天已经出现了 (\d+) 条这类记录/g, "- $1 record(s) of this kind already appeared today"],
   [/💓 陪跑状态：/g, "💓 Watch status:"],
   [/当前整机动作审计覆盖/g, "Current machine-wide action-audit coverage"],
