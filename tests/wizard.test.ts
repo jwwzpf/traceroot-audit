@@ -53,10 +53,11 @@ describe("notification wizard", () => {
     expect(output).toContain("WhatsApp");
     expect(output).toContain("OpenClaw");
     expect(output).toContain("+4917612345678");
+    expect(output).toContain("openclaw channels login --channel whatsapp");
     expect(output).toContain("先只保留本地审计时间线");
   });
 
-  it("does not show a bare WhatsApp quick-pick when TraceRoot has not identified one", async () => {
+  it("shows simple channel names instead of detected-route labels", async () => {
     const seenChoices: CliChoice[][] = [];
     const { runtime } = createCaptureRuntime({
       chooseOne: async (_question: string, choices: CliChoice[]) => {
@@ -78,7 +79,8 @@ describe("notification wizard", () => {
     });
 
     const firstPromptChoices = seenChoices[0] ?? [];
-    expect(firstPromptChoices.some((choice) => choice.label.includes("发到 WhatsApp"))).toBe(false);
-    expect(firstPromptChoices.some((choice) => choice.label.includes("发到其他已接好的聊天入口"))).toBe(true);
+    expect(firstPromptChoices.some((choice) => choice.label === "📱 WhatsApp")).toBe(true);
+    expect(firstPromptChoices.some((choice) => choice.label === "💬 Telegram")).toBe(true);
+    expect(firstPromptChoices.some((choice) => choice.label.includes("发到已识别的"))).toBe(false);
   });
 });
