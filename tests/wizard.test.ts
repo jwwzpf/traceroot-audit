@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { CliChoice, CliPrompter, CliRuntime } from "../src/cli/index";
+import { setCliLanguage } from "../src/cli/locale";
 import { promptNotificationSelection } from "../src/hardening/wizard";
 
 function createCaptureRuntime(prompter: CliPrompter): {
@@ -31,6 +32,10 @@ function createCaptureRuntime(prompter: CliPrompter): {
 }
 
 describe("notification wizard", () => {
+  beforeEach(() => {
+    setCliLanguage("en");
+  });
+
   it("lets users fall back to local audit when a chat route target is unknown", async () => {
     const { runtime, readStdout } = createCaptureRuntime({
       chooseOne: async () => "whatsapp",
@@ -50,11 +55,12 @@ describe("notification wizard", () => {
 
     expect(selection).toEqual({ mode: "local-only" });
     const output = readStdout();
+    expect(output).toContain("Connect WhatsApp");
     expect(output).toContain("WhatsApp");
-    expect(output).toContain("OpenClaw");
+    expect(output).toContain("QR code");
     expect(output).toContain("+4917612345678");
     expect(output).toContain("openclaw channels login --channel whatsapp");
-    expect(output).toContain("先只保留本地审计时间线");
+    expect(output).toContain("local audit timeline only");
   });
 
   it("shows simple channel names instead of detected-route labels", async () => {
@@ -81,6 +87,7 @@ describe("notification wizard", () => {
     const firstPromptChoices = seenChoices[0] ?? [];
     expect(firstPromptChoices.some((choice) => choice.label === "📱 WhatsApp")).toBe(true);
     expect(firstPromptChoices.some((choice) => choice.label === "💬 Telegram")).toBe(true);
-    expect(firstPromptChoices.some((choice) => choice.label.includes("发到已识别的"))).toBe(false);
+    expect(firstPromptChoices.some((choice) => choice.label.includes("Send to detected"))).toBe(false);
+    expect(firstPromptChoices.some((choice) => choice.label.includes("已识别"))).toBe(false);
   });
 });

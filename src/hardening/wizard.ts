@@ -10,6 +10,7 @@ import {
   displayNotifyChannel,
   type LikelyNotifyChannel
 } from "./notify-discovery";
+import { getCliLanguage } from "../cli/locale";
 import { discoverFiles, resolveTarget } from "../utils/files";
 import type {
   ExposureMode,
@@ -209,96 +210,278 @@ function notifyChannelIcon(channel: string): string {
   }
 }
 
+function usesChineseCli(): boolean {
+  return getCliLanguage() === "zh";
+}
+
 function baseNotificationChoices(): CliChoice[] {
   return [
     {
       value: "local-only",
-      label: "🧾 先只保留本地审计",
-      hint: "高风险动作会继续记在本地时间线里，但不额外打扰你"
-    },
-    {
-      value: "other-channel",
-      label: "🔔 发到其他已接好的聊天入口",
-      hint: "比如 Signal、Mattermost、Google Chat、iMessage、Teams"
+      label: usesChineseCli() ? "🧾 先只保留本地审计" : "🧾 Local audit only"
     },
     {
       value: "webhook",
-      label: "🪝 发到自己的提醒入口",
-      hint: "如果你已经有 webhook 或自动化接收端"
+      label: usesChineseCli() ? "🪝 Webhook / 自定义入口" : "🪝 Webhook / custom endpoint"
     }
   ];
 }
 
-function targetRequirementHint(channel: string): { intro: string; example: string } {
+function notificationQuestion(): string {
+  return usesChineseCli()
+    ? "🔔 你想把高风险提醒发到哪里？"
+    : "🔔 Where do you want high-risk reminders to go?";
+}
+
+function notifyConfiguredMessage(channel: string, target: string): string {
+  if (usesChineseCli()) {
+    return `✨ TraceRoot 已经能把提醒发到 ${displayNotifyChannel(channel)}（${target}）。这次会直接用它。\n`;
+  }
+
+  return `✨ TraceRoot can already send reminders to ${displayNotifyChannel(channel)} (${target}). TraceRoot will use that route this time.\n`;
+}
+
+function localAuditFallbackMessage(channel: string): string {
+  if (usesChineseCli()) {
+    return `🧾 没关系，这次先只保留本地审计时间线。等你把 ${displayNotifyChannel(channel)} 接好以后，再回来打开提醒就可以。\n`;
+  }
+
+  return `🧾 No problem. This run will keep a local audit timeline only for now. Once ${displayNotifyChannel(channel)} is connected, you can come back and turn reminders on.\n`;
+}
+
+type ChannelSetupGuide = {
+  title: string;
+  steps: string[];
+  prompt: string;
+};
+
+function targetRequirementHint(channel: string): ChannelSetupGuide {
   switch (channel) {
     case "whatsapp":
       return {
-        intro:
-          "💡 要把提醒发到 WhatsApp，TraceRoot 还需要知道你已经在 OpenClaw 里接好的那个号码或聊天目标。",
-        example:
-          "1. 先在 OpenClaw 里跑 `openclaw channels login --channel whatsapp`\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪个号码，现在就填，例如：+4917612345678\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "📱 连接 WhatsApp，只要跟着这几步走："
+          : "📱 Connect WhatsApp in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 在 OpenClaw 里运行 `openclaw channels login --channel whatsapp`。",
+              "2. OpenClaw 会显示一个二维码。",
+              "3. 用手机上的 WhatsApp 扫这个二维码。",
+              "4. 重启 `openclaw gateway`。",
+              "5. 如果你已经知道提醒要发到哪个号码或聊天目标，现在就贴进来，例如：+4917612345678。",
+              "6. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Run `openclaw channels login --channel whatsapp` inside OpenClaw.",
+              "2. OpenClaw will show you a QR code.",
+              "3. Scan that QR code with WhatsApp on your phone.",
+              "4. Restart `openclaw gateway`.",
+              "5. If you already know the phone number or chat target, paste it below, for example: +4917612345678.",
+              "6. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 WhatsApp 号码或聊天目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the WhatsApp number or chat target here (or press Enter to skip for now)"
       };
     case "telegram":
       return {
-        intro:
-          "💡 要把提醒发到 Telegram，TraceRoot 还需要知道你已经在 OpenClaw 里接好的聊天目标。",
-        example:
-          "1. 先在 Telegram 里用 @BotFather 创建机器人并拿到 token\n2. 把 token 配进 OpenClaw（例如 `channels.telegram.botToken`）\n3. 再启动或重启 `openclaw gateway`\n4. 如果你已经知道提醒要发到哪里，现在就填，例如：@ops-room 或 chat id\n5. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "💬 连接 Telegram，只要跟着这几步走："
+          : "💬 Connect Telegram in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 在 Telegram 里打开 @BotFather，创建一个机器人。",
+              "2. 把机器人 token 配进 OpenClaw（例如 `channels.telegram.botToken`）。",
+              "3. 重启 `openclaw gateway`。",
+              "4. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：@ops-room 或 chat id。",
+              "5. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Open @BotFather in Telegram and create a bot.",
+              "2. Put the bot token into OpenClaw, for example in `channels.telegram.botToken`.",
+              "3. Restart `openclaw gateway`.",
+              "4. If you already know the chat target, paste it below, for example: @ops-room or a chat id.",
+              "5. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Telegram 聊天目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Telegram chat target here (or press Enter to skip for now)"
       };
     case "discord":
       return {
-        intro:
-          "💡 要把提醒发到 Discord，TraceRoot 还需要知道你已经在 OpenClaw 里接好的频道或用户目标。",
-        example:
-          "1. 先把 Discord 机器人接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：channel:123456789 或 user:123456789\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "🎮 连接 Discord，只要跟着这几步走："
+          : "🎮 Connect Discord in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Discord 机器人接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：channel:123456789 或 user:123456789。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect your Discord bot inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: channel:123456789 or user:123456789.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Discord 频道或用户目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Discord channel or user target here (or press Enter to skip for now)"
       };
     case "slack":
       return {
-        intro:
-          "💡 要把提醒发到 Slack，TraceRoot 还需要知道你已经在 OpenClaw 里接好的频道或用户目标。",
-        example:
-          "1. 先把 Slack 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：channel:C123456 或 user:U123456\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "🧵 连接 Slack，只要跟着这几步走："
+          : "🧵 Connect Slack in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Slack 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：channel:C123456 或 user:U123456。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect Slack inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: channel:C123456 or user:U123456.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Slack 频道或用户目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Slack channel or user target here (or press Enter to skip for now)"
       };
     case "signal":
       return {
-        intro:
-          "💡 要把提醒发到 Signal，TraceRoot 还需要知道你已经在 OpenClaw 里接好的号码或群组目标。",
-        example:
-          "1. 先把 Signal 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：+4917612345678 或 group:<id>\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "🛰️ 连接 Signal，只要跟着这几步走："
+          : "🛰️ Connect Signal in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Signal 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：+4917612345678 或 group:<id>。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect Signal inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: +4917612345678 or group:<id>.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Signal 号码或群组目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Signal number or group target here (or press Enter to skip for now)"
       };
     case "googlechat":
       return {
-        intro:
-          "💡 要把提醒发到 Google Chat，TraceRoot 还需要知道你已经在 OpenClaw 里接好的 space 或用户目标。",
-        example:
-          "1. 先把 Google Chat 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：spaces/<spaceId>\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "💠 连接 Google Chat，只要跟着这几步走："
+          : "💠 Connect Google Chat in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Google Chat 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：spaces/<spaceId>。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect Google Chat inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: spaces/<spaceId>.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Google Chat 目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Google Chat target here (or press Enter to skip for now)"
       };
     case "mattermost":
       return {
-        intro:
-          "💡 要把提醒发到 Mattermost，TraceRoot 还需要知道你已经在 OpenClaw 里接好的频道或用户目标。",
-        example:
-          "1. 先把 Mattermost 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：@ops-room 或 channel:<id>\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "💭 连接 Mattermost，只要跟着这几步走："
+          : "💭 Connect Mattermost in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Mattermost 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：@ops-room 或 channel:<id>。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect Mattermost inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: @ops-room or channel:<id>.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Mattermost 频道或用户目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Mattermost channel or user target here (or press Enter to skip for now)"
       };
     case "imessage":
       return {
-        intro:
-          "💡 要把提醒发到 iMessage，TraceRoot 还需要知道你已经在 OpenClaw 里接好的聊天目标。",
-        example:
-          "1. 先把 iMessage 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：chat_id:<id> 或一个联系人号码/邮箱\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "💙 连接 iMessage，只要跟着这几步走："
+          : "💙 Connect iMessage in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 iMessage 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：chat_id:<id> 或联系人号码/邮箱。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect iMessage inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: chat_id:<id> or a contact phone/email.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 iMessage 聊天目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the iMessage chat target here (or press Enter to skip for now)"
       };
     case "msteams":
       return {
-        intro:
-          "💡 要把提醒发到 Microsoft Teams，TraceRoot 还需要知道你已经在 OpenClaw 里接好的会话目标。",
-        example:
-          "1. 先把 Microsoft Teams 接进 OpenClaw\n2. 再启动或重启 `openclaw gateway`\n3. 如果你已经知道提醒要发到哪里，现在就填，例如：conversation:<id>\n4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? "🪟 连接 Microsoft Teams，只要跟着这几步走："
+          : "🪟 Connect Microsoft Teams in a few simple steps:",
+        steps: usesChineseCli()
+          ? [
+              "1. 先把 Microsoft Teams 接进 OpenClaw。",
+              "2. 重启 `openclaw gateway`。",
+              "3. 如果你已经知道提醒要发到哪里，现在就贴进来，例如：conversation:<id>。",
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              "1. Connect Microsoft Teams inside OpenClaw.",
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below, for example: conversation:<id>.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? "📨 把 Microsoft Teams 会话目标贴在这里（可直接回车，先跳过）"
+          : "📨 Paste the Microsoft Teams conversation target here (or press Enter to skip for now)"
       };
     default:
       return {
-        intro: `💡 要把提醒发到 ${displayNotifyChannel(channel)}，TraceRoot 还需要知道应该发到哪个聊天目标。`,
-        example:
-          "如果你现在拿不准，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+        title: usesChineseCli()
+          ? `🔔 连接 ${displayNotifyChannel(channel)}，只要跟着这几步走：`
+          : `🔔 Connect ${displayNotifyChannel(channel)} in a few simple steps:`,
+        steps: usesChineseCli()
+          ? [
+              `1. 先把 ${displayNotifyChannel(channel)} 接进 OpenClaw。`,
+              "2. 重启 `openclaw gateway`。",
+              `3. 如果你已经知道提醒要发到哪里，现在就贴进来。`,
+              "4. 如果你现在还不确定，直接回车就行，TraceRoot 会先只保留本地审计时间线。"
+            ]
+          : [
+              `1. Connect ${displayNotifyChannel(channel)} inside OpenClaw.`,
+              "2. Restart `openclaw gateway`.",
+              "3. If you already know the target, paste it below.",
+              "4. If you are not sure yet, just press Enter and TraceRoot will keep local audit only for now."
+            ],
+        prompt: usesChineseCli()
+          ? `📨 把 ${displayNotifyChannel(channel)} 的聊天目标贴在这里（可直接回车，先跳过）`
+          : `📨 Paste the ${displayNotifyChannel(channel)} chat target here (or press Enter to skip for now)`
       };
   }
 }
@@ -430,63 +613,17 @@ export async function promptNotificationSelection(
   const likelyChannels =
     options.likelyChannels ??
     (options.target ? await detectLikelyNotifyChannels(options.target) : []);
-  const staticChoices = baseNotificationChoices().filter(
-    (choice) =>
-      !likelyChannels.some((item) => item.channel === choice.value) &&
-      !["telegram", "whatsapp", "slack", "discord"].includes(choice.value)
-  );
   const simpleChannelChoices = SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.map((channel) => ({
     value: channel,
     label: `${notifyChannelIcon(channel)} ${displayNotifyChannel(channel)}`
   }));
-  const quickChoices = [
-    ...simpleChannelChoices,
-    ...staticChoices
-  ];
-
-  if (likelyChannels.length > 0 && !options.quiet) {
-    runtime.io.stdout(
-      `✨ TraceRoot 已经在这个运行态里看到了这些可用聊天入口：${likelyChannels
-        .map((item) => displayNotifyChannel(item.channel))
-        .join("、")}。\n`
-    );
-  } else if (!options.quiet) {
-    runtime.io.stdout(
-      "💡 如果你还没把聊天入口接进 OpenClaw 也没关系，这次先只保留本地审计时间线也可以。\n"
-    );
-  }
-
-  if (likelyChannels.length === 1 && likelyChannels[0]?.target) {
-    const detected = likelyChannels[0];
-    if (!options.quiet) {
-      runtime.io.stdout(
-        `💡 TraceRoot 这次会直接把高风险提醒顺手发到 ${displayNotifyChannel(
-          detected.channel
-        )}（${detected.target}）。如果你之后想改提醒方式，再重新运行 doctor 就可以。\n`
-      );
-    }
-
-    return {
-      mode: "channel",
-      channel: detected.channel,
-      target: detected.target,
-      account: detected.account
-    };
-  }
+  const quickChoices = [...simpleChannelChoices, ...baseNotificationChoices()];
 
   const defaultNotificationChoice =
     likelyChannels.find((item) => item.target)?.channel ?? "local-only";
 
-  if (!options.quiet) {
-  if (likelyChannels.some((item) => item.target)) {
-      runtime.io.stdout(
-        "💡 如果你想让高风险动作一出现就顺手提醒你，直接回车就可以先用 TraceRoot 推荐的那个入口。\n"
-      );
-    }
-  }
-
   const choice = await runtime.prompter.chooseOne(
-    "🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？",
+    notificationQuestion(),
     quickChoices,
     { defaultValue: defaultNotificationChoice }
   );
@@ -499,36 +636,39 @@ export async function promptNotificationSelection(
     return { mode: "webhook" };
   }
 
-  let channel = choice;
-  const detectedChannel = likelyChannels.find((item) => item.channel === channel);
-  if (choice === "other-channel") {
-    channel = await runtime.prompter.chooseOne(
-      "💡 你想用哪个已接好的聊天入口？",
-      SUPPORTED_OPENCLAW_NOTIFY_CHANNELS.map((value) => ({
-        value,
-        label: displayNotifyChannel(value),
-        hint: "前提是 OpenClaw 已经接好了这个入口"
-      }))
-    );
+  const channel = choice;
+  const detectedChannel = likelyChannels.find(
+    (item) => item.channel === channel && item.target
+  );
+
+  if (detectedChannel?.target) {
+    if (!options.quiet) {
+      runtime.io.stdout(notifyConfiguredMessage(channel, detectedChannel.target));
+    }
+
+    return {
+      mode: "channel",
+      channel: detectedChannel.channel,
+      target: detectedChannel.target,
+      account: detectedChannel.account
+    };
   }
 
-  if (!detectedChannel?.target) {
-    const hint = targetRequirementHint(channel);
-    runtime.io.stdout(`${hint.intro}\n`);
-    runtime.io.stdout(`${hint.example}\n`);
+  const guide = targetRequirementHint(channel);
+  if (!options.quiet) {
+    runtime.io.stdout(`${guide.title}\n`);
+    for (const step of guide.steps) {
+      runtime.io.stdout(`${step}\n`);
+    }
+    runtime.io.stdout("\n");
   }
 
-  const target =
-    detectedChannel?.target ??
-    (await runtime.prompter.input(
-      `📨 TraceRoot 应该把提醒发到哪里？（${displayNotifyChannel(channel)}）`,
-      { allowEmpty: true }
-    ));
+  const target = await runtime.prompter.input(guide.prompt, {
+    allowEmpty: true
+  });
 
   if (!target.trim()) {
-    runtime.io.stdout(
-      "🧾 这次先只保留本地审计时间线；等你确认好提醒目标以后，再把聊天提醒接上就可以。\n"
-    );
+    runtime.io.stdout(localAuditFallbackMessage(channel));
     return { mode: "local-only" };
   }
 

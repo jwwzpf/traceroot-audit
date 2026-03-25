@@ -42,6 +42,21 @@ export function detectCliLanguageFromArgv(argv: string[]): CliLanguage {
   );
 }
 
+export function hasExplicitCliLanguage(argv: string[]): boolean {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (!value) {
+      continue;
+    }
+
+    if (value === "--lang" || value.startsWith("--lang=")) {
+      return true;
+    }
+  }
+
+  return Boolean(process.env.TRACEROOT_LANG ?? process.env.TRACEROOT_LANGUAGE);
+}
+
 export function setCliLanguage(language: CliLanguage): void {
   currentCliLanguage = language;
 }
