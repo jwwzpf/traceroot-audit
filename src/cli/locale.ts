@@ -1,8 +1,21 @@
+import path from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+
+import { resolveStateHomeDir } from "../utils/home";
+
 export type CliLanguage = "en" | "zh";
 
 let currentCliLanguage: CliLanguage = "en";
 
-function normalizeLanguage(value?: string | null): CliLanguage {
+interface CliPreferencesFile {
+  version: 1;
+  updatedAt: string;
+  cli?: {
+    language?: CliLanguage;
+  };
+}
+
+export function normalizeLanguage(value?: string | null): CliLanguage {
   if (!value) {
     return "en";
   }
@@ -21,7 +34,47 @@ function normalizeLanguage(value?: string | null): CliLanguage {
   return "en";
 }
 
-export function detectCliLanguageFromArgv(argv: string[]): CliLanguage {
+function cliPreferencesPath(homeDir = resolveStateHomeDir()): string {
+  return path.join(homeDir, ".traceroot", "preferences.json");
+}
+
+export async function loadSavedCliLanguage(
+  homeDir = resolveStateHomeDir()
+): Promise<CliLanguage | null> {
+  try {
+    const raw = await readFile(cliPreferencesPath(homeDir), "utf8");
+    const parsed = JSON.parse(raw) as CliPreferencesFile;
+    const language = parsed?.cli?.language;
+
+    if (language === "en" || language === "zh") {
+      return language;
+    }
+  } catch {
+    // ignore malformed or missing preference files
+  }
+
+  return null;
+}
+
+export async function saveCliLanguagePreference(
+  language: CliLanguage,
+  homeDir = resolveStateHomeDir()
+): Promise<void> {
+  const filePath = cliPreferencesPath(homeDir);
+  await mkdir(path.dirname(filePath), { recursive: true });
+
+  const nextFile: CliPreferencesFile = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    cli: {
+      language
+    }
+  };
+
+  await writeFile(filePath, `${JSON.stringify(nextFile, null, 2)}\n`, "utf8");
+}
+
+export function detectCliLanguageFromArgv(argv: string[]): CliLanguage | null {
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (!value) {
@@ -37,9 +90,7 @@ export function detectCliLanguageFromArgv(argv: string[]): CliLanguage {
     }
   }
 
-  return normalizeLanguage(
-    process.env.TRACEROOT_LANG ?? process.env.TRACEROOT_LANGUAGE ?? null
-  );
+  return null;
 }
 
 export function hasExplicitCliLanguage(argv: string[]): boolean {
@@ -54,7 +105,7 @@ export function hasExplicitCliLanguage(argv: string[]): boolean {
     }
   }
 
-  return Boolean(process.env.TRACEROOT_LANG ?? process.env.TRACEROOT_LANGUAGE);
+  return false;
 }
 
 export function setCliLanguage(language: CliLanguage): void {
@@ -66,6 +117,16 @@ export function getCliLanguage(): CliLanguage {
 }
 
 const exactReplacements: Array<[RegExp, string]> = [
+  [/TraceRoot Audit 语言设置/g, "TraceRoot Audit Language"],
+  [/当前语言：English/g, "Current language: English"],
+  [/当前语言：简体中文/g, "Current language: Simplified Chinese"],
+  [/TraceRoot 会一直记住这个语言，直到你再次切换。/g, "TraceRoot will keep using this language until you switch again."],
+  [/还没有保存过语言偏好，所以 TraceRoot 现在默认使用 English。/g, "No saved preference found. TraceRoot is using English by default."],
+  [/随时切换：/g, "Switch anytime:"],
+  [/已保存语言：English/g, "Saved language: English"],
+  [/已保存语言：简体中文/g, "Saved language: Simplified Chinese"],
+  [/TraceRoot 之后会一直记住这个选择。/g, "TraceRoot will remember this choice for future runs."],
+  [/请输入 en 或 zh。/g, "Please enter en or zh."],
   [/请输入编号（直接回车采用 TraceRoot 的推荐：([^)]+)）：/g, "Enter a number (press Enter to use TraceRoot's recommendation: $1):"],
   [/请输入编号：/g, "Enter a number:"],
   [

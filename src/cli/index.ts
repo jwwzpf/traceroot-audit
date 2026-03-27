@@ -8,6 +8,8 @@ import { Command, CommanderError } from "commander";
 import {
   detectCliLanguageFromArgv,
   hasExplicitCliLanguage,
+  loadSavedCliLanguage,
+  saveCliLanguagePreference,
   type CliLanguage,
   setCliLanguage,
   translateCliText
@@ -21,6 +23,7 @@ import { registerGuardCommand } from "./commands/guard";
 import { registerHardenCommand } from "./commands/harden";
 import { registerInitCommand } from "./commands/init";
 import { registerLogsCommand } from "./commands/logs";
+import { registerLanguageCommand } from "./commands/language";
 import { registerRulesCommand } from "./commands/rules";
 import { registerScanCommand } from "./commands/scan";
 import { registerTapCommand } from "./commands/tap";
@@ -272,6 +275,7 @@ export function createProgram(runtime: CliRuntime): Command {
   registerBaselineCommand(program, runtime);
   registerInitCommand(program, runtime);
   registerLogsCommand(program, runtime);
+  registerLanguageCommand(program, runtime);
   registerRulesCommand(program, runtime);
   registerExplainCommand(program, runtime);
   registerTapCommand(program, runtime);
@@ -304,8 +308,16 @@ function stripGlobalLanguageOption(argv: string[]): string[] {
   return sanitized;
 }
 
-function shouldPromptForCliLanguage(argv: string[], prompter?: CliPrompter): boolean {
+function shouldPromptForCliLanguage(
+  argv: string[],
+  prompter: CliPrompter | undefined,
+  savedLanguage: CliLanguage | null
+): boolean {
   if (prompter) {
+    return false;
+  }
+
+  if (savedLanguage) {
     return false;
   }
 
@@ -330,10 +342,10 @@ async function promptForCliLanguage(): Promise<CliLanguage> {
     while (true) {
       process.stdout.write(
         [
-          "🌍 Choose your language / 选择语言",
+          "🌍 Choose your language",
           "  1. English [Default]",
           "  2. 简体中文",
-          "Enter a number / 请输入编号 (press Enter for English): "
+          "Enter a number (press Enter for English): "
         ].join("\n")
       );
 
@@ -348,7 +360,7 @@ async function promptForCliLanguage(): Promise<CliLanguage> {
       }
 
       process.stdout.write(
-        "Please enter 1 or 2. / 请输入 1 或 2。\n\n"
+        "Please enter 1 or 2.\n\n"
       );
     }
   } finally {
@@ -361,9 +373,13 @@ export async function runCli(
   io: CliIO = defaultIo,
   prompter?: CliPrompter
 ): Promise<number> {
-  let language = detectCliLanguageFromArgv(argv);
-  if (shouldPromptForCliLanguage(argv, prompter)) {
+  const explicitLanguage = detectCliLanguageFromArgv(argv);
+  const savedLanguage = await loadSavedCliLanguage();
+  let language = explicitLanguage ?? savedLanguage ?? "en";
+
+  if (shouldPromptForCliLanguage(argv, prompter, savedLanguage)) {
     language = await promptForCliLanguage();
+    await saveCliLanguagePreference(language);
   }
 
   setCliLanguage(language);

@@ -5,6 +5,8 @@ import path from "node:path";
 
 import {
   detectCliLanguageFromArgv,
+  loadSavedCliLanguage,
+  saveCliLanguagePreference,
   setCliLanguage,
   translateCliText
 } from "../src/cli/locale";
@@ -47,7 +49,10 @@ describe("CLI locale", () => {
   });
 
   it("defaults to English when no language is specified", () => {
-    expect(detectCliLanguageFromArgv(["node", "traceroot-audit", "doctor"])).toBe("en");
+    process.env.TRACEROOT_LANG = "zh";
+    process.env.TRACEROOT_LANGUAGE = "zh";
+
+    expect(detectCliLanguageFromArgv(["node", "traceroot-audit", "doctor"])).toBeNull();
     expect(
       translateCliText("🔔 TraceRoot 盯到高风险动作时，要不要顺手提醒你？")
     ).toBe("🔔 When TraceRoot spots a high-risk action, should it send you a quick reminder?");
@@ -68,6 +73,54 @@ describe("CLI locale", () => {
     expect(
       detectCliLanguageFromArgv(["node", "traceroot-audit", "doctor", "--lang", "zh"])
     ).toBe("zh");
+  });
+
+  it("can save and reload a persisted language preference", async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), "traceroot-locale-pref-home-"));
+    process.env.HOME = tempHome;
+
+    try {
+      expect(await loadSavedCliLanguage()).toBeNull();
+      await saveCliLanguagePreference("zh");
+      expect(await loadSavedCliLanguage()).toBe("zh");
+    } finally {
+      rmSync(tempHome, { force: true, recursive: true });
+    }
+  });
+
+  it("lets users switch language with a command", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const tempHome = mkdtempSync(path.join(tmpdir(), "traceroot-language-command-home-"));
+    process.env.HOME = tempHome;
+
+    try {
+      const setExitCode = await runCli(
+        ["node", "traceroot-audit", "language", "zh"],
+        {
+          stdout: (text) => stdout.push(text),
+          stderr: (text) => stderr.push(text)
+        }
+      );
+
+      expect(setExitCode).toBe(0);
+      expect(stderr.join("")).toBe("");
+      expect(await loadSavedCliLanguage()).toBe("zh");
+
+      const showStdout: string[] = [];
+      const showExitCode = await runCli(
+        ["node", "traceroot-audit", "language"],
+        {
+          stdout: (text) => showStdout.push(text),
+          stderr: () => {}
+        }
+      );
+
+      expect(showExitCode).toBe(0);
+      expect(showStdout.join("")).toContain("当前语言：简体中文");
+    } finally {
+      rmSync(tempHome, { force: true, recursive: true });
+    }
   });
 
   it("accepts --lang after the subcommand and keeps output in Chinese", async () => {

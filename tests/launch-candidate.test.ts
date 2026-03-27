@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runCli, type CliChoice, type CliPrompter } from "../src/cli/index";
+import { saveCliLanguagePreference } from "../src/cli/locale";
 
 function createCapture() {
   let stdout = "";
@@ -96,16 +97,19 @@ function createStaticPrompter(answers: {
 
 describe("Launch candidate acceptance", () => {
   let previousHome: string | undefined;
+  let previousStateHome: string | undefined;
   let previousTmpDir: string | undefined;
   let previousCliLang: string | undefined;
   let previousCliLanguage: string | undefined;
 
   beforeEach(() => {
     previousHome = process.env.HOME;
+    previousStateHome = process.env.TRACEROOT_HOME;
     previousTmpDir = process.env.TMPDIR;
     previousCliLang = process.env.TRACEROOT_LANG;
     previousCliLanguage = process.env.TRACEROOT_LANGUAGE;
-    process.env.TRACEROOT_LANG = "zh";
+    delete process.env.TRACEROOT_LANG;
+    delete process.env.TRACEROOT_LANGUAGE;
   });
 
   afterEach(() => {
@@ -113,6 +117,12 @@ describe("Launch candidate acceptance", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = previousHome;
+    }
+
+    if (previousStateHome === undefined) {
+      delete process.env.TRACEROOT_HOME;
+    } else {
+      process.env.TRACEROOT_HOME = previousStateHome;
     }
 
     if (previousTmpDir === undefined) {
@@ -144,6 +154,8 @@ describe("Launch candidate acceptance", () => {
       await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       setTimeout(() => {
         void appendFile(
@@ -200,6 +212,8 @@ describe("Launch candidate acceptance", () => {
       await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       setTimeout(() => {
         void appendFile(
@@ -263,6 +277,8 @@ describe("Launch candidate acceptance", () => {
       await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       setTimeout(() => {
         void appendFile(
@@ -328,6 +344,8 @@ describe("Launch candidate acceptance", () => {
       );
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       setTimeout(() => {
         void appendFile(
@@ -394,6 +412,8 @@ describe("Launch candidate acceptance", () => {
       );
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       setTimeout(() => {
         void appendFile(

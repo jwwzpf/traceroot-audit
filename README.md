@@ -59,16 +59,16 @@ npx traceroot-audit@0.3.1 scan .
 
 CLI output defaults to English.
 
-If you prefer Chinese:
+Use Chinese once:
 
 ```bash
 npx traceroot-audit@0.3.1 doctor --watch --host --lang zh
 ```
 
-or:
+Save Chinese for future runs:
 
 ```bash
-TRACEROOT_LANG=zh npx traceroot-audit@0.3.1 doctor --watch --host
+npx traceroot-audit@0.3.1 language zh
 ```
 
 ## Local Development

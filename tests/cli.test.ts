@@ -6,6 +6,7 @@ import fg from "fast-glob";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runCli, type CliChoice, type CliPrompter } from "../src/cli/index";
+import { saveCliLanguagePreference } from "../src/cli/locale";
 
 function createCapture() {
   let stdout = "";
@@ -215,18 +216,22 @@ function createStaticPrompter(answers: {
 
 describe("CLI", () => {
   let previousHome: string | undefined;
+  let previousStateHome: string | undefined;
   let previousCliLang: string | undefined;
   let previousCliLanguage: string | undefined;
   let testHome: string;
 
   beforeEach(async () => {
     previousHome = process.env.HOME;
+    previousStateHome = process.env.TRACEROOT_HOME;
     previousCliLang = process.env.TRACEROOT_LANG;
     previousCliLanguage = process.env.TRACEROOT_LANGUAGE;
     testHome = await mkdtemp(path.join(os.tmpdir(), "traceroot-test-home-"));
     process.env.HOME = testHome;
-    process.env.TRACEROOT_LANG = "zh";
-    delete process.env.TRACEROOT_HOME;
+    process.env.TRACEROOT_HOME = testHome;
+    delete process.env.TRACEROOT_LANG;
+    delete process.env.TRACEROOT_LANGUAGE;
+    await saveCliLanguagePreference("zh", testHome);
   });
 
   afterEach(async () => {
@@ -234,6 +239,12 @@ describe("CLI", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = previousHome;
+    }
+
+    if (previousStateHome === undefined) {
+      delete process.env.TRACEROOT_HOME;
+    } else {
+      process.env.TRACEROOT_HOME = previousStateHome;
     }
 
     if (previousCliLang === undefined) {
@@ -468,6 +479,8 @@ describe("CLI", () => {
       );
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       await runCli(
         ["node", "traceroot-audit", "doctor", tempDir],
@@ -524,6 +537,8 @@ describe("CLI", () => {
       );
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       const capture = createCapture();
       const exitCode = await runCli(
@@ -588,6 +603,8 @@ describe("CLI", () => {
       await writeFile(path.join(logsDir, "runtime-events.jsonl"), "", "utf8");
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
       process.env.TRACEROOT_NOTIFY_OPENCLAW_BIN = messenger.executablePath;
 
       setTimeout(() => {
@@ -1400,6 +1417,8 @@ describe("CLI", () => {
       );
 
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       const capture = createCapture();
       const exitCode = await runCli(
@@ -1724,6 +1743,8 @@ describe("CLI", () => {
         "utf8"
       );
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       await runCli(
         [
@@ -2666,6 +2687,8 @@ describe("CLI", () => {
         "utf8"
       );
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       const capture = createCapture();
       const exitCode = await runCli(
@@ -2881,6 +2904,8 @@ describe("CLI", () => {
         "utf8"
       );
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       const watchCapture = createCapture();
       const watchExitCode = await runCli(
@@ -2999,6 +3024,8 @@ describe("CLI", () => {
 
     try {
       process.env.HOME = tempHome;
+      process.env.TRACEROOT_HOME = tempHome;
+      await saveCliLanguagePreference("zh", tempHome);
 
       const tapCapture = createCapture();
       const tapExitCode = await runCli(
